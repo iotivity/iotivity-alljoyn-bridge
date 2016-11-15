@@ -1,0 +1,4 @@
+out/
+BuildOptions.txt
+setenv.sh
+.sconsign.dblite
