@@ -20,6 +20,7 @@
 
 #include "Bridge.h"
 
+#include "ocstack.h"
 #include <alljoyn/AllJoynStd.h>
 #include "Plugin.h"
 #include "Presence.h"
@@ -129,6 +130,20 @@ void Bridge::Destroy(const char *id)
 bool Bridge::Start()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+    if (!handle)
+    {
+        LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+        return false;
+    }
+    OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
+    if (result != OC_STACK_OK)
+    {
+        LOG(LOG_ERR, "OCBindResourceTypeToResouurce() - %d", result);
+        return false;
+    }
+
     if (m_protocols & AJ)
     {
         m_bus->RegisterAboutListener(*this);
@@ -140,7 +155,7 @@ bool Bridge::Start()
         cbData.cb = Bridge::DiscoverCB;
         cbData.context = this;
         cbData.cd = NULL;
-        OCStackResult result = DoResource(NULL, OC_REST_DISCOVER, "/oic/res", NULL, 0, &cbData);
+        result = DoResource(NULL, OC_REST_DISCOVER, "/oic/res", NULL, 0, &cbData);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "DoResource(OC_REST_DISCOVER) - %d", result);

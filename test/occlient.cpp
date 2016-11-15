@@ -315,10 +315,14 @@ int main(int, char **)
             std::string query;
             while (token != tokens.end())
             {
-                std::string name = *token++;
-                if (name.find('=') != std::string::npos)
+                std::string str = *token++;
+                if (str.find('=') != std::string::npos)
                 {
-                    query += name;
+                    if (!query.empty())
+                    {
+                        query += ";";
+                    }
+                    query += str;
                 }
             }
             std::string uri = g_resources[i].uri;
@@ -348,6 +352,10 @@ int main(int, char **)
                 std::string str = *token++;
                 if (str.find('=') != std::string::npos)
                 {
+                    if (!query.empty())
+                    {
+                        query += ";";
+                    }
                     query += str;
                 }
                 else
@@ -384,10 +392,14 @@ int main(int, char **)
             std::string query;
             while (token != tokens.end())
             {
-                std::string name = *token++;
-                if (name.find('=') != std::string::npos)
+                std::string str = *token++;
+                if (str.find('=') != std::string::npos)
                 {
-                    query += name;
+                    if (!query.empty())
+                    {
+                        query += ";";
+                    }
+                    query += str;
                 }
             }
             std::string uri = g_resources[i].uri;
