@@ -289,7 +289,7 @@ static bool CloneArray(OCRepPayloadValueArray *arr, size_t *ai, uint8_t di,
                     std::string sig(fieldSignature, signature - fieldSignature);
                     fieldSignature = signature;
                     char name[16];
-                    snprintf(name, 16, "%lu", i);
+                    snprintf(name, 16, "%zu", i);
                     success = ToOCPayload(value, name, &arg->v_struct.members[i], sig.c_str());
                 }
                 if (success)
@@ -553,7 +553,7 @@ bool ToOCPayload(OCRepPayload *payload,
                     std::string sig(fieldSignature, signature - fieldSignature);
                     fieldSignature = signature;
                     char name[16];
-                    snprintf(name, 16, "%lu", i);
+                    snprintf(name, 16, "%zu", i);
                     success = ToOCPayload(value, name, &arg->v_struct.members[i], sig.c_str());
                 }
                 if (success)
@@ -2235,7 +2235,7 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                             std::string memberSig(memberSignature, structSig - memberSignature);
                             memberSignature = structSig;
                             char name[16];
-                            snprintf(name, 16, "%lu", i);
+                            snprintf(name, 16, "%zu", i);
                             success = false;
                             for (OCRepPayloadValue *v = value->obj->values; v; v = v->next)
                             {

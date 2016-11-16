@@ -21,6 +21,7 @@
 #ifndef _VIRTUALRESOURCE_H
 #define _VIRTUALRESOURCE_h
 
+#include <inttypes.h>
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/ProxyBusObject.h>
 #include "octypes.h"

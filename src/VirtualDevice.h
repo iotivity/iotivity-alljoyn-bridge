@@ -21,6 +21,7 @@
 #ifndef _VIRTUALDEVICE_H
 #define _VIRTUALDEVICE_H
 
+#include <inttypes.h>
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
 #include <alljoyn/Session.h>

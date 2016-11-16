@@ -21,6 +21,7 @@
 #ifndef _VIRTUALBUSOBJECT_H
 #define _VIRTUALBUSOBJECT_H
 
+#include <inttypes.h>
 #include <alljoyn/BusObject.h>
 #include "octypes.h"
 #include <condition_variable>

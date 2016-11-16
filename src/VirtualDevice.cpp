@@ -22,7 +22,9 @@
 
 #include "Plugin.h"
 #include "ocpayload.h"
+#ifdef WITH_POSIX
 #include <openssl/sha.h>
+#endif
 
 const char *VirtualDevice::m_specVersion = "0.3";
 
@@ -53,8 +55,9 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
         0x8f, 0x0e, 0x4e, 0x90, 0x79, 0xe5, 0x11, 0xe6,
         0xbd, 0xf4, 0x08, 0x00, 0x20, 0x0c, 0x9a, 0x66
     };
+    uint8_t digest[20];
+#ifdef WITH_POSIX
     SHA_CTX ctx;
-    uint8_t digest[SHA_DIGEST_LENGTH];
     int ret = SHA1_Init(&ctx);
     if (ret)
     {
@@ -72,6 +75,52 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
     {
         LOG(LOG_ERR, "SHA1 - %d\n", ret);
     }
+#elif _WIN32
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_HASH_HANDLE hHash = NULL;
+    DWORD cbHashObject;
+    uint8_t *pbHashObject = NULL;
+    NTSTATUS status;
+    status = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA1_ALGORITHM, NULL, 0);
+    if (BCRYPT_SUCCESS(status))
+    {
+        DWORD cbResult;
+        status = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbHashObject, sizeof(DWORD),
+                                   &cbResult, 0);
+    }
+    if (BCRYPT_SUCCESS(status))
+    {
+        pbHashObject = new uint8_t[cbHashObject];
+        status = BCryptCreateHash(hAlg, &hHash, pbHashObject, cbHashObject, NULL, 0, 0);
+    }
+    if (BCRYPT_SUCCESS(status))
+    {
+        status = BCryptHashData(hHash, (PUCHAR)ns.id, UUID_IDENTITY_SIZE, 0);
+    }
+    if (BCRYPT_SUCCESS(status))
+    {
+        status = BCryptHashData(hHash, (PUCHAR)name, strlen(name), 0);
+    }
+    if (BCRYPT_SUCCESS(status))
+    {
+        status = BCryptFinishHash(hHash, digest, 20, 0);
+    }
+    if (!BCRYPT_SUCCESS(status))
+    {
+        LOG(LOG_ERR, "SHA1 - 0x%x\n", status);
+    }
+    if (hAlg)
+    {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+    }
+    if (hHash)
+    {
+        BCryptDestroyHash(hHash);
+    }
+    delete[] pbHashObject;
+#else
+#error Missing implemention of SHA-1 hash
+#endif
     digest[7] = (digest[7] & 0x0f) | 0x50;
     digest[8] = (digest[8] & 0x3f) | 0x80;
     memcpy(di->id, digest, UUID_IDENTITY_SIZE);

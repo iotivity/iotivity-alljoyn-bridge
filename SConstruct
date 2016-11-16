@@ -18,13 +18,14 @@
 #
 #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
+import platform
+
 vars = Variables('BuildOptions.txt')
 vars.Add(EnumVariable('BUILD_TYPE', 'Specify release or debug build', 'debug', ['debug','release']))
-vars.Add(PathVariable('ALLJOYN_BASE', 'Location of the alljoyn project', None, PathVariable.PathAccept))
-vars.Add(EnumVariable('ALLJOYN_LIB_TYPE', 'Specify release or debug build', 'release', ['debug','release']))
+vars.Add(PathVariable('ALLJOYN_DIST', 'Location of the alljoyn project', None, PathVariable.PathAccept))
 vars.Add(PathVariable('IOTIVITY_BASE', 'Location of the iotivity project', None, PathVariable.PathAccept))
 vars.Add(EnumVariable('IOTIVITY_LIB_TYPE', 'Specify release or debug build', 'release', ['debug','release']))
-vars.Add(EnumVariable('TARGET_ARCH', 'Target architecture', 'x86_64', ['x86_64']))
+vars.Add(EnumVariable('TARGET_ARCH', 'Target architecture', 'x86_64', ['x86_64', 'amd64']))
 vars.Add(BoolVariable('VERBOSE', 'Show compilation', False))
 vars.Add(BoolVariable('COLOR', 'Enable color in build diagnostics, if supported by compiler', False))
 #vars.Add(EnumVariable('TEST', 'Run unit tests', '0', allowed_values=('0', '1')))
@@ -36,7 +37,7 @@ the SCONS_FLAGS environment variable
 
 Example of command line release build:
 
-   $ scons BUILD_TYPE=release ALLJOYN_BASE=/path/to/ALLJOYN_BASE IOTIVITY_BASE=/path/to/IOTIVITY_BASE
+   $ scons BUILD_TYPE=release ALLJOYN_DIST=/path/to/ALLJOYN_DIST IOTIVITY_BASE=/path/to/IOTIVITY_BASE
 
 The current options are:
 ''')
@@ -52,16 +53,59 @@ if env.get('VERBOSE') == False:
     env['ARCOMSTR'] = "Archiving $TARGET"
     env['RANLIBCOMSTR'] = "Indexing Archive $TARGET"
 
-# currently this build script only supports linux build as we add other target OSs
-# target_os will need to be replaced buy actual OSs
-target_os = 'linux'
-    
+env['TARGET_OS'] = platform.system().lower()
+
 # these must agree with options used in building IoTivity
 env['CPPDEFINES'] = ['ROUTING_EP']
-env['CPPFLAGS'] = ['-Wall', '-Werror', '-fPIC']
-env['CXXFLAGS'] = ['-std=c++11']
-if target_os == 'linux':
-    env.AppendUnique(CPPDEFINES = ['QCC_OS_GROUP_POSIX'])
+
+if env['TARGET_OS'] == 'linux':
+
+    # Set release/debug flags
+    if env['BUILD_TYPE'] == 'release':
+	env.AppendUnique(CCFLAGS = ['-Os'])
+	env.AppendUnique(CPPDEFINES = ['NDEBUG'])
+    else:
+	env.AppendUnique(CCFLAGS = ['-g'])
+
+    env.AppendUnique(CPPDEFINES = ['WITH_POSIX', '__linux__', 'QCC_OS_GROUP_POSIX'])
+    env.AppendUnique(CFLAGS = ['-std=gnu99'])
+    env.AppendUnique(CXXFLAGS = ['-std=c++11'])
+    env.AppendUnique(CCFLAGS = ['-Werror', '-Wall', '-Wextra', '-Wno-ignored-qualifiers', '-fPIC'])
+    env.AppendUnique(LIBS = ['crypto'])
+
+    target_arch = env.get('TARGET_ARCH')
+    if target_arch in ['x86']:
+	env.AppendUnique(CCFLAGS = ['-m32'])
+	env.AppendUnique(LINKFLAGS = ['-m32'])
+    elif target_arch in ['x86_64']:
+	env.AppendUnique(CCFLAGS = ['-m64'])
+	env.AppendUnique(LINKFLAGS = ['-m64'])
+
+elif env['TARGET_OS'] == 'windows':
+
+    # Set release/debug flags
+    if env['BUILD_TYPE'] == 'release':
+        env.AppendUnique(CCFLAGS = ['/MD', '/O2', '/GF'])
+        env.AppendUnique(CPPDEFINES = ['NDEBUG'])
+    else:
+        env.AppendUnique(CCFLAGS = ['/MDd', '/Od', '/Zi', '/RTC1', '/Gm'])
+        env.AppendUnique(LINKFLAGS = ['/debug'])
+
+    env.AppendUnique(CXXFLAGS=[
+        '/wd4244',   # C4244 conversion from one type to another type results in a possible loss of data.
+        '/wd4267',   # C4267 conversion from size_t to a smaller type.
+        '/wd4355',   # C4355 'this' used in base member initializer list.
+        '/wd4800',   # C4800 forcing value to bool 'true' or 'false'.
+        '/wd4996',   # C4996 deprecated declaration.
+        '/wd4820',   # C4820 added padding to the end of a struct.
+        '/wd4514',   # C4514 unreferenced inline function has been removed
+        '/wd4365',   # C4365 signed/unsigned mismatch
+        '/wd4503'])  # C4503 decorated name length exceeded, name was truncated
+
+    env.AppendUnique(CPPDEFINES = ['QCC_OS_GROUP_WINDOWS'])
+    env.AppendUnique(CCFLAGS=['/WX', '/EHsc'])
+    env.AppendUnique(LIBS = ['ajrouter', 'alljoyn', 'bcrypt', 'crypt32', 'ws2_32', 'iphlpapi', 'shell32', 'ole32'])
+    env.AppendUnique(LIBS = ['octbstack', 'c_common'])
 
 if env.get('COLOR') == True:
     # If the gcc version is 4.9 or newer add the diagnostics-color flag
@@ -72,13 +116,7 @@ if env.get('COLOR') == True:
     elif int(gccVer[0]) == 4 and int(gccVer[1]) >= 9:
         env['CPPFLAGS'].append('-fdiagnostics-color');
 
-if env['BUILD_TYPE'] == 'debug':
-    env.AppendUnique(CPPFLAGS = ['-g'])
-else:
-    env.AppendUnique(CCFLAGS = ['-Os'])
-    env.AppendUnique(CPPDEFINES = ['NDEBUG'])
-
-alljoyn_inc_paths = ['${ALLJOYN_BASE}/build/' + target_os + '/${TARGET_ARCH}/${ALLJOYN_LIB_TYPE}/dist/cpp/inc']
+alljoyn_inc_paths = ['${ALLJOYN_DIST}/cpp/inc']
 iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
                                '${IOTIVITY_BASE}/extlibs/cjson',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_malloc/include',
@@ -95,11 +133,11 @@ env.AppendUnique(CPPPATH = iotivity_resource_inc_paths)
 
 env.AppendUnique(CPPPATH = ['#/include/'])
 
-env.Replace(BUILD_DIR = 'out/' + target_os + '/${TARGET_ARCH}/${BUILD_TYPE}' )
+env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
 
 # libraries
-env['LIBPATH'] = ['${ALLJOYN_BASE}/build/' + target_os + '/${TARGET_ARCH}/${ALLJOYN_LIB_TYPE}/dist/cpp/lib',
-                  '${IOTIVITY_BASE}/out/' + target_os + '/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
+env['LIBPATH'] = ['${ALLJOYN_DIST}/cpp/lib',
+                  '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
 
 alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/bridge', exports= 'env', duplicate=0)
 env.Install('${BUILD_DIR}/libs', alljoynplugin_lib)

@@ -18,6 +18,7 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
+#include <inttypes.h>
 #include <alljoyn/Init.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -28,12 +29,13 @@ static volatile sig_atomic_t gQuitFlag = false;
 
 static void SigIntCB(int sig)
 {
+    (void) sig;
     gQuitFlag = true;
 }
 
 static FILE *PSOpenCB(const char *path, const char *mode)
 {
-    return fopen("oic_svr_db_bridge.dat", mode);
+    return fopen(path, mode);
 }
 
 int main(int argc, char **argv)

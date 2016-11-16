@@ -21,6 +21,7 @@
 #ifndef _PAYLOAD_H
 #define _PAYLOAD_H
 
+#include <inttypes.h>
 #include <alljoyn/MsgArg.h>
 #include "octypes.h"
 #include <map>

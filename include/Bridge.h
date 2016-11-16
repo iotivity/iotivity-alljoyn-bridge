@@ -21,6 +21,7 @@
 #ifndef _BRIDGE_H
 #define _BRIDGE_H
 
+#include <inttypes.h>
 #include <alljoyn/AboutListener.h>
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/SessionListener.h>

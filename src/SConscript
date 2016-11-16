@@ -28,6 +28,6 @@ iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
                                'VirtualBusObject.cpp',
                                'VirtualDevice.cpp',
                                'VirtualResource.cpp']
-alljoynplugin_lib = env.SharedLibrary('AlljoynPlugin', iotivity_alljoyn_bridge_cpp)
+alljoynplugin_lib = env.StaticLibrary('AlljoynPlugin', iotivity_alljoyn_bridge_cpp)
 
 Return('alljoynplugin_lib')

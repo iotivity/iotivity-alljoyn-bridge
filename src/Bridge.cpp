@@ -29,6 +29,7 @@
 #include "VirtualResource.h"
 #include <algorithm>
 #include <deque>
+#include <iterator>
 
 Bridge::Bridge(Protocol protocols)
     : m_protocols(protocols), m_bus(NULL)

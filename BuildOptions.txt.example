@@ -24,13 +24,9 @@
 # Specify if the output build is a 'debug' or 'release' build
 BUILD_TYPE = 'debug'
 
-# Specify the location of the AllJoyn Standard Core project
-# example ALLJOYN_BASE = '/home/tmalsbar/alljoyn'
-ALLJOYN_BASE = '/path/to/ALLJOYN_BASE'
-
-# The build variant of the AllJoyn library
-# Values 'debug' or 'release' 
-ALLJOYN_LIB_TYPE = 'release'
+# Specify the location of the AllJoyn Standard Core project dist folder
+# example ALLJOYN_DIST = '/home/tmalsbar/core/alljoyn/build/linux/x86_64/debug/dist'
+ALLJOYN_DIST = '/path/to/ALLJOYN_DIST'
 
 # Specify the location of the IoTivity project
 # example IOTIVITY_BASE = '/home/tmalsbar/iotivity'

@@ -28,6 +28,7 @@
 #include "Signature.h"
 #include "ocpayload.h"
 #include <algorithm>
+#include <assert.h>
 
 enum
 {
@@ -827,7 +828,7 @@ QStatus VirtualResource::Set(SetContext *context)
         this, context);
 
     size_t numArgs = 3;
-    ajn::MsgArg args[numArgs];
+    ajn::MsgArg args[3];
     args[0].Set("s", context->m_iface->GetName());
     args[1].Set("s", context->m_value->name);
     const ajn::InterfaceDescription::Property *property = context->m_iface->GetProperty(

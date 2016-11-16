@@ -25,6 +25,7 @@
 #include <alljoyn/BusAttachment.h>
 #include "ocpayload.h"
 #include <algorithm>
+#include <assert.h>
 
 struct VirtualBusObject::ObserveContext
 {

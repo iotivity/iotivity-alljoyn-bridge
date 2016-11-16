@@ -362,7 +362,7 @@ int main(int, char **)
             }
             OCRepPayload *payload = NULL;
             size_t size = 8192;
-            uint8_t buffer[size];
+            uint8_t buffer[8192];
             size = ConvertJSONToCBOR(body.c_str(), buffer, size);
             if (size)
             {

@@ -23,6 +23,7 @@
 #include "Bridge.h"
 #include "Plugin.h"
 #include "VirtualBusObject.h"
+#include <assert.h>
 
 static void ToAppId(const char *di, uint8_t *appId)
 {
