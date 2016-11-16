@@ -55,9 +55,13 @@ class Bridge : private ajn::AboutListener
         bool Process();
 
     private:
+        static const time_t DISCOVER_PERIOD_SECS = 5;
+
         std::mutex m_mutex;
         Protocol m_protocols;
         ajn::BusAttachment *m_bus;
+        OCDoHandle m_discoverHandle;
+        time_t m_discoverNextTick;
         std::vector<Presence *> m_presence;
         std::vector<VirtualDevice *> m_virtualDevices;
         std::vector<VirtualResource *> m_virtualResources;

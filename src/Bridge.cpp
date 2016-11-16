@@ -33,7 +33,7 @@
 #include <iterator>
 
 Bridge::Bridge(Protocol protocols)
-    : m_protocols(protocols), m_bus(NULL)
+    : m_protocols(protocols), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
     m_bus = new ajn::BusAttachment("Bridge", true);
 }
@@ -149,19 +149,6 @@ bool Bridge::Start()
         m_bus->RegisterAboutListener(*this);
         m_bus->RegisterBusListener(*this);
     }
-    if (m_protocols & OC)
-    {
-        OCCallbackData cbData;
-        cbData.cb = Bridge::DiscoverCB;
-        cbData.context = this;
-        cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_DISCOVER, "/oic/res", NULL, 0, &cbData);
-        if (result != OC_STACK_OK)
-        {
-            LOG(LOG_ERR, "DoResource(OC_REST_DISCOVER) - %d", result);
-            return false;
-        }
-    }
     return true;
 }
 
@@ -171,6 +158,15 @@ bool Bridge::Stop()
     for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
     {
         busAttachment->Stop();
+    }
+    if (m_discoverHandle)
+    {
+        OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "Cancel() - %d", result);
+        }
+        m_discoverHandle = NULL;
     }
     return true;
 }
@@ -203,6 +199,32 @@ bool Bridge::Process()
             {
                 LOG(LOG_ERR, "WhoImplements - %s", QCC_StatusText(status));
             }
+        }
+    }
+    if (m_protocols & OC)
+    {
+        if (time(NULL) >= m_discoverNextTick)
+        {
+            if (m_discoverHandle)
+            {
+                OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS);
+                if (result != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "Cancel() - %d", result);
+                }
+                m_discoverHandle = NULL;
+            }
+            OCCallbackData cbData;
+            cbData.cb = Bridge::DiscoverCB;
+            cbData.context = this;
+            cbData.cd = NULL;
+            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER, "/oic/res", NULL, 0,
+                                              &cbData);
+            if (result != OC_STACK_OK)
+            {
+                LOG(LOG_ERR, "DoResource(OC_REST_DISCOVER) - %d", result);
+            }
+            m_discoverNextTick = time(NULL) + DISCOVER_PERIOD_SECS;
         }
     }
     std::vector<std::string> absent;
@@ -484,6 +506,17 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         /* Ignore responses from self */
         goto exit;
     }
+
+    /* Check if we've seen this response before */
+    for (std::vector<VirtualBusAttachment *>::iterator it = thiz->m_virtualBusAttachments.begin();
+         it != thiz->m_virtualBusAttachments.end(); ++it)
+    {
+        if ((*it)->GetDi() == payload->sid)
+        {
+            goto exit;
+        }
+    }
+
     context = new DiscoverContext(thiz);
     context->m_presence = new OCPresence(&response->devAddr, payload->sid);
     if (!context->m_presence)
