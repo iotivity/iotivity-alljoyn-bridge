@@ -119,6 +119,7 @@ if env.get('COLOR') == True:
 alljoyn_inc_paths = ['${ALLJOYN_DIST}/cpp/inc']
 iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
                                '${IOTIVITY_BASE}/extlibs/cjson',
+	                       '${IOTIVITY_BASE}/resource/c_common/ocrandom/include',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_malloc/include',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_string/include',
                                '${IOTIVITY_BASE}/resource/c_common',

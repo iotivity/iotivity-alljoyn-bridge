@@ -24,11 +24,13 @@ Import('iotivity_resource_inc_paths')
 if env['TARGET_OS'] == 'linux':
     oic_libs = ['octbstack', 'connectivity_abstraction']
 
-    env_occlient = env.Clone()
-    occlient_cpp = ['occlient.cpp',
-                    '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cbortojson.c',
-                    '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty.c']
-    env_occlient.AppendUnique(LIBS = [oic_libs])
-    test_bins = env_occlient.Program('occlient', occlient_cpp)
+    env_octest = env.Clone()
+    env_octest.AppendUnique(LIBS = [oic_libs])
+    test_bins = [
+        env_octest.Program('occlient', ['occlient.cpp',
+                                        '${IOTIVITY_BASE}/extlibs/cjson/cJSON.c',
+                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cbortojson.c',
+                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty.c']),
+        env_octest.Program('ocserver', ['ocserver.cpp'])]
 
     env.Install('#/${BUILD_DIR}/bin', test_bins)

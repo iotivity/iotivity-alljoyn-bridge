@@ -39,8 +39,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         static VirtualBusAttachment *Create(const char *di);
         virtual ~VirtualBusAttachment();
         std::string GetDi() { return m_di; }
-        void SetAboutData(OCPlatformPayload *payload);
-        void SetAboutData(OCDevicePayload *payload);
+        void SetAboutData(OCRepPayload *payload);
         const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, OCPayload *payload);
         QStatus RegisterBusObject(VirtualBusObject *busObject);
         QStatus Announce();

@@ -515,7 +515,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     std::lock_guard<std::mutex> lock(context->m_bridge->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
     OCCallbackData cbData;
-    OCPlatformPayload *payload;
+    OCRepPayload *payload;
     if (!response)
     {
         goto exit;
@@ -524,7 +524,11 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     {
         LOG(LOG_INFO, "[%p] Missing /oic/p", context->m_bridge);
     }
-    payload = (OCPlatformPayload *) response->payload;
+    if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+    {
+        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", context->m_bridge, response->payload->type);
+    }
+    payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(payload);
     cbData.cb = Bridge::GetDeviceCB;
     cbData.context = context;
@@ -551,7 +555,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
 
     std::lock_guard<std::mutex> lock(context->m_bridge->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
-    OCDevicePayload *payload;
+    OCRepPayload *payload;
     OCCallbackData cbData;
     std::string uri;
     std::string path;
@@ -563,7 +567,11 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     {
         LOG(LOG_INFO, "[%p] Missing /oic/d", context->m_bridge);
     }
-    payload = (OCDevicePayload *) response->payload;
+    if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+    {
+        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", context->m_bridge, response->payload->type);
+    }
+    payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(payload);
     if (context->m_uris.empty())
     {

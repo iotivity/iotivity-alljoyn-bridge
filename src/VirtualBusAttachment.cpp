@@ -23,6 +23,8 @@
 #include "Bridge.h"
 #include "Plugin.h"
 #include "VirtualBusObject.h"
+#include "ocstack.h"
+#include "oic_malloc.h"
 #include <assert.h>
 
 static void ToAppId(const char *di, uint8_t *appId)
@@ -132,7 +134,7 @@ void VirtualBusAttachment::Stop()
     }
 }
 
-void VirtualBusAttachment::SetAboutData(OCPlatformPayload *payload)
+void VirtualBusAttachment::SetAboutData(OCRepPayload *payload)
 {
     LOG(LOG_INFO, "[%p]",
         this);
@@ -142,48 +144,56 @@ void VirtualBusAttachment::SetAboutData(OCPlatformPayload *payload)
     {
         return;
     }
-    if (payload->info.platformID)
+    void *value = NULL;
+    if (OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_ID, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetDeviceId(payload->info.platformID);
+        uint8_t appId[16];
+        ToAppId((char *)value, appId);
+        m_aboutData.SetAppId(appId, 16);
+        OICFree(value);
+        value = NULL;
     }
-    if (payload->info.manufacturerName)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetManufacturer(payload->info.manufacturerName);
+        m_aboutData.SetAppName((char *)value);
+        OICFree(value);
+        value = NULL;
     }
-    if (payload->info.modelNumber)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetModelNumber(payload->info.modelNumber);
+        m_aboutData.SetDeviceId((char *)value);
+        OICFree(value);
+        value = NULL;
     }
-    if (payload->info.dateOfManufacture)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetDateOfManufacture(payload->info.dateOfManufacture);
+        m_aboutData.SetManufacturer((char *)value);
+        OICFree(value);
+        value = NULL;
     }
-    if (payload->info.hardwareVersion)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MODEL_NUM, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetHardwareVersion(payload->info.hardwareVersion);
+        m_aboutData.SetModelNumber((char *)value);
+        OICFree(value);
+        value = NULL;
     }
-    if (payload->info.supportUrl)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_DATE, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetSupportUrl(payload->info.supportUrl);
+        m_aboutData.SetDateOfManufacture((char *)value);
+        OICFree(value);
+        value = NULL;
     }
-}
-
-void VirtualBusAttachment::SetAboutData(OCDevicePayload *payload)
-{
-    LOG(LOG_INFO, "[%p]",
-        this);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (!payload)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_HARDWARE_VERSION, &value) == OC_STACK_OK && value)
     {
-        return;
+        m_aboutData.SetHardwareVersion((char *)value);
+        OICFree(value);
+        value = NULL;
     }
-    uint8_t appId[16];
-    ToAppId(payload->sid, appId);
-    m_aboutData.SetAppId(appId, 16);
-    if (payload->deviceName)
+    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SUPPORT_URL, &value) == OC_STACK_OK && value)
     {
-        m_aboutData.SetAppName(payload->deviceName);
+        m_aboutData.SetSupportUrl((char *)value);
+        OICFree(value);
+        value = NULL;
     }
 }
 
