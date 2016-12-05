@@ -37,6 +37,26 @@ enum
     READWRITE = (1 << 1),
 };
 
+static std::string GetResourceTypeName(std::string ifaceName, std::string suffix)
+{
+    return std::string("x.") + ifaceName + "." + suffix;
+}
+
+static std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix)
+{
+    return GetResourceTypeName(iface->GetName(), suffix);
+}
+
+static std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
+{
+    return GetResourceTypeName(member->iface, member->name) + argName;
+}
+
+static std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName)
+{
+    return GetResourceTypeName(iface, memberName);
+}
+
 VirtualResource *VirtualResource::Create(ajn::BusAttachment *bus,
         const char *name, ajn::SessionId sessionId, const char *path,
         const char *ajSoftwareVersion)
@@ -146,7 +166,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
         {
             qcc::String value = (props[j]->name == "Version") ? "const" : "false";
             props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, value);
-            std::string rt = std::string("x.") + ifaces[i]->GetName() + "." + value;
+            std::string rt = GetResourceTypeName(ifaces[i], value);
             switch (props[j]->access)
             {
                 case ajn::PROP_ACCESS_RW:
@@ -166,7 +186,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
         ifaces[i]->GetMembers(members, numMembers);
         for (size_t j = 0; j < numMembers; ++j)
         {
-            std::string rt = std::string("x.") + ifaces[i]->GetName() + "." + members[j]->name.c_str();
+            std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
             if (members[j]->memberType == ajn::MESSAGE_METHOD_CALL)
             {
                 m_rts[rt] |= READWRITE;
@@ -368,15 +388,16 @@ static bool ToFilteredOCPayload(OCRepPayload *payload,
             {
                 property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
             }
-            success = ToOCPayload(payload, key, entry->v_dictEntry.val->v_variant.val, signature.c_str());
+            qcc::String propName = GetPropName(iface, key);
+            success = ToOCPayload(payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val, signature.c_str());
         }
     }
     return success;
 }
 
-static qcc::String NextArgName(const char *&argNames, size_t i)
+static std::string NextArgName(const char *&argNames, size_t i)
 {
-    qcc::String name;
+    std::string name;
     const char *argName = argNames;
     if (*argNames)
     {
@@ -386,7 +407,7 @@ static qcc::String NextArgName(const char *&argNames, size_t i)
         }
         if (argNames > argName)
         {
-            name = qcc::String(argName, argNames - argName);
+            name = std::string(argName, argNames - argName);
         }
         else
         {
@@ -597,11 +618,11 @@ handleRequest:
                     qcc::String signature = member->signature + member->returnSignature;
                     size_t numArgs = CountCompleteTypes(signature.c_str());
                     const char *argNames = member->argNames.c_str();
-                    qcc::String propName = member->name + "-validity";
+                    std::string propName = GetPropName(member, "validity");
                     OCRepPayloadSetPropBool(payload, propName.c_str(), false);
                     for (size_t i = 0; i < numArgs; ++i)
                     {
-                        propName = member->name + "-" + NextArgName(argNames, i);
+                        propName = GetPropName(member, NextArgName(argNames, i));
                         OCRepPayloadSetNull(payload, propName.c_str());
                     }
                     result = OC_EH_OK;
@@ -689,12 +710,12 @@ handleRequest:
                         ParseCompleteType(signature);
                         qcc::String sig(argSignature, signature - argSignature);
                         argSignature = signature;
-                        qcc::String argName = NextArgName(argNames, i);
+                        std::string argName = NextArgName(argNames, i);
                         if (resource->m_ajSoftwareVersion >= "v16.10.00")
                         {
                             member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                         }
-                        qcc::String propName = member->name + "-" + argName;
+                        qcc::String propName = GetPropName(member, argName);
                         OCRepPayload *payload = (OCRepPayload *) request->payload;
                         for (OCRepPayloadValue *value = payload->values; value; value = value->next)
                         {
@@ -769,7 +790,7 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                 size_t numOutArgs;
                 const ajn::MsgArg *outArgs;
                 msg->GetArgs(numOutArgs, outArgs);
-                qcc::String propName = context->m_member->name + "-validity";
+                std::string propName = GetPropName(context->m_member, "validity");
                 OCRepPayloadSetPropBool(payload, propName.c_str(), true);
                 const char *argNames = context->m_member->argNames.c_str();
                 for (size_t i = 0; i < numInArgs; ++i)
@@ -784,12 +805,12 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                     ParseCompleteType(signature);
                     qcc::String sig(argSignature, signature - argSignature);
                     argSignature = signature;
-                    qcc::String argName = NextArgName(argNames, numInArgs + i);
+                    std::string argName = NextArgName(argNames, numInArgs + i);
                     if (context->m_ajSoftwareVersion >= "v16.10.00")
                     {
                         context->m_member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                     }
-                    propName = context->m_member->name + "-" + argName;
+                    propName = GetPropName(context->m_member, argName);
                     success = ToOCPayload(payload, propName.c_str(), &outArgs[i], sig.c_str());
                 }
             }
@@ -827,12 +848,14 @@ QStatus VirtualResource::Set(SetContext *context)
     LOG(LOG_INFO, "[%p] context=%p",
         this, context);
 
+    std::string valueName = context->m_value->name;
+    std::string propName = GetMember(valueName);
     size_t numArgs = 3;
     ajn::MsgArg args[3];
     args[0].Set("s", context->m_iface->GetName());
-    args[1].Set("s", context->m_value->name);
+    args[1].Set("s", propName.c_str());
     const ajn::InterfaceDescription::Property *property = context->m_iface->GetProperty(
-                context->m_value->name);
+        propName.c_str());
     if (!property)
     {
         return ER_BUS_NO_SUCH_PROPERTY;
@@ -967,7 +990,7 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
     }
     else
     {
-        std::string rt = std::string("x.") + msg->GetInterface() + "." + msg->GetMemberName();
+        std::string rt = GetResourceTypeName(msg->GetInterface(), msg->GetMemberName());
         for (std::map<std::string, std::vector<OCObservationId>>::iterator it = m_observers.begin();
              it != m_observers.end(); ++it)
         {
@@ -984,7 +1007,7 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
             size_t numArgs;
             const ajn::MsgArg *args;
             msg->GetArgs(numArgs, args);
-            qcc::String propName = member->name + "-validity";
+            std::string propName = GetPropName(member, "validity");
             OCRepPayload *payload = CreatePayload();
             OCRepPayloadSetPropBool(payload, propName.c_str(), true);
             bool success = true;
@@ -995,12 +1018,12 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
                 ParseCompleteType(signature);
                 qcc::String sig(argSignature, signature - argSignature);
                 argSignature = signature;
-                qcc::String argName = NextArgName(argNames, i);
+                std::string argName = NextArgName(argNames, i);
                 if (m_ajSoftwareVersion >= "v16.10.00")
                 {
                     member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                 }
-                propName = member->name + "-" + argName;
+                propName = GetPropName(member, argName);
                 success = ToOCPayload(payload, propName.c_str(), &args[i], sig.c_str());
             }
             if (success)
