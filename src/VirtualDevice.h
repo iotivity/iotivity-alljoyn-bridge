@@ -40,7 +40,6 @@ class VirtualDevice
         void StartPresence();
 
     private:
-        static const char *m_specVersion;
         std::mutex m_mutex;
         std::string m_name;
         ajn::SessionId m_sessionId;

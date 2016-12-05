@@ -21,8 +21,19 @@
 #ifndef __PLUGIN_H__
 #define __PLUGIN_H__
 
+#include <alljoyn/AboutData.h>
+#include <alljoyn/AboutObjectDescription.h>
 #include "octypes.h"
 #include <stdint.h>
+
+/** Device software version.*/
+#define OC_RSRVD_SOFTWARE_VERSION       "sv"
+
+/** Device manufacture name. */
+#define OC_RSRVD_DEVICE_MFG_NAME        "dmn"
+
+/** Device model number.*/
+#define OC_RSRVD_DEVICE_MODEL_NUM       "dmno"
 
 #define LOG_ERR         3
 #define LOG_INFO        6
@@ -40,8 +51,7 @@ void LogWriteln(
     LogWriteln(__FILE__, __FUNCTION__, __LINE__, severity, fmt, ##__VA_ARGS__)
 
 const char *GetServerInstanceIDString();
-OCStackResult SetDeviceInfo(const OCUUIdentity *di, OCDeviceInfo deviceInfo);
-OCStackResult SetPlatformInfo(OCPlatformInfo platformInfo);
+OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription, ajn::AboutData &aboutData);
 OCStackResult StartPresence();
 OCStackResult StopPresence();
 
