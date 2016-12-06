@@ -27,6 +27,8 @@
 #include <qcc/StringUtil.h>
 #include "Signature.h"
 #include "ocpayload.h"
+#include "ocstack.h"
+#include "oic_malloc.h"
 #include <algorithm>
 #include <assert.h>
 
@@ -36,6 +38,14 @@ enum
     READ = (1 << 0),
     READWRITE = (1 << 1),
 };
+
+static bool TranslateInterface(const char *ifaceName)
+{
+    return !(strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
+             strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
+}
 
 static std::string GetResourceTypeName(std::string ifaceName, std::string suffix)
 {
@@ -151,10 +161,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
     {
         const char *ifaceName = ifaces[i]->GetName();
         LOG(LOG_INFO, "%s ifaceName=%s", GetPath().c_str(), ifaceName);
-        if (strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
-            strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
-            strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
-            strstr(ifaceName, "org.allseen.Introspectable") == ifaceName)
+        if (!TranslateInterface(ifaceName))
         {
             continue;
         }
@@ -243,7 +250,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
 
     std::map<std::string, uint8_t>::iterator rt = m_rts.begin();
     OCStackResult result = CreateResource(GetPath().c_str(), rt->first.c_str(),
-                                          (access & READ) ?  "oic.if.r" : "oic.if.rw",
+                                          (access & READ) ?  OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
                                           VirtualResource::EntityHandlerCB, this,
                                           OC_DISCOVERABLE | OC_OBSERVABLE);
     for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
@@ -252,7 +259,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
     }
     if ((access & (READ | READWRITE)) == (READ | READWRITE))
     {
-        result = ::AddInterface(GetPath().c_str(), "oic.if.rw");
+        result = ::AddInterface(GetPath().c_str(), OC_RSRVD_INTERFACE_READ_WRITE);
     }
     if (result == OC_STACK_OK)
     {
@@ -302,9 +309,9 @@ static std::string GetResourceType(std::map<std::string, std::string> &query,
                                    std::string defaultResourceType)
 {
     std::string rt = defaultResourceType;
-    if (query.find("rt") != query.end())
+    if (query.find(OC_RSRVD_RESOURCE_TYPE) != query.end())
     {
-        rt = query["rt"];
+        rt = query[OC_RSRVD_RESOURCE_TYPE];
     }
     return rt;
 }
@@ -313,13 +320,17 @@ static uint8_t GetAccess(std::map<std::string, std::string> &query,
                          uint8_t accessFlags)
 {
     uint8_t access = NONE;
-    if (query.find("if") != query.end())
+    if (query.find(OC_RSRVD_INTERFACE) != query.end())
     {
-        if (query["if"] == "oic.if.rw")
+        if (query[OC_RSRVD_INTERFACE] == OC_RSRVD_INTERFACE_DEFAULT)
         {
             access = READWRITE;
         }
-        else if (query["if"] == "oic.if.r")
+        else if (query[OC_RSRVD_INTERFACE] == OC_RSRVD_INTERFACE_READ_WRITE)
+        {
+            access = READWRITE;
+        }
+        else if (query[OC_RSRVD_INTERFACE] == OC_RSRVD_INTERFACE_READ)
         {
             access = READ;
         }
@@ -389,7 +400,8 @@ static bool ToFilteredOCPayload(OCRepPayload *payload,
                 property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
             }
             qcc::String propName = GetPropName(iface, key);
-            success = ToOCPayload(payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val, signature.c_str());
+            success = ToOCPayload(payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val,
+                                  signature.c_str());
         }
     }
     return success;
@@ -472,6 +484,33 @@ struct VirtualResource::SetContext
     }
 };
 
+
+struct VirtualResource::GetAllBaselineContext
+{
+    std::string m_ajSoftwareVersion;
+    const ajn::InterfaceDescription **m_ifaces;
+    size_t m_numIfaces;
+    size_t m_iface;
+    OCRepPayload *m_payload;
+    OCEntityHandlerResponse *m_response;
+    GetAllBaselineContext(std::string ajSoftwareVersion, const ajn::InterfaceDescription **ifaces,
+                          size_t numIfaces,
+                          OCRepPayload *payload, OCEntityHandlerRequest *request)
+        : m_ajSoftwareVersion(ajSoftwareVersion), m_ifaces(ifaces), m_numIfaces(numIfaces), m_iface(0),
+          m_payload(payload), m_response(NULL)
+    {
+        m_response = (OCEntityHandlerResponse *) calloc(1, sizeof(OCEntityHandlerResponse));
+        m_response->requestHandle = request->requestHandle;
+        m_response->resourceHandle = request->resource;
+    }
+    ~GetAllBaselineContext()
+    {
+        delete[] m_ifaces;
+        OCRepPayloadDestroy(m_payload);
+        free(m_response);
+    }
+};
+
 OCRepPayload *VirtualResource::CreatePayload()
 {
     OCRepPayload *payload = OCRepPayloadCreate();
@@ -480,6 +519,32 @@ OCRepPayload *VirtualResource::CreatePayload()
         OCRepPayloadSetUri(payload, GetPath().c_str());
     }
     return payload;
+}
+
+OCStackResult VirtualResource::SetMemberPayload(OCRepPayload *payload,
+        const char *ifaceName, const char *memberName)
+{
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (!iface)
+    {
+        return OC_STACK_ERROR;
+    }
+    const ajn::InterfaceDescription::Member *member = iface->GetMember(memberName);
+    if (!member)
+    {
+        return OC_STACK_ERROR;
+    }
+    qcc::String signature = member->signature + member->returnSignature;
+    size_t numArgs = CountCompleteTypes(signature.c_str());
+    const char *argNames = member->argNames.c_str();
+    std::string propName = GetPropName(member, "validity");
+    OCRepPayloadSetPropBool(payload, propName.c_str(), false);
+    for (size_t i = 0; i < numArgs; ++i)
+    {
+        propName = GetPropName(member, NextArgName(argNames, i));
+        OCRepPayloadSetNull(payload, propName.c_str());
+    }
+    return OC_STACK_OK;
 }
 
 OCEntityHandlerResult VirtualResource::EntityHandlerCB(OCEntityHandlerFlag flag,
@@ -496,7 +561,7 @@ OCEntityHandlerResult VirtualResource::EntityHandlerCB(OCEntityHandlerFlag flag,
     uint8_t access = GetAccess(queryMap, resource->m_rts[rt]);
     if (!access)
     {
-        LOG(LOG_INFO, "Unsupported interface requested - %s", queryMap["if"].c_str());
+        LOG(LOG_INFO, "Unsupported interface requested - %s", queryMap[OC_RSRVD_INTERFACE].c_str());
         return OC_EH_ERROR;
     }
     if (flag & OC_OBSERVE_FLAG)
@@ -571,8 +636,29 @@ handleRequest:
             {
                 std::string ifaceName = ::GetInterface(rt);
                 std::string memberName = GetMember(rt);
-                if (memberName == "const" || memberName == "true" || memberName == "false"
-                    || memberName == "invalidates")
+                if (queryMap[OC_RSRVD_INTERFACE] == OC_RSRVD_INTERFACE_DEFAULT)
+                {
+                    size_t numIfaces = resource->GetInterfaces(NULL, 0);
+                    const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
+                    resource->GetInterfaces(ifaces, numIfaces);
+                    OCRepPayload *payload = resource->CreatePayload();
+                    GetAllBaselineContext *context = new GetAllBaselineContext(resource->m_ajSoftwareVersion, ifaces,
+                            numIfaces,
+                            payload, request);
+                    QStatus status = resource->GetAllBaseline(context);
+                    if (status == ER_OK)
+                    {
+                        result = OC_EH_OK;
+                    }
+                    else
+                    {
+                        LOG(LOG_ERR, "GetAllBaseline - %s", QCC_StatusText(status));
+                        delete context;
+                        result = OC_EH_ERROR;
+                    }
+                }
+                else if (memberName == "const" || memberName == "true" || memberName == "false"
+                         || memberName == "invalidates")
                 {
                     ajn::MsgArg arg("s", ifaceName.c_str());
                     const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface(
@@ -603,27 +689,10 @@ handleRequest:
                     response.requestHandle = request->requestHandle;
                     response.resourceHandle = request->resource;
                     OCRepPayload *payload = resource->CreatePayload();
-                    const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface(ifaceName.c_str());
-                    if (!iface)
+                    if (resource->SetMemberPayload(payload, ifaceName.c_str(), memberName.c_str()) != OC_STACK_OK)
                     {
                         result = OC_EH_ERROR;
                         break;
-                    }
-                    const ajn::InterfaceDescription::Member *member = iface->GetMember(memberName.c_str());
-                    if (!member)
-                    {
-                        result = OC_EH_ERROR;
-                        break;
-                    }
-                    qcc::String signature = member->signature + member->returnSignature;
-                    size_t numArgs = CountCompleteTypes(signature.c_str());
-                    const char *argNames = member->argNames.c_str();
-                    std::string propName = GetPropName(member, "validity");
-                    OCRepPayloadSetPropBool(payload, propName.c_str(), false);
-                    for (size_t i = 0; i < numArgs; ++i)
-                    {
-                        propName = GetPropName(member, NextArgName(argNames, i));
-                        OCRepPayloadSetNull(payload, propName.c_str());
                     }
                     result = OC_EH_OK;
                     response.ehResult = result;
@@ -855,7 +924,7 @@ QStatus VirtualResource::Set(SetContext *context)
     args[0].Set("s", context->m_iface->GetName());
     args[1].Set("s", propName.c_str());
     const ajn::InterfaceDescription::Property *property = context->m_iface->GetProperty(
-        propName.c_str());
+                propName.c_str());
     if (!property)
     {
         return ER_BUS_NO_SUCH_PROPERTY;
@@ -1087,6 +1156,193 @@ void VirtualResource::GetAllInvalidatedCB(ajn::Message &msg, void *ctx)
         {
             OCRepPayloadDestroy(payload);
         }
+    }
+}
+
+/* Called with m_mutex held. */
+QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
+{
+    LOG(LOG_INFO, "[%p] context=%p",
+        this, context);
+
+    for (; (context->m_iface < context->m_numIfaces)
+         && (context->m_response->ehResult == OC_EH_OK); ++context->m_iface)
+    {
+        const char *ifaceName = context->m_ifaces[context->m_iface]->GetName();
+        if (!TranslateInterface(ifaceName))
+        {
+            continue;
+        }
+        size_t numProps = context->m_ifaces[context->m_iface]->GetProperties(NULL, 0);
+        if (numProps)
+        {
+            ajn::MsgArg arg("s", ifaceName);
+            QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName, "GetAll",
+                                             this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllBaselineCB),
+                                             &arg, 1, context);
+            if (status != ER_OK)
+            {
+                LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                context->m_response->ehResult = OC_EH_ERROR;
+            }
+            break;
+        }
+    }
+    if ((context->m_response->ehResult != OC_EH_OK) || (context->m_iface == context->m_numIfaces))
+    {
+        if (context->m_response->ehResult == OC_EH_OK)
+        {
+            for (size_t i = 0; (i < context->m_numIfaces) && (context->m_response->ehResult == OC_EH_OK); ++i)
+            {
+                const char *ifaceName = context->m_ifaces[i]->GetName();
+                if (!TranslateInterface(ifaceName))
+                {
+                    continue;
+                }
+                size_t numMembers = context->m_ifaces[i]->GetMembers(NULL, 0);
+                const ajn::InterfaceDescription::Member **members = new const
+                ajn::InterfaceDescription::Member*[numMembers];
+                context->m_ifaces[i]->GetMembers(members, numMembers);
+                for (size_t j = 0; (j < numMembers) && (context->m_response->ehResult == OC_EH_OK); ++j)
+                {
+                    if (SetMemberPayload(context->m_payload, ifaceName, members[j]->name.c_str()) != OC_STACK_OK)
+                    {
+                        context->m_response->ehResult = OC_EH_ERROR;
+                    }
+                }
+                delete[] members;
+            }
+        }
+        /* Common properties */
+        const char **rts = NULL;
+        const char **ifs = NULL;
+        if (context->m_response->ehResult == OC_EH_OK)
+        {
+            size_t dim[MAX_REP_ARRAY_DEPTH] = {0, 0, 0};
+            uint8_t nrts = 0;
+            OCStackResult result = OCGetNumberOfResourceTypes(context->m_response->resourceHandle, &nrts);
+            if (result != OC_STACK_OK)
+            {
+                context->m_response->ehResult = OC_EH_ERROR;
+                goto exit;
+            }
+            dim[0] = nrts;
+            rts = (const char **)OICMalloc(sizeof(const char *) * nrts);
+            if (rts == NULL)
+            {
+                context->m_response->ehResult = OC_EH_ERROR;
+                goto exit;
+            }
+            for (size_t i = 0; i < nrts; ++i)
+            {
+                rts[i] = OCGetResourceTypeName(context->m_response->resourceHandle, i);
+            }
+            if (!OCRepPayloadSetStringArray(context->m_payload, OC_RSRVD_RESOURCE_TYPE, (const char **)rts, dim))
+            {
+                context->m_response->ehResult = OC_EH_ERROR;
+                goto exit;
+            }
+            uint8_t nifs = 0;
+            result = OCGetNumberOfResourceInterfaces(context->m_response->resourceHandle, &nifs);
+            if (result != OC_STACK_OK)
+            {
+                context->m_response->ehResult = OC_EH_ERROR;
+                goto exit;
+            }
+            dim[0] = nifs;
+            ifs = (const char **)OICMalloc(sizeof(const char *) * nifs);
+            if (ifs == NULL)
+            {
+                context->m_response->ehResult = OC_EH_ERROR;
+                goto exit;
+            }
+            for (size_t i = 0; i < nifs; ++i)
+            {
+                ifs[i] = OCGetResourceInterfaceName(context->m_response->resourceHandle, i);
+            }
+            if (!OCRepPayloadSetStringArray(context->m_payload, OC_RSRVD_INTERFACE, (const char **)ifs, dim))
+            {
+                context->m_response->ehResult = OC_EH_ERROR;
+                goto exit;
+            }
+        }
+    exit:
+        if (context->m_response->ehResult == OC_EH_OK)
+        {
+            context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
+        }
+        OCStackResult doResult = DoResponse(context->m_response);
+        if (doResult != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "DoResponse - %d", doResult);
+        }
+        OICFree(ifs);
+        OICFree(rts);
+        delete context;
+    }
+    return ER_OK;
+}
+
+void VirtualResource::GetAllBaselineCB(ajn::Message &msg, void *ctx)
+{
+    LOG(LOG_INFO, "[%p] ctx=%p",
+        this, ctx);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    GetAllBaselineContext *context = reinterpret_cast<GetAllBaselineContext *>(ctx);
+    switch (msg->GetType())
+    {
+        case ajn::MESSAGE_METHOD_RET:
+            {
+                const ajn::InterfaceDescription *iface = context->m_ifaces[context->m_iface];
+                const ajn::MsgArg *dict = msg->GetArg(0);
+                bool success = true;
+                size_t numEntries = dict->v_array.GetNumElements();
+                for (size_t i = 0; success && i < numEntries; ++i)
+                {
+                    const ajn::MsgArg *entry = &dict->v_array.GetElements()[i];
+                    const char *key = entry->v_dictEntry.key->v_string.str;
+                    const ajn::InterfaceDescription::Property *property = iface->GetProperty(key);
+                    if (property)
+                    {
+                        /*
+                         * Annotations prior to v16.10.00 are not guaranteed to
+                         * appear in the order they were specified, so are
+                         * unreliable.
+                         */
+                        qcc::String signature = property->signature;
+                        if (context->m_ajSoftwareVersion >= "v16.10.00")
+                        {
+                            property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
+                        }
+                        qcc::String propName = GetPropName(iface, key);
+                        success = ToOCPayload(context->m_payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val,
+                                              signature.c_str());
+                    }
+                }
+                if (success)
+                {
+                    context->m_response->ehResult = OC_EH_OK;
+                }
+                else
+                {
+                    context->m_response->ehResult = OC_EH_ERROR;
+                }
+                break;
+            }
+        case ajn::MESSAGE_ERROR:
+            context->m_response->ehResult = OC_EH_ERROR;
+            break;
+        default:
+            assert(0);
+            break;
+    }
+    ++context->m_iface;
+    QStatus status = GetAllBaseline(context);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "GetAllBaseline - %s", QCC_StatusText(status));
+        delete context;
     }
 }
 

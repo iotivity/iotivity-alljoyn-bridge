@@ -51,7 +51,8 @@ void LogWriteln(
     LogWriteln(__FILE__, __FUNCTION__, __LINE__, severity, fmt, ##__VA_ARGS__)
 
 const char *GetServerInstanceIDString();
-OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription, ajn::AboutData &aboutData);
+OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
+                                       ajn::AboutData &aboutData);
 OCStackResult StartPresence();
 OCStackResult StopPresence();
 

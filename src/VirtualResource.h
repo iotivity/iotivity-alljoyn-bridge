@@ -60,9 +60,14 @@ class VirtualResource : public ajn::ProxyBusObject
         void SetCB(ajn::Message &msg, void *context);
         struct GetAllInvalidatedContext;
         void GetAllInvalidatedCB(ajn::Message &msg, void *ctx);
+        struct GetAllBaselineContext;
+        QStatus GetAllBaseline(GetAllBaselineContext *context);
+        void GetAllBaselineCB(ajn::Message &msg, void *ctx);
         virtual void AddMatchCB(QStatus status, void *ctx);
         virtual void RemoveMatchCB(QStatus status, void *ctx);
         OCRepPayload *CreatePayload();
+        OCStackResult SetMemberPayload(OCRepPayload *payload,
+                                       const char *ifaceName, const char *memberName);
         static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
                 OCEntityHandlerRequest *request,
                 void *context);

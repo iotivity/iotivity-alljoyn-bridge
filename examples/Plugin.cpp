@@ -146,7 +146,8 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
     memcpy(di->id, digest, UUID_IDENTITY_SIZE);
 }
 
-OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription, ajn::AboutData &aboutData)
+OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
+                                       ajn::AboutData &aboutData)
 {
     char *deviceId;
     aboutData.GetDeviceId(&deviceId);
