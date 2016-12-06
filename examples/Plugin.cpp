@@ -194,23 +194,28 @@ OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescri
     unsigned int id[16];
     if (sscanf(deviceId, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                &id[0], &id[1], &id[2], &id[3], &id[4], &id[5], &id[6], &id[7],
-               &id[8], &id[9], &id[10], &id[11], &id[12], &id[13], &id[14], &id[15]) == 16 ||
-        sscanf(deviceId, "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-               &id[0], &id[1], &id[2], &id[3], &id[4], &id[5], &id[6], &id[7],
                &id[8], &id[9], &id[10], &id[11], &id[12], &id[13], &id[14], &id[15]) == 16)
     {
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, deviceId);
+    }
+    else if (sscanf(deviceId, "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                    &id[0], &id[1], &id[2], &id[3], &id[4], &id[5], &id[6], &id[7],
+                    &id[8], &id[9], &id[10], &id[11], &id[12], &id[13], &id[14], &id[15]) == 16)
+    {
+        char uuid[UUID_IDENTITY_SIZE * 2 + 5];
+        snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
+                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                 id[0], id[1], id[2], id[3], id[4], id[5], id[6], id[7],
+                 id[8], id[9], id[10], id[11], id[12], id[13], id[14], id[15]);
+        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
     }
     else
     {
         char uuid[UUID_IDENTITY_SIZE * 2 + 5];
         snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
                  "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 di.id[0], di.id[1], di.id[2], di.id[3],
-                 di.id[4], di.id[5],
-                 di.id[6], di.id[7],
-                 di.id[8], di.id[9],
-                 di.id[10], di.id[11], di.id[12], di.id[13], di.id[14], di.id[15]);
+                 di.id[0], di.id[1], di.id[2], di.id[3], di.id[4], di.id[5], di.id[6], di.id[7],
+                 di.id[8], di.id[9], di.id[10], di.id[11], di.id[12], di.id[13], di.id[14], di.id[15]);
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
     }
     value = NULL;
