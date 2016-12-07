@@ -559,12 +559,16 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
 {
     (void) handle;
     Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
-    LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
     if (!response || response->result != OC_STACK_OK)
     {
+        return OC_STACK_KEEP_TRANSACTION;
+    }
+    if (!thiz->m_whitelistAddr.empty() && (thiz->m_whitelistAddr != response->devAddr.addr))
+    {
+        LOG(LOG_INFO, "[%p] Ignoring %s:%d", thiz, response->devAddr.addr, response->devAddr.port);
         return OC_STACK_KEEP_TRANSACTION;
     }
     OCDiscoveryPayload *payload;

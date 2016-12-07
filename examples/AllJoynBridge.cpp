@@ -110,6 +110,7 @@ static void SessionLostCB()
 int main(int argc, char **argv)
 {
     int protocols = 0;
+    const char *whitelistAddr = NULL;
     if (argc > 1)
     {
         for (int i = 1; i < argc; ++i)
@@ -137,6 +138,10 @@ int main(int argc, char **argv)
             else if (!strcmp(argv[i], "--rd") && (i < (argc - 1)))
             {
                 sRD = argv[++i];
+            }
+            else if (!strcmp(argv[i], "--whitelist") && (i < (argc - 1)))
+            {
+                whitelistAddr = argv[++i];
             }
         }
     }
@@ -230,6 +235,7 @@ int main(int argc, char **argv)
     {
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetAnnouncedCB(AnnouncedCB);
+        bridge->SetWhitelistAddress(whitelistAddr);
     }
     if (!bridge->Start())
     {
