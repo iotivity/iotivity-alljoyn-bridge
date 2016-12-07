@@ -28,6 +28,7 @@
 #include "octypes.h"
 #include <mutex>
 #include <vector>
+#include <set>
 
 class Presence;
 class VirtualBusAttachment;
@@ -66,6 +67,8 @@ class Bridge : private ajn::AboutListener
         std::vector<VirtualDevice *> m_virtualDevices;
         std::vector<VirtualResource *> m_virtualResources;
         std::vector<VirtualBusAttachment *> m_virtualBusAttachments;
+        struct DiscoverContext;
+        std::set<DiscoverContext *> m_discovered;
 
         void Destroy(const char *id);
         virtual void BusDisconnected();

@@ -478,7 +478,7 @@ void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::Session
     }
 }
 
-struct DiscoverContext
+struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
     OCPresence *m_presence;
@@ -522,6 +522,14 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             goto exit;
         }
     }
+    for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
+         it != thiz->m_discovered.end(); ++it)
+    {
+        if ((*it)->m_bus->GetDi() == payload->sid)
+        {
+            goto exit;
+        }
+    }
 
     context = new DiscoverContext(thiz);
     context->m_presence = new OCPresence(&response->devAddr, payload->sid);
@@ -547,6 +555,8 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             context->m_uris.push_back(uri);
         }
     }
+    thiz->m_discovered.insert(context);
+
     cbData.cb = Bridge::GetPlatformCB;
     cbData.context = context;
     cbData.cd = NULL;
@@ -558,6 +568,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
 exit:
     if (result != OC_STACK_OK)
     {
+        thiz->m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_KEEP_TRANSACTION;
@@ -568,9 +579,10 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
 {
     (void) handle;
     DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
-    LOG(LOG_INFO, "[%p]", context->m_bridge);
+    Bridge *thiz = context->m_bridge;
+    LOG(LOG_INFO, "[%p]", thiz);
 
-    std::lock_guard<std::mutex> lock(context->m_bridge->m_mutex);
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
     OCCallbackData cbData;
     OCRepPayload *payload;
@@ -580,11 +592,12 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     }
     if (response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_INFO, "[%p] Missing /oic/p", context->m_bridge);
+        LOG(LOG_INFO, "[%p] Missing /oic/p", thiz);
     }
     if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
-        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", context->m_bridge, response->payload->type);
+        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", thiz,
+            response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
@@ -599,6 +612,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
 exit:
     if (result != OC_STACK_OK)
     {
+        thiz->m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
@@ -609,9 +623,10 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
 {
     (void) handle;
     DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
-    LOG(LOG_INFO, "[%p]", context->m_bridge);
+    Bridge *thiz = context->m_bridge;
+    LOG(LOG_INFO, "[%p]", thiz);
 
-    std::lock_guard<std::mutex> lock(context->m_bridge->m_mutex);
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
     OCRepPayload *payload;
     OCCallbackData cbData;
@@ -623,11 +638,12 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     }
     if (response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_INFO, "[%p] Missing /oic/d", context->m_bridge);
+        LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
     }
     if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
-        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", context->m_bridge, response->payload->type);
+        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", thiz,
+            response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
@@ -652,6 +668,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
 exit:
     if (result != OC_STACK_OK)
     {
+        thiz->m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
@@ -662,9 +679,10 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
 {
     (void) handle;
     DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
-    LOG(LOG_INFO, "[%p]", context->m_bridge);
+    Bridge *thiz = context->m_bridge;
+    LOG(LOG_INFO, "[%p]", thiz);
 
-    std::lock_guard<std::mutex> lock(context->m_bridge->m_mutex);
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
     std::string rt;
     std::string uri;
@@ -718,22 +736,27 @@ next:
         QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
         if (status != ER_OK)
         {
-            goto exit;
+            delete context->m_obj;
         }
         context->m_obj = NULL; /* context->m_obj now belongs to context->m_bus */
         status = context->m_bus->Announce();
         if (status != ER_OK)
         {
+            result = OC_STACK_ERROR;
             goto exit;
         }
-        context->m_bridge->m_virtualBusAttachments.push_back(context->m_bus);
-        context->m_bus = NULL; /* context->m_bus now belongs to context->m_bridge */
-        context->m_bridge->m_presence.push_back(context->m_presence);
-        context->m_presence = NULL; /* context->m_presence now belongs to context->m_bridge */
+        thiz->m_virtualBusAttachments.push_back(context->m_bus);
+        context->m_bus = NULL; /* context->m_bus now belongs to thiz */
+        thiz->m_presence.push_back(context->m_presence);
+        context->m_presence = NULL; /* context->m_presence now belongs to thiz */
+        result = OC_STACK_OK;
+        thiz->m_discovered.erase(context);
+        delete context;
     }
 exit:
     if (result != OC_STACK_OK)
     {
+        thiz->m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
