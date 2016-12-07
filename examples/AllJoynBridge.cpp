@@ -26,6 +26,7 @@
 #include "Bridge.h"
 
 static volatile sig_atomic_t gQuitFlag = false;
+static const char *gPSPath = NULL;
 
 static void SigIntCB(int sig)
 {
@@ -33,9 +34,10 @@ static void SigIntCB(int sig)
     gQuitFlag = true;
 }
 
-static FILE *PSOpenCB(const char *path, const char *mode)
+static FILE *PSOpenCB(const char *defaultPath, const char *mode)
 {
-    return fopen(path, mode);
+    std::string path = gPSPath ? gPSPath : defaultPath;
+    return fopen(path.c_str(), mode);
 }
 
 int main(int argc, char **argv)
@@ -53,9 +55,13 @@ int main(int argc, char **argv)
             {
                 protocols |= Bridge::OC;
             }
+            else if (!strcmp(argv[i], "--ps") && (i < (argc - 1)))
+            {
+                gPSPath = argv[++i];
+            }
         }
     }
-    else
+    if (protocols == 0)
     {
         protocols = Bridge::AJ | Bridge::OC;
     }
