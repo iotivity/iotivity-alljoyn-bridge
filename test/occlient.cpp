@@ -135,7 +135,7 @@ static void LogResponse(OCMethod method, OCClientResponse *response)
 
     std::cout << "Uri-Host: " << response->devAddr.addr << std::endl
               << "Uri-Port: " << response->devAddr.port << std::endl
-              << "Uri-Path: " << response->resourceUri << std::endl;
+              << "Uri-Path: " << (response->resourceUri ? response->resourceUri : "") << std::endl;
     if (method & OC_REST_OBSERVE)
     {
         std::cout << "Observe: " << response->sequenceNumber << std::endl;
