@@ -24,6 +24,7 @@
 #include "Plugin.h"
 #include "VirtualBusObject.h"
 #include "ocstack.h"
+#include "ocpayload.h"
 #include "oic_malloc.h"
 #include <assert.h>
 
@@ -134,7 +135,7 @@ void VirtualBusAttachment::Stop()
     }
 }
 
-void VirtualBusAttachment::SetAboutData(OCRepPayload *payload)
+void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
 {
     LOG(LOG_INFO, "[%p]",
         this);
@@ -144,56 +145,90 @@ void VirtualBusAttachment::SetAboutData(OCRepPayload *payload)
     {
         return;
     }
-    void *value = NULL;
-    if (OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_ID, &value) == OC_STACK_OK && value)
+    char *value = NULL;
+    if (!strcmp(uri, OC_RSRVD_DEVICE_URI))
     {
-        uint8_t appId[16];
-        ToAppId((char *)value, appId);
-        m_aboutData.SetAppId(appId, 16);
-        OICFree(value);
-        value = NULL;
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_ID, &value))
+        {
+            uint8_t appId[16];
+            ToAppId((char *)value, appId);
+            m_aboutData.SetAppId(appId, 16);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MFG_NAME, &value))
+        {
+            m_aboutData.SetManufacturer((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
+        {
+            m_aboutData.SetModelNumber((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SOFTWARE_VERSION, &value))
+        {
+            m_aboutData.SetDateOfManufacture((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
     }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, &value) == OC_STACK_OK && value)
+    if (!strcmp(uri, OC_RSRVD_PLATFORM_URI))
     {
-        m_aboutData.SetAppName((char *)value);
-        OICFree(value);
-        value = NULL;
-    }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, &value) == OC_STACK_OK && value)
-    {
-        m_aboutData.SetDeviceId((char *)value);
-        OICFree(value);
-        value = NULL;
-    }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, &value) == OC_STACK_OK && value)
-    {
-        m_aboutData.SetManufacturer((char *)value);
-        OICFree(value);
-        value = NULL;
-    }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MODEL_NUM, &value) == OC_STACK_OK && value)
-    {
-        m_aboutData.SetModelNumber((char *)value);
-        OICFree(value);
-        value = NULL;
-    }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_DATE, &value) == OC_STACK_OK && value)
-    {
-        m_aboutData.SetDateOfManufacture((char *)value);
-        OICFree(value);
-        value = NULL;
-    }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_HARDWARE_VERSION, &value) == OC_STACK_OK && value)
-    {
-        m_aboutData.SetHardwareVersion((char *)value);
-        OICFree(value);
-        value = NULL;
-    }
-    if (OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SUPPORT_URL, &value) == OC_STACK_OK && value)
-    {
-        m_aboutData.SetSupportUrl((char *)value);
-        OICFree(value);
-        value = NULL;
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_ID, &value))
+        {
+            m_aboutData.SetDeviceId((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
+        {
+            m_aboutData.SetDateOfManufacture((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_HARDWARE_VERSION, &value))
+        {
+            m_aboutData.SetHardwareVersion((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SUPPORT_URL, &value))
+        {
+            m_aboutData.SetSupportUrl((char *)value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_URL, &value))
+        {
+            ajn::MsgArg valueArg("s", value);
+            m_aboutData.SetField("org.openconnectivity.mnml", valueArg);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_VERSION, &value))
+        {
+            ajn::MsgArg valueArg("s", value);
+            m_aboutData.SetField("org.openconnectivity.mnpv", valueArg);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_FIRMWARE_VERSION, &value))
+        {
+            ajn::MsgArg valueArg("s", value);
+            m_aboutData.SetField("org.openconnectivity.mnfv", valueArg);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SYSTEM_TIME, &value))
+        {
+            ajn::MsgArg valueArg("s", value);
+            m_aboutData.SetField("org.openconnectivity.st", valueArg);
+            OICFree(value);
+            value = NULL;
+        }
     }
 }
 

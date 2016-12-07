@@ -218,7 +218,7 @@ bool Bridge::Process()
             cbData.cb = Bridge::DiscoverCB;
             cbData.context = this;
             cbData.cd = NULL;
-            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER, "/oic/res", NULL, 0,
+            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER, OC_RSRVD_WELL_KNOWN_URI, NULL, 0,
                                               &cbData);
             if (result != OC_STACK_OK)
             {
@@ -540,7 +540,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     cbData.cb = Bridge::GetPlatformCB;
     cbData.context = context;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, "/oic/p", &response->devAddr, NULL, &cbData);
+    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
     if (result != OC_STACK_OK)
     {
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -577,11 +577,11 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
         LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", context->m_bridge, response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
-    context->m_bus->SetAboutData(payload);
+    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
     cbData.cb = Bridge::GetDeviceCB;
     cbData.context = context;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, "/oic/d", &response->devAddr, NULL, &cbData);
+    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_DEVICE_URI, &response->devAddr, NULL, &cbData);
     if (result != OC_STACK_OK)
     {
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -620,7 +620,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", context->m_bridge, response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
-    context->m_bus->SetAboutData(payload);
+    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
     if (context->m_uris.empty())
     {
         goto exit;
