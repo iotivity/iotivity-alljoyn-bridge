@@ -307,6 +307,11 @@ const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const cha
         LOG(LOG_ERR, "CreateInterface - %s", QCC_StatusText(status));
         return NULL;
     }
+    if (strstr(ifaceName, "oic.d.") == ifaceName)
+    {
+        /* Device types are translated as empty interfaces */
+        goto exit;
+    }
     if (payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
         LOG(LOG_INFO, "Ignoring non-representation payload");
@@ -330,6 +335,7 @@ const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const cha
             return NULL;
         }
     }
+exit:
     iface->Activate();
     return iface;
 }

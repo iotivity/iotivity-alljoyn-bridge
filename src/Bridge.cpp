@@ -32,6 +32,12 @@
 #include <deque>
 #include <iterator>
 
+static bool TranslateResourceType(const char *type)
+{
+    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0);
+}
+
 Bridge::Bridge(Protocol protocols)
     : m_protocols(protocols), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
@@ -533,6 +539,10 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     {
         for (OCStringLL *type = resource->types; type; type = type->next)
         {
+            if (!TranslateResourceType(type->value))
+            {
+                continue;
+            }
             std::string uri = resource->uri + std::string("?rt=") + type->value;
             context->m_uris.push_back(uri);
         }
