@@ -639,13 +639,13 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     path = uri.substr(0, uri.find("?"));
     context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
 
-    cbData.cb = Bridge::ObserveCB;
+    cbData.cb = Bridge::GetCB;
     cbData.context = context;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_OBSERVE, uri.c_str(), &response->devAddr, NULL, &cbData);
+    result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
     if (result != OC_STACK_OK)
     {
-        LOG(LOG_ERR, "DoResource(OC_REST_OBSERVE) - %d", result);
+        LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
         goto exit;
     }
     return OC_STACK_DELETE_TRANSACTION;
@@ -657,7 +657,7 @@ exit:
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-OCStackApplicationResult Bridge::ObserveCB(void *ctx, OCDoHandle handle,
+OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
     (void) handle;
@@ -672,7 +672,7 @@ OCStackApplicationResult Bridge::ObserveCB(void *ctx, OCDoHandle handle,
     const ajn::InterfaceDescription *iface;
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_ERR, "ObserveCB (%s) response=%p {payload=%p,result=%d}", context->m_uris.front().c_str(),
+        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_uris.front().c_str(),
             response, response ? response->payload : 0, response ? response->result : 0);
         goto next;
     }
@@ -702,13 +702,13 @@ next:
             context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
         }
         OCCallbackData cbData;
-        cbData.cb = Bridge::ObserveCB;
+        cbData.cb = Bridge::GetCB;
         cbData.context = context;
         cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_OBSERVE, uri.c_str(), &response->devAddr, NULL, &cbData);
+        result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "DoResource(OC_REST_OBSERVE) - %d", result);
+            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
             goto exit;
         }
     }

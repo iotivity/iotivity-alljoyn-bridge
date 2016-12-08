@@ -82,7 +82,7 @@ class Bridge : private ajn::AboutListener
                 OCClientResponse *response);
         static OCStackApplicationResult GetDeviceCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
-        static OCStackApplicationResult ObserveCB(void *ctx, OCDoHandle handle,
+        static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
 };
 
