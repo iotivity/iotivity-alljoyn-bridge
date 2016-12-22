@@ -86,10 +86,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "OCRegisterPersistentStorageHandler - %d\n", result);
         return EXIT_FAILURE;
     }
-    result = OCInit(NULL, 0, OC_CLIENT_SERVER);
+    result = OCInit1(OC_CLIENT_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS);
     if (result != OC_STACK_OK)
     {
-        fprintf(stderr, "OCInit - %d\n", result);
+        fprintf(stderr, "OCInit1 - %d\n", result);
         return EXIT_FAILURE;
     }
 
