@@ -146,9 +146,10 @@ bool Bridge::Start()
     OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
     if (result != OC_STACK_OK)
     {
-        LOG(LOG_ERR, "OCBindResourceTypeToResouurce() - %d", result);
+        LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
         return false;
     }
+    LOG(LOG_INFO, "di=%s", OCGetServerInstanceIDString());
 
     if (m_protocols & AJ)
     {
