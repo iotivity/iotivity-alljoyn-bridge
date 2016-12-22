@@ -87,6 +87,8 @@ class Bridge : private ajn::AboutListener
                 OCClientResponse *response);
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
+        OCStackResult CreateInterface(DiscoverContext *context, OCClientResponse *response);
+        OCStackApplicationResult GetNext(DiscoverContext *context, OCClientResponse *response);
 };
 
 #endif

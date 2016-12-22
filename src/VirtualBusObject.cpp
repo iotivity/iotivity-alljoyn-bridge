@@ -122,10 +122,14 @@ void VirtualBusObject::Observe()
         this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    bool multipleRts = m_ifaces.size() > 1;
     for (const ajn::InterfaceDescription *iface : m_ifaces)
     {
-        qcc::String uri = GetPath()
-                          + qcc::String("?rt=") + iface->GetName();
+        qcc::String uri = GetPath();
+        if (multipleRts)
+        {
+            uri += qcc::String("?rt=") + iface->GetName();
+        }
         ObserveContext *context = new ObserveContext(this, iface->GetName());
         OCCallbackData cbData;
         cbData.cb = VirtualBusObject::ObserveCB;
@@ -202,9 +206,12 @@ void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, 
         this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    qcc::String uri = GetPath()
-                      + qcc::String("?rt=") + msg->GetArg(0)->v_string.str
-                      + qcc::String("?") + msg->GetArg(1)->v_string.str;
+    bool multipleRts = m_ifaces.size() > 1;
+    qcc::String uri = GetPath();
+    if (multipleRts)
+    {
+        uri += qcc::String("?rt=") + msg->GetArg(0)->v_string.str;
+    }
     DoResource(OC_REST_GET, uri.c_str(), NULL, msg, &VirtualBusObject::GetPropCB);
 }
 
@@ -265,8 +272,12 @@ void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *memb
         this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    qcc::String uri = GetPath()
-                      + qcc::String("?rt=") + msg->GetArg(0)->v_string.str;
+    bool multipleRts = m_ifaces.size() > 1;
+    qcc::String uri = GetPath();
+    if (multipleRts)
+    {
+        uri += qcc::String("?rt=") + msg->GetArg(0)->v_string.str;
+    }
     DoResource(OC_REST_GET, uri.c_str(), NULL, msg, &VirtualBusObject::GetAllPropsCB);
 }
 

@@ -546,13 +546,22 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
          resource = resource->next)
     {
+        bool multipleRts = resource->types && resource->types->next;
         for (OCStringLL *type = resource->types; type; type = type->next)
         {
             if (!TranslateResourceType(type->value))
             {
                 continue;
             }
-            std::string uri = resource->uri + std::string("?rt=") + type->value;
+            std::string uri = resource->uri;
+            if (multipleRts)
+            {
+                uri += std::string("?rt=") + type->value;
+            }
+            else
+            {
+                uri += std::string("?rt=!") + type->value;
+            }
             context->m_uris.push_back(uri);
         }
     }
@@ -633,6 +642,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     OCCallbackData cbData;
     std::string uri;
     std::string path;
+    std::string rt;
     if (!response)
     {
         goto exit;
@@ -655,17 +665,31 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     uri = context->m_uris.front();
     path = uri.substr(0, uri.find("?"));
     context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
-
-    cbData.cb = Bridge::GetCB;
-    cbData.context = context;
-    cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
-    if (result != OC_STACK_OK)
+    rt = uri.substr(uri.find("rt=") + 3);
+    if (rt[0] == '!')
     {
-        LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-        goto exit;
+        uri = path;
+        rt = rt.substr(1);
     }
-    return OC_STACK_DELETE_TRANSACTION;
+    if (rt.find("oic.d.") == 0)
+    {
+        /* Don't need to issue a GET for device types */
+        thiz->CreateInterface(context, response);
+        return thiz->GetNext(context, response);
+    }
+    else
+    {
+        cbData.cb = Bridge::GetCB;
+        cbData.context = context;
+        cbData.cd = NULL;
+        result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
+            goto exit;
+        }
+        return OC_STACK_DELETE_TRANSACTION;
+    }
 exit:
     if (result != OC_STACK_OK)
     {
@@ -684,31 +708,44 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
-    OCStackResult result = OC_STACK_ERROR;
-    std::string rt;
-    std::string uri;
-    std::string path;
-    const ajn::InterfaceDescription *iface;
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
         LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_uris.front().c_str(),
             response, response ? response->payload : 0, response ? response->result : 0);
-        goto next;
     }
-    uri = context->m_uris.front();
-    rt = uri.substr(uri.find("rt=") + 3);
-    iface = context->m_bus->CreateInterface(rt.c_str(), response->payload);
+    else
+    {
+        thiz->CreateInterface(context, response);
+    }
+    return thiz->GetNext(context, response);
+}
+
+OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse *response)
+{
+    std::string uri = context->m_uris.front();
+    std::string rt = uri.substr(uri.find("rt=") + 3);
+    if (rt[0] == '!')
+    {
+        rt = rt.substr(1);
+    }
+    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(rt.c_str(), response->payload);
     if (!iface)
     {
-        goto next;
+        return OC_STACK_ERROR;
     }
     context->m_obj->AddInterface(iface);
+    return OC_STACK_OK;
+}
 
-next:
+OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientResponse *response)
+{
+    OCStackResult result = OC_STACK_ERROR;
+
     context->m_uris.pop_front();
     if (!context->m_uris.empty())
     {
-        uri = context->m_uris.front();
+        std::string uri = context->m_uris.front();
+        std::string path = uri.substr(0, uri.find("?"));
         if (uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
             QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
@@ -717,8 +754,12 @@ next:
                 delete context->m_obj;
                 context->m_obj = NULL;
             }
-            path = uri.substr(0, uri.find("?"));
             context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
+        }
+        std::string rt = uri.substr(uri.find("rt=") + 3);
+        if (rt[0] == '!')
+        {
+            uri = path;
         }
         OCCallbackData cbData;
         cbData.cb = Bridge::GetCB;
@@ -746,18 +787,18 @@ next:
             result = OC_STACK_ERROR;
             goto exit;
         }
-        thiz->m_virtualBusAttachments.push_back(context->m_bus);
+        m_virtualBusAttachments.push_back(context->m_bus);
         context->m_bus = NULL; /* context->m_bus now belongs to thiz */
-        thiz->m_presence.push_back(context->m_presence);
+        m_presence.push_back(context->m_presence);
         context->m_presence = NULL; /* context->m_presence now belongs to thiz */
         result = OC_STACK_OK;
-        thiz->m_discovered.erase(context);
+        m_discovered.erase(context);
         delete context;
     }
 exit:
     if (result != OC_STACK_OK)
     {
-        thiz->m_discovered.erase(context);
+        m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
