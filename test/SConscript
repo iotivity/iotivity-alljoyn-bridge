@@ -31,6 +31,9 @@ if env['TARGET_OS'] == 'linux':
                                         '${IOTIVITY_BASE}/extlibs/cjson/cJSON.c',
                                         '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cbortojson.c',
                                         '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty.c']),
-        env_octest.Program('ocserver', ['ocserver.cpp'])]
+        env_octest.Program('ocserver', ['ocserver.cpp',
+                                        '${IOTIVITY_BASE}/extlibs/cjson/cJSON.c',
+                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cbortojson.c',
+                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty.c'])]
 
     env.Install('#/${BUILD_DIR}/bin', test_bins)
