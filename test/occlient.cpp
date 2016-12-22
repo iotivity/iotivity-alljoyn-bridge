@@ -123,13 +123,14 @@ static void LogResponse(OCMethod method, OCClientResponse *response)
         case OC_REST_DISCOVER:
         case OC_REST_GET:
         case OC_REST_OBSERVE:
-            std::cout << "get";
+            std::cout << "GET";
             break;
         case OC_REST_POST:
-            std::cout << "post";
+            std::cout << "POST";
             break;
         default:
             std::cout << method;
+            break;
     }
     std::cout << " - " << response->result << std::endl;
 
@@ -316,7 +317,7 @@ int main(int, char **)
             while (token != tokens.end())
             {
                 std::string str = *token++;
-                if (str.find('=') != std::string::npos)
+                if (str != "{")
                 {
                     if (!query.empty())
                     {
