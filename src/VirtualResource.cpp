@@ -42,6 +42,7 @@ enum
 static bool TranslateInterface(const char *ifaceName)
 {
     return !(strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.About") == ifaceName ||
              strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
              strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
              strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
