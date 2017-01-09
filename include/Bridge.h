@@ -49,6 +49,7 @@ class Bridge : private ajn::AboutListener
             OC = (1 << 1),
         };
         Bridge(Protocol protocols);
+        Bridge(const char *uuid, const char *sender);
         ~Bridge();
 
         bool Start();
@@ -60,6 +61,7 @@ class Bridge : private ajn::AboutListener
 
         std::mutex m_mutex;
         Protocol m_protocols;
+        const char *m_sender;
         ajn::BusAttachment *m_bus;
         OCDoHandle m_discoverHandle;
         time_t m_discoverNextTick;

@@ -39,9 +39,15 @@ static bool TranslateResourceType(const char *type)
 }
 
 Bridge::Bridge(Protocol protocols)
-    : m_protocols(protocols), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+    : m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
     m_bus = new ajn::BusAttachment("Bridge", true);
+}
+
+Bridge::Bridge(const char *uuid, const char *sender)
+    : m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+{
+    m_bus = new ajn::BusAttachment(uuid, true);
 }
 
 Bridge::~Bridge()
@@ -137,17 +143,20 @@ bool Bridge::Start()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-    if (!handle)
+    if (!m_sender)
     {
-        LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-        return false;
-    }
-    OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-        return false;
+        OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+        if (!handle)
+        {
+            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            return false;
+        }
+        OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+            return false;
+        }
     }
     LOG(LOG_INFO, "di=%s", OCGetServerInstanceIDString());
 
@@ -201,10 +210,15 @@ bool Bridge::Process()
         }
         if (!wasConnected && m_bus->IsConnected())
         {
-            QStatus status = m_bus->WhoImplements(NULL, 0);
+            std::string matchRule = "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
+            if (m_sender)
+            {
+                matchRule += ",sender='" + std::string(m_sender) + "'";
+            }
+            QStatus status = m_bus->AddMatch(matchRule.c_str());
             if (status != ER_OK)
             {
-                LOG(LOG_ERR, "WhoImplements - %s", QCC_StatusText(status));
+                LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
             }
         }
     }
@@ -285,14 +299,11 @@ struct AnnouncedContext
 void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port,
                        const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
 {
-    (void) aboutDataArg;
-    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u", this, name, version, port);
-
-    m_mutex.lock();
     QStatus status;
     AnnouncedContext *context;
     ajn::SessionOpts opts;
 
+    m_mutex.lock();
     /* Ignore Announce from self */
     for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
     {
@@ -301,6 +312,27 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
             m_mutex.unlock();
             return;
         }
+    }
+
+    ajn::AboutData aboutData(aboutDataArg);
+    char *deviceId;
+    aboutData.GetDeviceId(&deviceId);
+    uint8_t *appId;
+    size_t n;
+    aboutData.GetAppId(&appId, &n);
+    OCUUIdentity id;
+    DeriveUniqueId(&id, deviceId, appId, n);
+    char piid[UUID_IDENTITY_SIZE * 2 + 5];
+    snprintf(piid, UUID_IDENTITY_SIZE * 2 + 5,
+             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
+             id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
+
+    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piid);
+    if (!m_sender)
+    {
+        m_mutex.unlock();
+        return;
     }
 
     /* Check if we've seen this Announce before */

@@ -26,14 +26,17 @@
 #include "octypes.h"
 #include <stdint.h>
 
+/** Protocol independent indentifier.*/
+#define OC_RSRVD_PROTOCOL_INDEPENDENT_ID "piid"
+
 /** Device software version.*/
-#define OC_RSRVD_SOFTWARE_VERSION       "sv"
+#define OC_RSRVD_SOFTWARE_VERSION        "sv"
 
 /** Device manufacture name. */
-#define OC_RSRVD_DEVICE_MFG_NAME        "dmn"
+#define OC_RSRVD_DEVICE_MFG_NAME         "dmn"
 
 /** Device model number.*/
-#define OC_RSRVD_DEVICE_MODEL_NUM       "dmno"
+#define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
 
 #define LOG_ERR         3
 #define LOG_INFO        6
@@ -50,11 +53,18 @@ void LogWriteln(
 #define LOG(severity, fmt, ...)                                         \
     LogWriteln(__FILE__, __FUNCTION__, __LINE__, severity, fmt, ##__VA_ARGS__)
 
+extern std::string gRD;
+
+void DeriveUniqueId(OCUUIdentity *id, const char *deviceId,
+                    uint8_t *appId, size_t n);
+
 const char *GetServerInstanceIDString();
 OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
                                        ajn::AboutData &aboutData);
 OCStackResult StartPresence();
 OCStackResult StopPresence();
+
+OCStackResult RDPublish();
 
 OCStackResult CreateResource(const char *uri, const char *typeName, const char *interfaceName,
                              OCEntityHandler entityHandler, void *callbackParam,

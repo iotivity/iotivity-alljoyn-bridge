@@ -56,7 +56,7 @@ if env.get('VERBOSE') == False:
 env['TARGET_OS'] = platform.system().lower()
 
 # these must agree with options used in building IoTivity
-env['CPPDEFINES'] = ['ROUTING_EP']
+env['CPPDEFINES'] = ['ROUTING_EP', 'RD_SERVER', 'RD_CLIENT']
 
 if env['TARGET_OS'] == 'linux':
 
@@ -124,6 +124,7 @@ iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_string/include',
                                '${IOTIVITY_BASE}/resource/c_common',
                                '${IOTIVITY_BASE}/resource/csdk/logger/include',
+                               '${IOTIVITY_BASE}/resource/csdk/resource-directory/include',
                                '${IOTIVITY_BASE}/resource/csdk/stack/include',
                                '${IOTIVITY_BASE}/resource/include',
                                '${IOTIVITY_BASE}/resource/oc_logger/include']

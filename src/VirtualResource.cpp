@@ -266,6 +266,11 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
     {
         LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s",
             this, GetPath().c_str());
+        result = RDPublish();
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "RDPublish - %d", result);
+        }
     }
 }
 
