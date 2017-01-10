@@ -93,6 +93,19 @@ static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
     return OC_STACK_DELETE_TRANSACTION;
 }
 
+static void AnnouncedCB(const char *uuid, const char *sender)
+{
+    printf("exec --uuid %s --sender %s --rd %s\n",
+           uuid, sender, OCGetServerInstanceIDString());
+    fflush(stdout);
+}
+
+static void SessionLostCB()
+{
+    LOG(LOG_INFO, "SessionLostCB");
+    sQuitFlag = true;
+}
+
 int main(int argc, char **argv)
 {
     int protocols = 0;
@@ -199,10 +212,12 @@ int main(int argc, char **argv)
     if (sUUID && sSender)
     {
         bridge = new Bridge(sUUID, sSender);
+        bridge->SetSessionLostCB(SessionLostCB);
     }
     else
     {
         bridge = new Bridge((Bridge::Protocol) protocols);
+        bridge->SetAnnouncedCB(AnnouncedCB);
     }
     if (!bridge->Start())
     {

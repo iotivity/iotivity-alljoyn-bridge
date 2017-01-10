@@ -39,13 +39,15 @@ static bool TranslateResourceType(const char *type)
 }
 
 Bridge::Bridge(Protocol protocols)
-    : m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+    : m_announcedCb(NULL), m_sessionLostCb(NULL),
+      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
     m_bus = new ajn::BusAttachment("Bridge", true);
 }
 
 Bridge::Bridge(const char *uuid, const char *sender)
-    : m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+    : m_announcedCb(NULL), m_sessionLostCb(NULL),
+      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
     m_bus = new ajn::BusAttachment(uuid, true);
 }
@@ -332,6 +334,10 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
     if (!m_sender)
     {
         m_mutex.unlock();
+        if (m_announcedCb)
+        {
+            m_announcedCb(piid, name);
+        }
         return;
     }
 
@@ -508,6 +514,11 @@ void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::Session
             Destroy(device->GetName().c_str());
             break;
         }
+    }
+
+    if (m_sessionLostCb)
+    {
+        m_sessionLostCb();
     }
 }
 

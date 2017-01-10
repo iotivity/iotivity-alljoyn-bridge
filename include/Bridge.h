@@ -52,6 +52,11 @@ class Bridge : private ajn::AboutListener
         Bridge(const char *uuid, const char *sender);
         ~Bridge();
 
+        typedef void (*AnnouncedCB)(const char *uuid, const char *sender);
+        void SetAnnouncedCB(AnnouncedCB cb) { m_announcedCb = cb; }
+        typedef void (*SessionLostCB)();
+        void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
+
         bool Start();
         bool Stop();
         bool Process();
@@ -59,6 +64,8 @@ class Bridge : private ajn::AboutListener
     private:
         static const time_t DISCOVER_PERIOD_SECS = 5;
 
+        AnnouncedCB m_announcedCb;
+        SessionLostCB m_sessionLostCb;
         std::mutex m_mutex;
         Protocol m_protocols;
         const char *m_sender;

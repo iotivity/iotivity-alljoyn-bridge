@@ -44,7 +44,7 @@ void LogWriteln(
     ...
 )
 {
-    static FILE *fps[] = { NULL, NULL, NULL, stderr, NULL, NULL, stdout };
+    static FILE *fps[] = { NULL, NULL, NULL, stderr, NULL, NULL, stderr };
     static const char *levels[] = { NULL, NULL, NULL, "ERR ", NULL, NULL, "INFO" };
 
     const char *basename = strrchr(file, '/');
@@ -58,9 +58,10 @@ void LogWriteln(
     }
     va_list ap;
     va_start(ap, fmt);
-    fprintf(fps[severity], "%s %s:%d::%s - ", levels[severity], basename, line, function);
+    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", getpid(), levels[severity], basename, line, function);
     vfprintf(fps[severity], fmt, ap);
     fprintf(fps[severity], "\n");
+    fflush(fps[severity]);
     va_end(ap);
 }
 
