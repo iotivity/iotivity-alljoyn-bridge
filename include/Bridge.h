@@ -48,8 +48,8 @@ class Bridge : private ajn::AboutListener
             AJ = (1 << 0),
             OC = (1 << 1),
         };
-        Bridge(Protocol protocols);
-        Bridge(const char *uuid, const char *sender);
+        Bridge(const char *name, Protocol protocols);
+        Bridge(const char *name, const char *uuid, const char *sender);
         ~Bridge();
 
         typedef void (*AnnouncedCB)(const char *uuid, const char *sender);

@@ -30,6 +30,7 @@
 #include "Plugin.h"
 
 static volatile sig_atomic_t sQuitFlag = false;
+static const char *gPSPrefix = "AllJoynBridge";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
 static const char *sRD = NULL;
@@ -42,14 +43,14 @@ static void SigIntCB(int sig)
 
 static FILE *PSOpenCB(const char *defaultPath, const char *mode)
 {
-    std::string path;
+    std::string path = gPSPrefix;
     if (sUUID)
     {
-        path = std::string(sUUID) + ".dat";
+        path += std::string(sUUID) + ".dat";
     }
     else
     {
-        path = defaultPath;
+        path += defaultPath;
     }
     return fopen(path.c_str(), mode);
 }
@@ -95,8 +96,8 @@ static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
 
 static void AnnouncedCB(const char *uuid, const char *sender)
 {
-    printf("exec --uuid %s --sender %s --rd %s\n",
-           uuid, sender, OCGetServerInstanceIDString());
+    printf("exec --ps %s --uuid %s --sender %s --rd %s\n",
+           gPSPrefix, uuid, sender, OCGetServerInstanceIDString());
     fflush(stdout);
 }
 
@@ -113,7 +114,11 @@ int main(int argc, char **argv)
     {
         for (int i = 1; i < argc; ++i)
         {
-            if (!strcmp(argv[i], "--aj"))
+            if (!strcmp(argv[i], "--ps") && (i < (argc - 1)))
+            {
+                gPSPrefix = argv[++i];
+            }
+            else if (!strcmp(argv[i], "--aj"))
             {
                 protocols |= Bridge::AJ;
             }
@@ -161,6 +166,13 @@ int main(int argc, char **argv)
     if (result != OC_STACK_OK)
     {
         fprintf(stderr, "OCRegisterPersistentStorageHandler - %d\n", result);
+        return EXIT_FAILURE;
+    }
+    std::string dbFilename = std::string(gPSPrefix) + ".db";
+    result = OCRDDatabaseSetStorageFilename(dbFilename.c_str());
+    if (result != OC_STACK_OK)
+    {
+        fprintf(stderr, "OCRDDatabaseSetStorageFilename - %d\n", result);
         return EXIT_FAILURE;
     }
     result = OCInit1(OC_CLIENT_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS);
@@ -211,12 +223,12 @@ int main(int argc, char **argv)
     Bridge *bridge = NULL;
     if (sUUID && sSender)
     {
-        bridge = new Bridge(sUUID, sSender);
+        bridge = new Bridge(gPSPrefix, sUUID, sSender);
         bridge->SetSessionLostCB(SessionLostCB);
     }
     else
     {
-        bridge = new Bridge((Bridge::Protocol) protocols);
+        bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetAnnouncedCB(AnnouncedCB);
     }
     if (!bridge->Start())

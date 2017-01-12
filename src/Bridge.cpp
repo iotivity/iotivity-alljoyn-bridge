@@ -38,18 +38,19 @@ static bool TranslateResourceType(const char *type)
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0);
 }
 
-Bridge::Bridge(Protocol protocols)
+Bridge::Bridge(const char *name, Protocol protocols)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
       m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
-    m_bus = new ajn::BusAttachment("Bridge", true);
+    m_bus = new ajn::BusAttachment(name, true);
 }
 
-Bridge::Bridge(const char *uuid, const char *sender)
+Bridge::Bridge(const char *name, const char *uuid, const char *sender)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
       m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
 {
-    m_bus = new ajn::BusAttachment(uuid, true);
+    std::string nm = std::string(name) + uuid;
+    m_bus = new ajn::BusAttachment(nm.c_str(), true);
 }
 
 Bridge::~Bridge()

@@ -66,7 +66,15 @@ int main(int argc, char **argv)
         }
         close(pipefd[1]);
         close(pipefd[0]);
-        execl(path, name, (char *)NULL);
+        char *args[argc + 1];
+        args[0] = path;
+        args[1] = name;
+        for (int i = 2; i < argc; ++i)
+        {
+            args[i] = argv[i];
+        }
+        args[argc] = NULL;
+        execv(path, args);
         perror("execl");
         return EXIT_FAILURE;
     }
@@ -96,12 +104,12 @@ int main(int argc, char **argv)
 
             if (!strncmp(line, "exec", strlen("exec")))
             {
-                char *args[9];
+                char *args[11];
                 args[0] = path;
                 args[1] = name;
-                sscanf(line, "exec %ms %ms %ms %ms %ms %ms",
-                       &args[2], &args[3], &args[4], &args[5], &args[6], &args[7]);
-                args[8] = NULL;
+                sscanf(line, "exec %ms %ms %ms %ms %ms %ms %ms %ms",
+                       &args[2], &args[3], &args[4], &args[5], &args[6], &args[7], &args[8], &args[9]);
+                args[10] = NULL;
                 pid_t pid = fork();
                 if (pid < 0)
                 {
@@ -114,7 +122,7 @@ int main(int argc, char **argv)
                     perror("execv");
                     return EXIT_FAILURE;
                 }
-                for (int i = 2; i < 8; ++i)
+                for (int i = 2; i < 10; ++i)
                 {
                     free(args[i]);
                 }
