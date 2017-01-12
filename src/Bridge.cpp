@@ -531,6 +531,7 @@ void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::Session
 struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
+    std::string m_host;
     OCPresence *m_presence;
     VirtualBusAttachment *m_bus;
     std::deque<std::string> m_uris;
@@ -549,86 +550,110 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
-    DiscoverContext *context = NULL;
-    OCCallbackData cbData;
+    if (!response || response->result != OC_STACK_OK)
+    {
+        return OC_STACK_KEEP_TRANSACTION;
+    }
     OCDiscoveryPayload *payload;
-    if (!response || !response->payload || response->result != OC_STACK_OK)
+    for (payload = (OCDiscoveryPayload *) response->payload; payload; payload = payload->next)
     {
-        goto exit;
-    }
-    payload = (OCDiscoveryPayload *) response->payload;
-    if (!strcmp(payload->sid, GetServerInstanceIDString()))
-    {
-        /* Ignore responses from self */
-        goto exit;
-    }
+        DiscoverContext *context = NULL;
+        OCCallbackData cbData;
+        char targetUri[MAX_URI_LENGTH] = { 0 };
+        std::deque<std::string> uris;
 
-    /* Check if we've seen this response before */
-    for (std::vector<VirtualBusAttachment *>::iterator it = thiz->m_virtualBusAttachments.begin();
-         it != thiz->m_virtualBusAttachments.end(); ++it)
-    {
-        if ((*it)->GetDi() == payload->sid)
+        if (!strcmp(payload->sid, GetServerInstanceIDString()))
         {
-            goto exit;
+            /* Ignore responses from self */
+            goto next;
         }
-    }
-    for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
-         it != thiz->m_discovered.end(); ++it)
-    {
-        if ((*it)->m_bus->GetDi() == payload->sid)
-        {
-            goto exit;
-        }
-    }
 
-    context = new DiscoverContext(thiz);
-    context->m_presence = new OCPresence(&response->devAddr, payload->sid);
-    if (!context->m_presence)
-    {
-        goto exit;
-    }
-    context->m_bus = VirtualBusAttachment::Create(payload->sid);
-    if (!context->m_bus)
-    {
-        goto exit;
-    }
-    for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-         resource = resource->next)
-    {
-        bool multipleRts = resource->types && resource->types->next;
-        for (OCStringLL *type = resource->types; type; type = type->next)
+        /* Check if we've seen this response before */
+        for (std::vector<VirtualBusAttachment *>::iterator it = thiz->m_virtualBusAttachments.begin();
+             it != thiz->m_virtualBusAttachments.end(); ++it)
         {
-            if (!TranslateResourceType(type->value))
+            if ((*it)->GetDi() == payload->sid)
             {
-                continue;
+                goto next;
             }
-            std::string uri = resource->uri;
-            if (multipleRts)
-            {
-                uri += std::string("?rt=") + type->value;
-            }
-            else
-            {
-                uri += std::string("?rt=!") + type->value;
-            }
-            context->m_uris.push_back(uri);
         }
-    }
-    thiz->m_discovered.insert(context);
+        for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
+             it != thiz->m_discovered.end(); ++it)
+        {
+            if ((*it)->m_bus->GetDi() == payload->sid)
+            {
+                goto next;
+            }
+        }
 
-    cbData.cb = Bridge::GetPlatformCB;
-    cbData.context = context;
-    cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-    }
-exit:
-    if (result != OC_STACK_OK)
-    {
-        thiz->m_discovered.erase(context);
-        delete context;
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            bool multipleRts = resource->types && resource->types->next;
+            for (OCStringLL *type = resource->types; type; type = type->next)
+            {
+                if (!TranslateResourceType(type->value))
+                {
+                    continue;
+                }
+                std::string uri = resource->uri;
+                if (multipleRts)
+                {
+                    uri += std::string("?rt=") + type->value;
+                }
+                else
+                {
+                    uri += std::string("?rt=!") + type->value;
+                }
+                uris.push_back(uri);
+            }
+        }
+        if (uris.empty())
+        {
+            continue;
+        }
+
+        context = new DiscoverContext(thiz);
+        if (payload->baseURI)
+        {
+            context->m_host = payload->baseURI;
+        }
+        else
+        {
+            char host[MAX_URI_LENGTH] = { 0 };
+            snprintf(host, MAX_URI_LENGTH, "%s:%d", response->devAddr.addr, response->devAddr.port);
+            context->m_host = host;
+        }
+        context->m_uris = uris;
+        // TODO this will check presence of RD, not bridged device:
+        context->m_presence = new OCPresence(&response->devAddr, payload->sid);
+        if (!context->m_presence)
+        {
+            goto next;
+        }
+        context->m_bus = VirtualBusAttachment::Create(payload->sid);
+        if (!context->m_bus)
+        {
+            goto next;
+        }
+        thiz->m_discovered.insert(context);
+
+        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_PLATFORM_URI);
+        cbData.cb = Bridge::GetPlatformCB;
+        cbData.context = context;
+        cbData.cd = NULL;
+        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
+        }
+    next:
+        if (result != OC_STACK_OK)
+        {
+            thiz->m_discovered.erase(context);
+            delete context;
+            context = NULL;
+        }
     }
     return OC_STACK_KEEP_TRANSACTION;
 }
@@ -643,6 +668,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
+    char targetUri[MAX_URI_LENGTH] = { 0 };
     OCCallbackData cbData;
     OCRepPayload *payload;
     if (!response)
@@ -660,10 +686,11 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
+    snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_DEVICE_URI);
     cbData.cb = Bridge::GetDeviceCB;
     cbData.context = context;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_DEVICE_URI, &response->devAddr, NULL, &cbData);
+    result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
     if (result != OC_STACK_OK)
     {
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -713,7 +740,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     }
     uri = context->m_uris.front();
     path = uri.substr(0, uri.find("?"));
-    context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
+    context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
     rt = uri.substr(uri.find("rt=") + 3);
     if (rt[0] == '!')
     {
@@ -728,10 +755,12 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     }
     else
     {
+        char targetUri[MAX_URI_LENGTH] = { 0 };
+        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
         cbData.cb = Bridge::GetCB;
         cbData.context = context;
         cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
+        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -788,6 +817,7 @@ OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse
 
 OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientResponse *response)
 {
+    (void) response;
     OCStackResult result = OC_STACK_ERROR;
 
     context->m_uris.pop_front();
@@ -803,18 +833,20 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
                 delete context->m_obj;
                 context->m_obj = NULL;
             }
-            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
+            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
         }
         std::string rt = uri.substr(uri.find("rt=") + 3);
         if (rt[0] == '!')
         {
             uri = path;
         }
+        char targetUri[MAX_URI_LENGTH] = { 0 };
+        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
         OCCallbackData cbData;
         cbData.cb = Bridge::GetCB;
         cbData.context = context;
         cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
+        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);

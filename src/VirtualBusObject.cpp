@@ -59,11 +59,11 @@ struct VirtualBusObject::DoResourceContext
         OCDoHandle m_handle;
 };
 
-VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, const char *uri, OCDevAddr *devAddr)
-    : ajn::BusObject(uri), m_bus(bus), m_devAddr(*devAddr), m_pending(0)
+VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, const char *uri, const char *host)
+    : ajn::BusObject(uri), m_bus(bus), m_host(host), m_pending(0)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,uri=%s,devAddr=%p",
-        this, bus, uri, devAddr);
+    LOG(LOG_INFO, "[%p] bus=%p,uri=%s,host=%s",
+        this, bus, uri, host);
 }
 
 VirtualBusObject::~VirtualBusObject()
@@ -125,7 +125,7 @@ void VirtualBusObject::Observe()
     bool multipleRts = m_ifaces.size() > 1;
     for (const ajn::InterfaceDescription *iface : m_ifaces)
     {
-        qcc::String uri = GetPath();
+        qcc::String uri = m_host + GetPath();
         if (multipleRts)
         {
             uri += qcc::String("?rt=") + iface->GetName();
@@ -135,9 +135,8 @@ void VirtualBusObject::Observe()
         cbData.cb = VirtualBusObject::ObserveCB;
         cbData.context = context;
         cbData.cd = ObserveContext::Deleter;
-        OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(), &m_devAddr,
-                                            NULL,
-                                            &cbData);
+        OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(),
+                                            NULL, NULL, &cbData);
         if (result == OC_STACK_OK)
         {
             m_observes.insert(context);
@@ -308,11 +307,13 @@ void VirtualBusObject::DoResource(OCMethod method, const char *uri, OCRepPayload
         this, method, uri, payload);
 
     DoResourceContext *context = new DoResourceContext(this, cb, msg);
+    char targetUri[MAX_URI_LENGTH] = { 0 };
+    snprintf(targetUri, MAX_URI_LENGTH, "%s%s", m_host.c_str(), uri);
     OCCallbackData cbData;
     cbData.cb = VirtualBusObject::DoResourceCB;
     cbData.context = context;
     cbData.cd = NULL;
-    OCStackResult result = ::DoResource(&context->m_handle, method, uri, &m_devAddr,
+    OCStackResult result = ::DoResource(&context->m_handle, method, uri, NULL,
                                         (OCPayload *) payload,
                                         &cbData);
     if (result == OC_STACK_OK)
