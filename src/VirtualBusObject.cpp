@@ -313,7 +313,7 @@ void VirtualBusObject::DoResource(OCMethod method, const char *uri, OCRepPayload
     cbData.cb = VirtualBusObject::DoResourceCB;
     cbData.context = context;
     cbData.cd = NULL;
-    OCStackResult result = ::DoResource(&context->m_handle, method, uri, NULL,
+    OCStackResult result = ::DoResource(&context->m_handle, method, targetUri, NULL,
                                         (OCPayload *) payload,
                                         &cbData);
     if (result == OC_STACK_OK)
