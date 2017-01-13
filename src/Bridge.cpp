@@ -20,7 +20,9 @@
 
 #include "Bridge.h"
 
+#include "ocpayload.h"
 #include "ocstack.h"
+#include "oic_malloc.h"
 #include <alljoyn/AllJoynStd.h>
 #include "Plugin.h"
 #include "Presence.h"
@@ -531,14 +533,14 @@ void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::Session
 struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
+    std::string m_di;
     std::string m_host;
-    OCPresence *m_presence;
     VirtualBusAttachment *m_bus;
     std::deque<std::string> m_uris;
     VirtualBusObject *m_obj;
-    DiscoverContext(Bridge *bridge) : m_bridge(bridge), m_presence(NULL), m_bus(NULL),
+    DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
         m_obj(NULL) { }
-    ~DiscoverContext() { delete m_obj; delete m_bus; delete m_presence; }
+    ~DiscoverContext() { delete m_obj; delete m_bus; }
 };
 
 OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
@@ -580,7 +582,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
              it != thiz->m_discovered.end(); ++it)
         {
-            if ((*it)->m_bus->GetDi() == payload->sid)
+            if ((*it)->m_di == payload->sid)
             {
                 goto next;
             }
@@ -613,7 +615,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             continue;
         }
 
-        context = new DiscoverContext(thiz);
+        context = new DiscoverContext(thiz, payload->sid);
         if (payload->baseURI)
         {
             context->m_host = payload->baseURI;
@@ -625,21 +627,10 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             context->m_host = host;
         }
         context->m_uris = uris;
-        // TODO this will check presence of RD, not bridged device:
-        context->m_presence = new OCPresence(&response->devAddr, payload->sid);
-        if (!context->m_presence)
-        {
-            goto next;
-        }
-        context->m_bus = VirtualBusAttachment::Create(payload->sid);
-        if (!context->m_bus)
-        {
-            goto next;
-        }
         thiz->m_discovered.insert(context);
 
-        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_PLATFORM_URI);
-        cbData.cb = Bridge::GetPlatformCB;
+        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_DEVICE_URI);
+        cbData.cb = Bridge::GetDeviceCB;
         cbData.context = context;
         cbData.cd = NULL;
         result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
@@ -658,7 +649,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     return OC_STACK_KEEP_TRANSACTION;
 }
 
-OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
+OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
     (void) handle;
@@ -671,23 +662,30 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     char targetUri[MAX_URI_LENGTH] = { 0 };
     OCCallbackData cbData;
     OCRepPayload *payload;
+    char *piid = NULL;
     if (!response)
     {
         goto exit;
     }
     if (response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_INFO, "[%p] Missing /oic/p", thiz);
+        LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
     }
     if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
-        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", thiz,
+        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", thiz,
             response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
-    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_DEVICE_URI);
-    cbData.cb = Bridge::GetDeviceCB;
+    OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &piid);
+    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), piid);
+    if (!context->m_bus)
+    {
+        goto exit;
+    }
+    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
+    snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_PLATFORM_URI);
+    cbData.cb = Bridge::GetPlatformCB;
     cbData.context = context;
     cbData.cd = NULL;
     result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
@@ -696,6 +694,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
     }
 exit:
+    OICFree(piid);
     if (result != OC_STACK_OK)
     {
         thiz->m_discovered.erase(context);
@@ -704,7 +703,7 @@ exit:
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
+OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
     (void) handle;
@@ -725,15 +724,15 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     }
     if (response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
+        LOG(LOG_INFO, "[%p] Missing /oic/p", thiz);
     }
     if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
-        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", thiz,
+        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", thiz,
             response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
-    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
+    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
     if (context->m_uris.empty())
     {
         goto exit;
@@ -856,6 +855,13 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
     else
     {
         /* Done */
+        OCPresence *presence = new OCPresence(&response->devAddr, context->m_bus->GetDi().c_str());
+        if (!presence)
+        {
+            result = OC_STACK_ERROR;
+            goto exit;
+        }
+        m_presence.push_back(presence);
         QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
         if (status != ER_OK)
         {
@@ -870,8 +876,6 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
         }
         m_virtualBusAttachments.push_back(context->m_bus);
         context->m_bus = NULL; /* context->m_bus now belongs to thiz */
-        m_presence.push_back(context->m_presence);
-        context->m_presence = NULL; /* context->m_presence now belongs to thiz */
         result = OC_STACK_OK;
         m_discovered.erase(context);
         delete context;
