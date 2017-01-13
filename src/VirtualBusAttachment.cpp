@@ -151,26 +151,32 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_ID, &value))
         {
             uint8_t appId[16];
-            ToAppId((char *)value, appId);
+            ToAppId(value, appId);
             m_aboutData.SetAppId(appId, 16);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MFG_NAME, &value))
         {
-            m_aboutData.SetManufacturer((char *)value);
+            m_aboutData.SetManufacturer(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
         {
-            m_aboutData.SetModelNumber((char *)value);
+            m_aboutData.SetModelNumber(value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
+        {
+            m_aboutData.SetDateOfManufacture(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_SOFTWARE_VERSION, &value))
         {
-            m_aboutData.SetDateOfManufacture((char *)value);
+            m_aboutData.SetSoftwareVersion(value);
             OICFree(value);
             value = NULL;
         }
@@ -179,25 +185,25 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
     {
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_ID, &value))
         {
-            m_aboutData.SetDeviceId((char *)value);
+            m_aboutData.SetDeviceId(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
         {
-            m_aboutData.SetDateOfManufacture((char *)value);
+            m_aboutData.SetDateOfManufacture(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_HARDWARE_VERSION, &value))
         {
-            m_aboutData.SetHardwareVersion((char *)value);
+            m_aboutData.SetHardwareVersion(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_SUPPORT_URL, &value))
         {
-            m_aboutData.SetSupportUrl((char *)value);
+            m_aboutData.SetSupportUrl(value);
             OICFree(value);
             value = NULL;
         }

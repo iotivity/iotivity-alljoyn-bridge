@@ -223,6 +223,15 @@ OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescri
                     &pi[0], &pi[1], &pi[2], &pi[3], &pi[4], &pi[5], &pi[6], &pi[7],
                     &pi[8], &pi[9], &pi[10], &pi[11], &pi[12], &pi[13], &pi[14], &pi[15]) == 16)
     {
+        char uuid[UUID_IDENTITY_SIZE * 2 + 5];
+        snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
+                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                 pi[0], pi[1], pi[2], pi[3], pi[4], pi[5], pi[6], pi[7],
+                 pi[8], pi[9], pi[10], pi[11], pi[12], pi[13], pi[14], pi[15]);
+        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
+    }
+    else
+    {
         DeriveUniqueId(&id, deviceId, NULL, 0);
         char uuid[UUID_IDENTITY_SIZE * 2 + 5];
         snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
@@ -230,10 +239,6 @@ OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescri
                  id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
                  id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
-    }
-    else
-    {
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, piid);
     }
     value = NULL;
     aboutData.GetManufacturer(&value);
