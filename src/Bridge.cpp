@@ -313,17 +313,6 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
     AnnouncedContext *context;
     ajn::SessionOpts opts;
 
-    m_mutex.lock();
-    /* Ignore Announce from self */
-    for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
-    {
-        if (busAttachment->GetUniqueName() == name)
-        {
-            m_mutex.unlock();
-            return;
-        }
-    }
-
     ajn::AboutData aboutData(aboutDataArg);
     char *deviceId;
     aboutData.GetDeviceId(&deviceId);
@@ -339,6 +328,28 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
              id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
 
     LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piid);
+
+    ajn::MsgArg *value;
+    bool isVirtual;
+    if (aboutData.GetField("com.intel.Virtual", value) == ER_OK &&
+        value->Get("b", &isVirtual) == ER_OK &&
+        isVirtual)
+    {
+        LOG(LOG_INFO, "[%p] Ignoring virtual application", this);
+        return;
+    }
+
+    m_mutex.lock();
+    /* Ignore Announce from self */
+    for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
+    {
+        if (busAttachment->GetUniqueName() == name)
+        {
+            m_mutex.unlock();
+            return;
+        }
+    }
+
     if (!m_sender)
     {
         m_mutex.unlock();
@@ -662,7 +673,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     char targetUri[MAX_URI_LENGTH] = { 0 };
     OCCallbackData cbData;
     OCRepPayload *payload;
-    char *piid = NULL;
+    char *value = NULL;
     if (!response)
     {
         goto exit;
@@ -677,8 +688,17 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
             response->payload->type);
     }
     payload = (OCRepPayload *) response->payload;
-    OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &piid);
-    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), piid);
+    if (OCRepPayloadGetPropString(payload, "x.com.intel.virtual", &value))
+    {
+        LOG(LOG_INFO, "[%p] Ignoring virtual resource", thiz);
+        OICFree(value);
+        value = NULL;
+        goto exit;
+    }
+    OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value);
+    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value);
+    OICFree(value);
+    value = NULL;
     if (!context->m_bus)
     {
         goto exit;
@@ -694,7 +714,6 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
     }
 exit:
-    OICFree(piid);
     if (result != OC_STACK_OK)
     {
         thiz->m_discovered.erase(context);

@@ -116,6 +116,9 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid)
     ToAppId(di, appId);
     m_aboutData.SetAppId(appId, 16);
     m_aboutData.SetAppName("");
+
+    ajn::MsgArg value("b", true);
+    m_aboutData.SetField("com.intel.Virtual", value);
 }
 
 VirtualBusAttachment::~VirtualBusAttachment()

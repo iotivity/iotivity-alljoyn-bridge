@@ -211,6 +211,7 @@ OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescri
     value = NULL;
     aboutData.GetModelNumber(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, value);
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, "x.com.intel.virtual", "true");
 
     unsigned int pi[16];
     if (sscanf(deviceId, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",

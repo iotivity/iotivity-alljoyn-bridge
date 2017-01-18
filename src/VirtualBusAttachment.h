@@ -47,10 +47,19 @@ class VirtualBusAttachment : public ajn::BusAttachment
         void Stop();
 
     private:
+        class AboutData : public ajn::AboutData
+        {
+        public:
+            AboutData()
+            {
+                SetNewFieldDetails("com.intel.Virtual", ajn::AboutData::ANNOUNCED, "b");
+            }
+        };
+
         std::string m_di;
         std::string m_piid;
         std::mutex m_mutex;
-        ajn::AboutData m_aboutData;
+        AboutData m_aboutData;
         ajn::SessionPort m_port;
         uint32_t m_numSessions;
         std::vector<VirtualBusObject *> m_virtualBusObjects;
