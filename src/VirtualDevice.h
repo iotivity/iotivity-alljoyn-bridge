@@ -44,6 +44,9 @@ class VirtualDevice
         std::string m_name;
         ajn::SessionId m_sessionId;
         ajn::AboutData m_aboutData;
+
+        void SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
+                                      ajn::AboutData &aboutData);
 };
 
 #endif

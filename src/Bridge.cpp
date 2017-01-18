@@ -700,7 +700,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         goto exit;
     }
     OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value);
-    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value);
+    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value, thiz->m_isGoldenUnit);
     OICFree(value);
     value = NULL;
     if (!context->m_bus)

@@ -272,6 +272,10 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
             LOG(LOG_ERR, "RDPublish - %d", result);
         }
     }
+    else
+    {
+        LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
+    }
 }
 
 static std::map<std::string, std::string> ParseQuery(const char *query)

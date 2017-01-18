@@ -56,6 +56,7 @@ class Bridge : private ajn::AboutListener
         void SetAnnouncedCB(AnnouncedCB cb) { m_announcedCb = cb; }
         typedef void (*SessionLostCB)();
         void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
+        void SetGoldenUnit(bool isGoldenUnit) { m_isGoldenUnit = isGoldenUnit; }
         void SetWhitelistAddress(const char *addr) { if (addr) m_whitelistAddr = addr; }
 
         bool Start();
@@ -67,6 +68,7 @@ class Bridge : private ajn::AboutListener
 
         AnnouncedCB m_announcedCb;
         SessionLostCB m_sessionLostCb;
+        bool m_isGoldenUnit;
         std::string m_whitelistAddr;
 
         std::mutex m_mutex;

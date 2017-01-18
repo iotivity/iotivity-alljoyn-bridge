@@ -36,7 +36,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
     , private ajn::SessionListener
 {
     public:
-        static VirtualBusAttachment *Create(const char *di, const char *piid);
+        static VirtualBusAttachment *Create(const char *di, const char *piid, bool isGoldenUnit = false);
         virtual ~VirtualBusAttachment();
         std::string GetDi() { return m_di; }
         std::string GetProtocolIndependentId() { return m_piid; }
@@ -65,7 +65,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         std::vector<VirtualBusObject *> m_virtualBusObjects;
         ajn::AboutObj *m_aboutObj;
 
-        VirtualBusAttachment(const char *di, const char *piid);
+        VirtualBusAttachment(const char *di, const char *piid, bool isGoldenUnit);
         virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
                                          const ajn::SessionOpts &opts);
         virtual void SessionJoined(ajn::SessionPort port, ajn::SessionId id, const char *name);
