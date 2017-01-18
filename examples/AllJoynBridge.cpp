@@ -247,6 +247,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "OCProcess - %d\n", result);
             return EXIT_FAILURE;
         }
+        usleep(10 * 1000);
     }
 
     bridge->Stop();
