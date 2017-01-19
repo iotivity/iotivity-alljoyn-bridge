@@ -696,10 +696,11 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     {
         LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
     }
-    if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+    if (response->payload && response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
         LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", thiz,
             response->payload->type);
+        goto exit;
     }
     payload = (OCRepPayload *) response->payload;
     if (OCRepPayloadGetPropString(payload, "x.com.intel.virtual", &value))
@@ -759,10 +760,11 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     {
         LOG(LOG_INFO, "[%p] Missing /oic/p", thiz);
     }
-    if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+    if (response->payload && response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
         LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", thiz,
             response->payload->type);
+        goto exit;
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
