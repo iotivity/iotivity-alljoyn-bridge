@@ -48,9 +48,14 @@ static bool TranslateInterface(const char *ifaceName)
              strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
 }
 
+static std::string GetResourceTypeName(std::string ifaceName)
+{
+    return std::string("x.") + ifaceName;
+}
+
 static std::string GetResourceTypeName(std::string ifaceName, std::string suffix)
 {
-    return std::string("x.") + ifaceName + "." + suffix;
+    return GetResourceTypeName(ifaceName) + "." + suffix;
 }
 
 static std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix)
@@ -237,8 +242,18 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
         }
         delete[] names;
         delete[] values;
+        if (!numProps && !numMembers)
+        {
+            std::string rt = GetResourceTypeName(ifaceName);
+            m_rts[rt] |= READ;
+        }
     }
     delete[] ifaces;
+    if (m_rts.empty())
+    {
+        LOG(LOG_INFO, "No translatable interfaces");
+        return;
+    }
 
     const ajn::InterfaceDescription *iface = m_bus->GetInterface(
                 ::ajn::org::freedesktop::DBus::Properties::InterfaceName);
