@@ -36,7 +36,8 @@
 
 static bool TranslateResourceType(const char *type)
 {
-    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
+    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_RES) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RD) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH) == 0 ||
