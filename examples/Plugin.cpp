@@ -33,7 +33,6 @@
 #endif
 
 std::string gRD;
-static std::map<std::string, OCResourceHandle> sResources;
 
 void LogWriteln(
     const char *file,
@@ -174,47 +173,35 @@ OCStackResult CreateResource(const char *uri,
                              void *callbackParam,
                              uint8_t properties)
 {
-    OCResourceHandle handle;
-    OCStackResult result = OCCreateResource(&handle, typeName, interfaceName, uri,
-                                            entityHandler, callbackParam, properties);
-    if (result == OC_STACK_OK)
+    OCStackResult result;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
+    if (handle)
     {
-        sResources[uri] = handle;
+        result = OC_STACK_OK;
+    }
+    else
+    {
+        result = OCCreateResource(&handle, typeName, interfaceName, uri,
+                                  entityHandler, callbackParam, properties);
     }
     return result;
 }
 
 OCStackResult DestroyResource(const char *uri)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = sResources.find(uri);
-    if (it == sResources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
-    sResources.erase(it);
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCDeleteResource(handle);
 }
 
 OCStackResult AddResourceType(const char *uri, const char *typeName)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = sResources.find(uri);
-    if (it == sResources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCBindResourceTypeToResource(handle, typeName);
 }
 
 OCStackResult AddInterface(const char *uri, const char *interfaceName)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = sResources.find(uri);
-    if (it == sResources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCBindResourceInterfaceToResource(handle, interfaceName);
 }
 
@@ -244,12 +231,7 @@ OCStackResult NotifyListOfObservers(const char *uri,
                                     uint8_t numberOfIds,
                                     OCRepPayload *payload)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = sResources.find(uri);
-    if (it == sResources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCNotifyListOfObservers(handle, obsIdList, numberOfIds, payload,
                                    OC_HIGH_QOS);
 }
