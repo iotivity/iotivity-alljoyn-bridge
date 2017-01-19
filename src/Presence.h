@@ -33,6 +33,7 @@ class Presence
         Presence(const std::string &id) : m_id(id) { }
         virtual ~Presence() { }
         virtual bool IsPresent() = 0;
+        virtual void Seen() = 0;
         virtual std::string GetId() const { return m_id; }
     private:
         std::string m_id;
@@ -46,7 +47,7 @@ class AllJoynPresence : public Presence
         virtual ~AllJoynPresence();
 
         virtual bool IsPresent();
-        void Seen();
+        virtual void Seen();
 
     private:
         static const time_t PERIOD_SECS = 1;
@@ -64,20 +65,19 @@ class AllJoynPresence : public Presence
 class OCPresence : public Presence
 {
     public:
-        OCPresence(const OCDevAddr *devAddr, const char *di);
+        OCPresence(const OCDevAddr *devAddr, const char *di, time_t periodSecs);
         virtual ~OCPresence();
 
-        virtual bool IsPresent() { return m_isPresent; }
+        virtual bool IsPresent();
+        virtual void Seen();
 
     private:
-        std::mutex m_mutex;
-        OCDevAddr m_devAddr;
-        bool m_isPresent;
-        OCDoHandle m_handle;
-        OCStackApplicationResult m_result;
+        static const uint8_t RETRIES = 3;
 
-        static OCStackApplicationResult PresenceCB(void *context, OCDoHandle handle,
-                OCClientResponse *response);
+        OCDevAddr m_devAddr;
+        const time_t m_periodSecs;
+        std::mutex m_mutex;
+        time_t m_lastTick;
 };
 
 #endif

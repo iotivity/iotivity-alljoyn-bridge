@@ -585,6 +585,16 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             goto next;
         }
 
+        /* Update presence status */
+        for (std::vector<Presence *>::iterator it = thiz->m_presence.begin();
+             it != thiz->m_presence.end(); ++it)
+        {
+            if ((*it)->GetId() == payload->sid)
+            {
+                (*it)->Seen();
+            }
+        }
+
         /* Check if we've seen this response before */
         for (std::vector<VirtualBusAttachment *>::iterator it = thiz->m_virtualBusAttachments.begin();
              it != thiz->m_virtualBusAttachments.end(); ++it)
@@ -878,7 +888,8 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
     else
     {
         /* Done */
-        OCPresence *presence = new OCPresence(&response->devAddr, context->m_bus->GetDi().c_str());
+        OCPresence *presence = new OCPresence(&response->devAddr, context->m_bus->GetDi().c_str(),
+            DISCOVER_PERIOD_SECS);
         if (!presence)
         {
             result = OC_STACK_ERROR;

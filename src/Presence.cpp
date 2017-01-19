@@ -87,69 +87,25 @@ void AllJoynPresence::PingCB(QStatus status, void *context)
     }
 }
 
-OCPresence::OCPresence(const OCDevAddr *devAddr, const char *di)
-    : Presence(di), m_devAddr(*devAddr), m_isPresent(true), m_handle(NULL),
-      m_result(OC_STACK_KEEP_TRANSACTION)
+OCPresence::OCPresence(const OCDevAddr *devAddr, const char *di, time_t periodSecs)
+    : Presence(di), m_devAddr(*devAddr), m_periodSecs(periodSecs), m_lastTick(time(NULL))
 {
     LOG(LOG_INFO, "[%p]", this);
-
-    OCCallbackData cbData;
-    cbData.cb = OCPresence::PresenceCB;
-    cbData.context = this;
-    cbData.cd = NULL;
-    OCStackResult result = DoResource(&m_handle, OC_REST_PRESENCE, "/oic/ad", &m_devAddr, 0, &cbData);
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "DoResource(OC_REST_PRESENCE) - %d", result);
-    }
 }
 
 OCPresence::~OCPresence()
 {
     LOG(LOG_INFO, "[%p]", this);
-
-    OCDoHandle handle;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        handle = m_handle;
-        m_result = OC_STACK_DELETE_TRANSACTION;
-    }
-    Cancel(handle, OC_LOW_QOS);
 }
 
-OCStackApplicationResult OCPresence::PresenceCB(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
+bool OCPresence::IsPresent()
 {
-    (void) handle;
-    OCPresence *thiz = reinterpret_cast<OCPresence *>(ctx);
-    LOG(LOG_INFO, "[%p]", thiz);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return (time(NULL) - m_lastTick) <= (m_periodSecs * RETRIES);
+}
 
-    std::lock_guard<std::mutex> lock(thiz->m_mutex);
-    if (!response)
-    {
-        goto exit;
-    }
-    switch (response->result)
-    {
-        case OC_STACK_OK:
-            thiz->m_isPresent = true;
-            break;
-        case OC_STACK_PRESENCE_STOPPED:
-        case OC_STACK_PRESENCE_TIMEOUT:
-            thiz->m_isPresent = false;
-            break;
-        case OC_STACK_PRESENCE_DO_NOT_HANDLE:
-        default:
-            break;
-    }
-    LOG(LOG_INFO, "[%p] result=%d", thiz, response->result);
-    if (response->payload)
-    {
-        static const char *triggerText[] = { "CREATE", "CHANGE", "DELETE" };
-        OCPresencePayload *payload = (OCPresencePayload *) response->payload;
-        LOG(LOG_INFO, "[%p] sequenceNumber=%u,maxAge=%u,trigger=%s,resourceType=%s", thiz,
-            payload->sequenceNumber, payload->maxAge, triggerText[payload->trigger], payload->resourceType);
-    }
-exit:
-    return thiz->m_result;
+void OCPresence::Seen()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_lastTick = time(NULL);
 }
