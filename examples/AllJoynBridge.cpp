@@ -279,6 +279,7 @@ int main(int argc, char **argv)
             {
                 break;
             }
+            usleep(10 * 1000);
         }
     }
     else
