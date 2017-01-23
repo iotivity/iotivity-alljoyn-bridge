@@ -769,10 +769,20 @@ handleRequest:
                             break;
                         }
                     }
+                    qcc::String propName = GetPropName(member, "validity");
+                    OCRepPayload *payload = (OCRepPayload *) request->payload;
+                    for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+                    {
+                        if (propName == value->name && (value->type != OCREP_PROP_BOOL || !value->b))
+                        {
+                            success = false;
+                            break;
+                        }
+                    }
                     const char *signature = member->signature.c_str();
                     const char *argSignature = signature;
                     const char *argNames = member->argNames.c_str();
-                    for (size_t i = 0; i < numArgs; ++i)
+                    for (size_t i = 0; success && i < numArgs; ++i)
                     {
                         ParseCompleteType(signature);
                         qcc::String sig(argSignature, signature - argSignature);
