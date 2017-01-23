@@ -99,13 +99,16 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
         delete[] ifaces;
     }
     delete[] paths;
-    OCStringLL *dmv = NULL;
-    for (std::string dataModelVersion : dataModelVersions)
+    std::string dmv;
+    for (std::set<std::string>::iterator it = dataModelVersions.begin(); it != dataModelVersions.end(); ++it)
     {
-        OCResourcePayloadAddStringLL(&dmv, dataModelVersion.c_str());
+        if (it != dataModelVersions.begin())
+        {
+            dmv += ",";
+        }
+        dmv += *it;
     }
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, dmv);
-    OCFreeOCStringLL(dmv);
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, dmv.c_str());
     value = NULL;
     aboutData.GetSoftwareVersion(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SOFTWARE_VERSION, value);
