@@ -1,6 +1,6 @@
 #******************************************************************
 #
-# Copyright 2016 Intel Corporation All Rights Reserved.
+# Copyright 2017 Intel Corporation All Rights Reserved.
 #
 #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 #
@@ -20,15 +20,13 @@
 
 Import('env')
 
-iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
-                               'Name.cpp',
-                               'Payload.cpp',
-                               'Presence.cpp',
-                               'Signature.cpp',
-                               'VirtualBusAttachment.cpp',
-                               'VirtualBusObject.cpp',
-                               'VirtualDevice.cpp',
-                               'VirtualResource.cpp']
-alljoynplugin_lib = env.StaticLibrary('AlljoynPlugin', iotivity_alljoyn_bridge_cpp)
-
-Return('alljoynplugin_lib')
+env_unittest = env.Clone();
+env_unittest.VariantDir('src', '../src')
+unittest_cpp = ['AllJoynBridgeTest.cpp',
+                'src/Name.cpp',
+                '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
+                '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
+env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include', '#/src'])
+env_unittest.AppendUnique(LIBS = ['pthread'])
+unittest_bins = env_unittest.Program('AllJoynBridgeTest', unittest_cpp)
+env.Install('#/${BUILD_DIR}/bin', unittest_bins)

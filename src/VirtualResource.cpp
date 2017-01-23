@@ -20,6 +20,7 @@
 
 #include "VirtualResource.h"
 
+#include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
 #include <alljoyn/AllJoynStd.h>
@@ -46,21 +47,6 @@ static bool TranslateInterface(const char *ifaceName)
              strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
              strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
              strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
-}
-
-static std::string GetResourceTypeName(std::string ifaceName)
-{
-    return std::string("x.") + ifaceName;
-}
-
-static std::string GetResourceTypeName(std::string ifaceName, std::string suffix)
-{
-    return GetResourceTypeName(ifaceName) + "." + suffix;
-}
-
-static std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix)
-{
-    return GetResourceTypeName(iface->GetName(), suffix);
 }
 
 static std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
@@ -372,19 +358,6 @@ static uint8_t GetAccess(std::map<std::string, std::string> &query,
         }
     }
     return access;
-}
-
-static std::string GetInterface(std::string &rt)
-{
-    std::string::size_type b, e;
-    b = rt.find('.') + 1;
-    e = rt.rfind('.');
-    return rt.substr(b, e - b);
-}
-
-static std::string GetMember(std::string &rt)
-{
-    return rt.substr(rt.rfind('.') + 1);
 }
 
 /* Filter properties based on resource type and interface requested. */

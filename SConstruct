@@ -142,7 +142,7 @@ env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
 env['LIBPATH'] = ['${ALLJOYN_DIST}/cpp/lib',
                   '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
 
-alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/bridge', exports= 'env', duplicate=0)
+alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/src', exports= 'env', duplicate=0)
 env.Install('${BUILD_DIR}/libs', alljoynplugin_lib)
 
 # build examples
@@ -150,3 +150,6 @@ env.SConscript('examples/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/exa
 
 # build tests
 env.SConscript('test/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/test', exports= ['env', 'iotivity_resource_inc_paths'], duplicate=0)
+
+# build unit tests
+env.SConscript('unittest/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/unittests', exports=['env'], duplicate=0)
