@@ -24,6 +24,7 @@
 #include "ocstack.h"
 #include "oic_malloc.h"
 #include <alljoyn/AllJoynStd.h>
+#include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
 #include "VirtualBusAttachment.h"
@@ -841,7 +842,7 @@ OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse
     {
         rt = rt.substr(1);
     }
-    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(rt.c_str(), response->payload);
+    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(ToAJName(rt).c_str(), response->payload);
     if (!iface)
     {
         return OC_STACK_ERROR;
