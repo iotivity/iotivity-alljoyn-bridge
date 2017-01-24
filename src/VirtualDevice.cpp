@@ -180,7 +180,7 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_VERSION, value);
     }
     valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.mnos", valueArg);
+    aboutData.GetField("org.openconnectivity.mpos", valueArg);
     if (valueArg)
     {
         value = NULL;
