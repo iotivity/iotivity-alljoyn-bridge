@@ -340,7 +340,7 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
         context->m_obj, ctx, handle, response, response ? response->payload : 0, response ? response->result : 0);
 
     std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
-    if (!response || response->result != OC_STACK_OK || !response->payload)
+    if (!response || response->result > OC_STACK_RESOURCE_CHANGED || !response->payload)
     {
         QStatus status = context->m_obj->MethodReply(context->m_msg, ER_FAIL);
         if (status != ER_OK)
