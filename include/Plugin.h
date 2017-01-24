@@ -38,6 +38,9 @@
 /** Device model number.*/
 #define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
 
+/** To represent secure mode resource type.*/
+#define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
+
 #define LOG_ERR         3
 #define LOG_INFO        6
 

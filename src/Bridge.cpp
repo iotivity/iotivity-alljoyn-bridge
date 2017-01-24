@@ -23,6 +23,7 @@
 #include "ocpayload.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
+#include "oic_string.h"
 #include <alljoyn/AllJoynStd.h>
 #include "Name.h"
 #include "Plugin.h"
@@ -49,14 +50,16 @@ static bool TranslateResourceType(const char *type)
 
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0),
+      m_secureMode(false)
 {
     m_bus = new ajn::BusAttachment(name, true);
 }
 
 Bridge::Bridge(const char *name, const char *uuid, const char *sender)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0),
+      m_secureMode(false)
 {
     std::string nm = std::string(name) + uuid;
     m_bus = new ajn::BusAttachment(nm.c_str(), true);
@@ -167,6 +170,15 @@ bool Bridge::Start()
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+            return false;
+        }
+        result = CreateResource("/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
+                                OC_RSRVD_INTERFACE_READ_WRITE,
+                                Bridge::EntityHandlerCB, this,
+                                OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "CreateResource() - %d", result);
             return false;
         }
     }
@@ -925,4 +937,173 @@ exit:
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
+}
+
+#define INTERFACE_DEFAULT_QUERY "if=" OC_RSRVD_INTERFACE_DEFAULT
+
+OCRepPayload *Bridge::CreateSecureModePayload(OCEntityHandlerRequest *request)
+{
+    OCStackResult result;
+    OCRepPayload *payload = NULL;
+    uint8_t n;
+    char** array = NULL;
+    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0, 0, 0 };
+
+    payload = OCRepPayloadCreate();
+    if (!payload)
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetUri(payload, OCGetResourceUri(request->resource)))
+    {
+        goto error;
+    }
+    if (request->query && strstr(request->query, INTERFACE_DEFAULT_QUERY))
+    {
+        result = OCGetNumberOfResourceTypes(request->resource, &n);
+        if (result != OC_STACK_OK)
+        {
+            goto error;
+        }
+        array = (char**)OICCalloc(n, sizeof(char*));
+        if (!array)
+        {
+            goto error;
+        }
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            array[i] = OICStrdup(OCGetResourceTypeName(request->resource, i));
+            if (!array[i])
+            {
+                goto error;
+            }
+        }
+        dim[0] = n;
+        if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_RESOURCE_TYPE, array, dim))
+        {
+            goto error;
+        }
+        array = NULL;
+        result = OCGetNumberOfResourceInterfaces(request->resource, &n);
+        if (result != OC_STACK_OK)
+        {
+            goto error;
+        }
+        array = (char**)OICCalloc(n, sizeof(char*));
+        if (!array)
+        {
+            goto error;
+        }
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            array[i] = OICStrdup(OCGetResourceInterfaceName(request->resource, i));
+            if (!array[i])
+            {
+                goto error;
+            }
+        }
+        dim[0] = n;
+        if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_INTERFACE, array, dim))
+        {
+            goto error;
+        }
+        array = NULL;
+    }
+    if (!OCRepPayloadSetPropBool(payload, "secureMode", m_secureMode))
+    {
+        goto error;
+    }
+    return payload;
+
+error:
+    if (array)
+    {
+        for(uint8_t i = 0; i < n; ++i)
+        {
+            OICFree(array[i]);
+        }
+        OICFree(array);
+    }
+    OCRepPayloadDestroy(payload);
+    return NULL;
+}
+
+OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
+                                              OCEntityHandlerRequest *request,
+                                              void *ctx)
+{
+    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
+        ctx, flag, request, ctx);
+
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    thiz->m_mutex.lock();
+    bool hasChanged = false;
+    OCEntityHandlerResult result;
+    switch (request->method)
+    {
+        case OC_REST_GET:
+            {
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *payload = thiz->CreateSecureModePayload(request);
+                if (!payload)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(payload);
+                OCStackResult doResult = DoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    OCRepPayloadDestroy(payload);
+                }
+                break;
+            }
+        case OC_REST_POST:
+            {
+                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayload *inPayload = (OCRepPayload *) request->payload;
+                bool secureMode;
+                if (!OCRepPayloadGetPropBool(inPayload, "secureMode", &secureMode))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                hasChanged = (thiz->m_secureMode != secureMode);
+                thiz->m_secureMode = secureMode;
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *outPayload = thiz->CreateSecureModePayload(request);
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(outPayload);
+                OCStackResult doResult = DoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    OCRepPayloadDestroy(outPayload);
+                }
+                break;
+            }
+        default:
+            result = OC_EH_METHOD_NOT_ALLOWED;
+            break;
+    }
+    thiz->m_mutex.unlock();
+    if (hasChanged)
+    {
+        OCNotifyAllObservers(request->resource, OC_NA_QOS);
+    }
+    return result;
 }

@@ -83,6 +83,7 @@ class Bridge : private ajn::AboutListener
         std::vector<VirtualBusAttachment *> m_virtualBusAttachments;
         struct DiscoverContext;
         std::set<DiscoverContext *> m_discovered;
+        bool m_secureMode;
 
         void Destroy(const char *id);
         virtual void BusDisconnected();
@@ -93,6 +94,10 @@ class Bridge : private ajn::AboutListener
         void GetAboutDataCB(ajn::Message &msg, void *ctx);
         virtual void SessionLost(ajn::SessionId sessionId, ajn::SessionListener::SessionLostReason reason);
 
+        OCRepPayload *CreateSecureModePayload(OCEntityHandlerRequest *request);
+        static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
+                OCEntityHandlerRequest *request,
+                void *context);
         static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult GetPlatformCB(void *context, OCDoHandle handle,
