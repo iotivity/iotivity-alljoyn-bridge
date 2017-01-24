@@ -549,7 +549,14 @@ struct Bridge::DiscoverContext
     std::string m_di;
     std::string m_host;
     VirtualBusAttachment *m_bus;
-    std::deque<std::string> m_uris;
+    struct Resource {
+        Resource(std::string uri, uint8_t bitmap, bool hasMultipleRts)
+            : m_uri(uri), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
+        std::string m_uri;
+        uint8_t m_bitmap;
+        bool m_hasMultipleRts;
+    };
+    std::deque<Resource> m_resources;
     VirtualBusObject *m_obj;
     DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
         m_obj(NULL) { }
@@ -579,7 +586,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         DiscoverContext *context = NULL;
         OCCallbackData cbData;
         char targetUri[MAX_URI_LENGTH] = { 0 };
-        std::deque<std::string> uris;
+        std::deque<DiscoverContext::Resource> resources;
 
         if (!strcmp(payload->sid, GetServerInstanceIDString()))
         {
@@ -618,7 +625,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
              resource = resource->next)
         {
-            bool multipleRts = resource->types && resource->types->next;
+            bool hasMultipleRts = resource->types && resource->types->next;
             for (OCStringLL *type = resource->types; type; type = type->next)
             {
                 if (!TranslateResourceType(type->value))
@@ -626,18 +633,11 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
                     continue;
                 }
                 std::string uri = resource->uri;
-                if (multipleRts)
-                {
-                    uri += std::string("?rt=") + type->value;
-                }
-                else
-                {
-                    uri += std::string("?rt=!") + type->value;
-                }
-                uris.push_back(uri);
+                uri += std::string("?rt=") + type->value;
+                resources.push_back(DiscoverContext::Resource(uri, resource->bitmap, hasMultipleRts));
             }
         }
-        if (uris.empty())
+        if (resources.empty())
         {
             continue;
         }
@@ -653,7 +653,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             snprintf(host, MAX_URI_LENGTH, "%s:%d", response->devAddr.addr, response->devAddr.port);
             context->m_host = host;
         }
-        context->m_uris = uris;
+        context->m_resources = resources;
         thiz->m_discovered.insert(context);
 
         snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_DEVICE_URI);
@@ -751,6 +751,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     OCStackResult result = OC_STACK_ERROR;
     OCRepPayload *payload;
     OCCallbackData cbData;
+    bool hasMultipleRts;
     std::string uri;
     std::string path;
     std::string rt;
@@ -770,18 +771,18 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    if (context->m_uris.empty())
+    if (context->m_resources.empty())
     {
         goto exit;
     }
-    uri = context->m_uris.front();
+    hasMultipleRts = context->m_resources.front().m_hasMultipleRts;
+    uri = context->m_resources.front().m_uri;
     path = uri.substr(0, uri.find("?"));
     context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
     rt = uri.substr(uri.find("rt=") + 3);
-    if (rt[0] == '!')
+    if (!hasMultipleRts)
     {
         uri = path;
-        rt = rt.substr(1);
     }
     if (rt.find("oic.d.") == 0)
     {
@@ -824,7 +825,7 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_uris.front().c_str(),
+        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_resources.front().m_uri.c_str(),
             response, response ? response->payload : 0, response ? response->result : 0);
     }
     else
@@ -836,13 +837,11 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
 
 OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse *response)
 {
-    std::string uri = context->m_uris.front();
+    bool isObservable = context->m_resources.front().m_bitmap & OC_OBSERVABLE;
+    std::string uri = context->m_resources.front().m_uri;
     std::string rt = uri.substr(uri.find("rt=") + 3);
-    if (rt[0] == '!')
-    {
-        rt = rt.substr(1);
-    }
-    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(ToAJName(rt).c_str(), response->payload);
+    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(ToAJName(rt).c_str(),
+            isObservable, response->payload);
     if (!iface)
     {
         return OC_STACK_ERROR;
@@ -856,10 +855,11 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
     (void) response;
     OCStackResult result = OC_STACK_ERROR;
 
-    context->m_uris.pop_front();
-    if (!context->m_uris.empty())
+    context->m_resources.pop_front();
+    if (!context->m_resources.empty())
     {
-        std::string uri = context->m_uris.front();
+        bool hasMultipleRts = context->m_resources.front().m_hasMultipleRts;
+        std::string uri = context->m_resources.front().m_uri;
         std::string path = uri.substr(0, uri.find("?"));
         if (uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
@@ -872,7 +872,7 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
             context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
         }
         std::string rt = uri.substr(uri.find("rt=") + 3);
-        if (rt[0] == '!')
+        if (!hasMultipleRts)
         {
             uri = path;
         }

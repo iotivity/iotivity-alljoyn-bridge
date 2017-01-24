@@ -306,7 +306,7 @@ static void CreateSignature(char *sig, OCRepPayloadValue *value)
 }
 
 const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char *ifaceName,
-        OCPayload *payload)
+        bool emitsChanged, OCPayload *payload)
 {
     LOG(LOG_INFO, "[%p] ifaceName=%s,payload=%p",
         this, ifaceName, payload);
@@ -345,7 +345,8 @@ const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const cha
             return NULL;
         }
         status = iface->AddPropertyAnnotation(value->name,
-                                              ajn::org::freedesktop::DBus::AnnotateEmitsChanged, "true");
+                                              ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
+                                              emitsChanged ? "true" : "false");
         if (status != ER_OK)
         {
             LOG(LOG_ERR, "AddPropertyAnnotation - %s", QCC_StatusText(status));
