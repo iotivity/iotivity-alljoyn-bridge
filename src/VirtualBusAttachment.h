@@ -54,6 +54,10 @@ class VirtualBusAttachment : public ajn::BusAttachment
             {
                 SetNewFieldDetails("com.intel.Virtual", ajn::AboutData::ANNOUNCED, "b");
             }
+            QStatus SetNewFieldDetails(const char* name, AboutFieldMask mask, const char* signature)
+            {
+                return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
+            }
         };
 
         std::string m_di;
