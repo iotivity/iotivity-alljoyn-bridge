@@ -21,13 +21,16 @@
 Import('env')
 
 iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
+                               'BridgeSecurity.cpp',
                                'Name.cpp',
                                'Payload.cpp',
                                'Presence.cpp',
+                               'Resource.cpp',
                                'Signature.cpp',
                                'VirtualBusAttachment.cpp',
                                'VirtualBusObject.cpp',
                                'VirtualDevice.cpp',
+                               'VirtualConfigurationResource.cpp',
                                'VirtualResource.cpp']
 alljoynplugin_lib = env.StaticLibrary('AlljoynPlugin', iotivity_alljoyn_bridge_cpp)
 

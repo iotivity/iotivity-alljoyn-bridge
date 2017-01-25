@@ -30,6 +30,7 @@
 #include <vector>
 #include <set>
 
+class BusAuthListener;
 class Presence;
 class VirtualBusAttachment;
 class VirtualBusObject;
@@ -75,6 +76,7 @@ class Bridge : private ajn::AboutListener
         Protocol m_protocols;
         const char *m_sender;
         ajn::BusAttachment *m_bus;
+        BusAuthListener *m_authListener;
         OCDoHandle m_discoverHandle;
         time_t m_discoverNextTick;
         std::vector<Presence *> m_presence;
@@ -93,8 +95,12 @@ class Bridge : private ajn::AboutListener
                                    void *context);
         void GetAboutDataCB(ajn::Message &msg, void *ctx);
         virtual void SessionLost(ajn::SessionId sessionId, ajn::SessionListener::SessionLostReason reason);
+        VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus,
+                                               const char *name, ajn::SessionId sessionId, const char *path,
+                                               const char *ajSoftwareVersion);
 
-        OCRepPayload *CreateSecureModePayload(OCEntityHandlerRequest *request);
+        OCRepPayload *GetSecureMode(OCEntityHandlerRequest *request);
+        bool PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged);
         static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
                 OCEntityHandlerRequest *request,
                 void *context);

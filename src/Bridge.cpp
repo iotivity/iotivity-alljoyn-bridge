@@ -25,12 +25,15 @@
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include <alljoyn/AllJoynStd.h>
+#include "BridgeSecurity.h"
 #include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
+#include "Resource.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
 #include "VirtualDevice.h"
+#include "VirtualConfigurationResource.h"
 #include "VirtualResource.h"
 #include <algorithm>
 #include <deque>
@@ -50,19 +53,20 @@ static bool TranslateResourceType(const char *type)
 
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0),
-      m_secureMode(false)
+      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
 {
     m_bus = new ajn::BusAttachment(name, true);
 }
 
 Bridge::Bridge(const char *name, const char *uuid, const char *sender)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0),
-      m_secureMode(false)
+      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_authListener(NULL),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
 {
     std::string nm = std::string(name) + uuid;
     m_bus = new ajn::BusAttachment(nm.c_str(), true);
+    m_authListener = new BusAuthListener();
 }
 
 Bridge::~Bridge()
@@ -222,6 +226,14 @@ bool Bridge::Process()
             if (status != ER_OK)
             {
                 LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
+            }
+            status = m_bus->EnablePeerSecurity("ALLJOYN_ECDHE_ECDSA ALLJOYN_ECDHE_NULL ALLJOYN_ECDHE_PSK ALLJOYN_ECDHE_SPEKE "
+                                               "ALLJOYN_SRP_KEYX ALLJOYN_SRP_LOGON "
+                                               "GSSAPI",
+                                               m_authListener); // TODO NULL, true, permissionConfigurationListener);
+            if (status != ER_OK)
+            {
+                LOG(LOG_ERR, "EnablePeerSecurity - %s", QCC_StatusText(status));
             }
         }
         bool wasConnected = m_bus->IsConnected();
@@ -444,6 +456,20 @@ static bool ComparePath(const char *a, const char *b)
     return (strcmp(a, b) < 0);
 }
 
+VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus,
+                                               const char *name, ajn::SessionId sessionId, const char *path,
+                                               const char *ajSoftwareVersion)
+{
+    if (!strcmp(path, "/Config"))
+    {
+        return VirtualConfigurationResource::Create(bus, name, sessionId, path, ajSoftwareVersion);
+    }
+    else
+    {
+        return VirtualResource::Create(bus, name, sessionId, path, ajSoftwareVersion);
+    }
+}
+
 void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
 {
     LOG(LOG_INFO, "[%p]", this);
@@ -499,7 +525,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
                                 std::inserter(add, add.begin()), ComparePath);
             for (size_t i = 0; i < add.size(); ++i)
             {
-                VirtualResource *resource = VirtualResource::Create(m_bus,
+                VirtualResource *resource = CreateVirtualResource(m_bus,
                                             context->m_name.c_str(), msg->GetSessionId(), add[i],
                                             ajSoftwareVersion);
                 if (resource)
@@ -520,7 +546,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             objectDescription.GetPaths(paths, numPaths);
             for (size_t i = 0; i < numPaths; ++i)
             {
-                VirtualResource *resource = VirtualResource::Create(m_bus,
+                VirtualResource *resource = CreateVirtualResource(m_bus,
                                             context->m_name.c_str(), msg->GetSessionId(), paths[i],
                                             ajSoftwareVersion);
                 if (resource)
@@ -939,93 +965,28 @@ exit:
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-#define INTERFACE_DEFAULT_QUERY "if=" OC_RSRVD_INTERFACE_DEFAULT
-
-OCRepPayload *Bridge::CreateSecureModePayload(OCEntityHandlerRequest *request)
+OCRepPayload *Bridge::GetSecureMode(OCEntityHandlerRequest *request)
 {
-    OCStackResult result;
-    OCRepPayload *payload = NULL;
-    uint8_t n;
-    char** array = NULL;
-    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0, 0, 0 };
-
-    payload = OCRepPayloadCreate();
-    if (!payload)
-    {
-        goto error;
-    }
-    if (!OCRepPayloadSetUri(payload, OCGetResourceUri(request->resource)))
-    {
-        goto error;
-    }
-    if (request->query && strstr(request->query, INTERFACE_DEFAULT_QUERY))
-    {
-        result = OCGetNumberOfResourceTypes(request->resource, &n);
-        if (result != OC_STACK_OK)
-        {
-            goto error;
-        }
-        array = (char**)OICCalloc(n, sizeof(char*));
-        if (!array)
-        {
-            goto error;
-        }
-        for (uint8_t i = 0; i < n; ++i)
-        {
-            array[i] = OICStrdup(OCGetResourceTypeName(request->resource, i));
-            if (!array[i])
-            {
-                goto error;
-            }
-        }
-        dim[0] = n;
-        if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_RESOURCE_TYPE, array, dim))
-        {
-            goto error;
-        }
-        array = NULL;
-        result = OCGetNumberOfResourceInterfaces(request->resource, &n);
-        if (result != OC_STACK_OK)
-        {
-            goto error;
-        }
-        array = (char**)OICCalloc(n, sizeof(char*));
-        if (!array)
-        {
-            goto error;
-        }
-        for (uint8_t i = 0; i < n; ++i)
-        {
-            array[i] = OICStrdup(OCGetResourceInterfaceName(request->resource, i));
-            if (!array[i])
-            {
-                goto error;
-            }
-        }
-        dim[0] = n;
-        if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_INTERFACE, array, dim))
-        {
-            goto error;
-        }
-        array = NULL;
-    }
+    OCRepPayload *payload = CreatePayload(request->resource, request->query);
     if (!OCRepPayloadSetPropBool(payload, "secureMode", m_secureMode))
     {
-        goto error;
+        OCRepPayloadDestroy(payload);
+        payload = NULL;
     }
     return payload;
+}
 
-error:
-    if (array)
+bool Bridge::PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged)
+{
+    OCRepPayload *payload = (OCRepPayload *) request->payload;
+    bool secureMode;
+    if (!OCRepPayloadGetPropBool(payload, "secureMode", &secureMode))
     {
-        for(uint8_t i = 0; i < n; ++i)
-        {
-            OICFree(array[i]);
-        }
-        OICFree(array);
+        return false;
     }
-    OCRepPayloadDestroy(payload);
-    return NULL;
+    hasChanged = (m_secureMode != secureMode);
+    m_secureMode = secureMode;
+    return true;
 }
 
 OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
@@ -1047,7 +1008,7 @@ OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
                 memset(&response, 0, sizeof(response));
                 response.requestHandle = request->requestHandle;
                 response.resourceHandle = request->resource;
-                OCRepPayload *payload = thiz->CreateSecureModePayload(request);
+                OCRepPayload *payload = thiz->GetSecureMode(request);
                 if (!payload)
                 {
                     result = OC_EH_ERROR;
@@ -1071,20 +1032,16 @@ OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
                     result = OC_EH_ERROR;
                     break;
                 }
-                OCRepPayload *inPayload = (OCRepPayload *) request->payload;
-                bool secureMode;
-                if (!OCRepPayloadGetPropBool(inPayload, "secureMode", &secureMode))
+                if (!thiz->PostSecureMode(request, hasChanged))
                 {
                     result = OC_EH_ERROR;
                     break;
                 }
-                hasChanged = (thiz->m_secureMode != secureMode);
-                thiz->m_secureMode = secureMode;
                 OCEntityHandlerResponse response;
                 memset(&response, 0, sizeof(response));
                 response.requestHandle = request->requestHandle;
                 response.resourceHandle = request->resource;
-                OCRepPayload *outPayload = thiz->CreateSecureModePayload(request);
+                OCRepPayload *outPayload = thiz->GetSecureMode(request);
                 result = OC_EH_OK;
                 response.ehResult = result;
                 response.payload = reinterpret_cast<OCPayload *>(outPayload);
