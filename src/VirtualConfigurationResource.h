@@ -33,6 +33,8 @@ class VirtualConfigurationResource : public VirtualResource
 
     private:
         std::map<std::string, std::string> m_appNames;
+        bool m_fr;
+        bool m_rb;
 
         VirtualConfigurationResource(ajn::BusAttachment *bus,
                                      const char *name, ajn::SessionId sessionId, const char *path,
@@ -46,7 +48,10 @@ class VirtualConfigurationResource : public VirtualResource
         struct MethodCallContext;
         QStatus UpdateAppNames(MethodCallContext *context);
         void UpdateConfigurationsCB(ajn::Message &msg, void *ctx);
-        static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
+        static OCEntityHandlerResult ConfigurationHandlerCB(OCEntityHandlerFlag flag,
+                OCEntityHandlerRequest *request,
+                void *context);
+        static OCEntityHandlerResult MaintenanceHandlerCB(OCEntityHandlerFlag flag,
                 OCEntityHandlerRequest *request,
                 void *context);
 };

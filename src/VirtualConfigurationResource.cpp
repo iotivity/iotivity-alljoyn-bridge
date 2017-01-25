@@ -37,6 +37,9 @@
 #define OC_RSRVD_CONFIGURATION_URI                   "/oic/con"
 #define OC_RSRVD_RESOURCE_TYPE_CONFIGURATION         "oic.wk.con"
 
+#define OC_RSRVD_MAINTENANCE_URI                     "/oic/mnt"
+#define OC_RSRVD_RESOURCE_TYPE_MAINTENANCE           "oic.wk.mnt"
+
 static const struct { const char *aj; const char *oc; } keys[] =
 {
     { "AppName", "n" },
@@ -64,7 +67,7 @@ VirtualResource *VirtualConfigurationResource::Create(ajn::BusAttachment *bus,
 VirtualConfigurationResource::VirtualConfigurationResource(ajn::BusAttachment *bus,
                                  const char *name, ajn::SessionId sessionId, const char *path,
                                  const char *ajSoftwareVersion)
-    : VirtualResource(bus, name, sessionId, path, ajSoftwareVersion)
+    : VirtualResource(bus, name, sessionId, path, ajSoftwareVersion), m_fr(false), m_rb(false)
 {
     LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s",
         this, bus, name, sessionId, path, ajSoftwareVersion);
@@ -106,12 +109,24 @@ void VirtualConfigurationResource::IntrospectCB(QStatus status, ProxyBusObject* 
 
     OCStackResult result = CreateResource(OC_RSRVD_CONFIGURATION_URI, OC_RSRVD_RESOURCE_TYPE_CONFIGURATION,
                                           OC_RSRVD_INTERFACE_READ_WRITE,
-                                          VirtualConfigurationResource::EntityHandlerCB, this,
+                                          VirtualConfigurationResource::ConfigurationHandlerCB, this,
                                           OC_DISCOVERABLE | OC_OBSERVABLE);
     if (result == OC_STACK_OK)
     {
         LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s",
             this, OC_RSRVD_CONFIGURATION_URI);
+    }
+    result = CreateResource(OC_RSRVD_MAINTENANCE_URI, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
+                            OC_RSRVD_INTERFACE_READ_WRITE,
+                            VirtualConfigurationResource::MaintenanceHandlerCB, this,
+                            OC_DISCOVERABLE | OC_OBSERVABLE);
+    if (result == OC_STACK_OK)
+    {
+        LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s",
+            this, OC_RSRVD_MAINTENANCE_URI);
+    }
+    if (result == OC_STACK_OK)
+    {
         result = RDPublish();
         if (result != OC_STACK_OK)
         {
@@ -143,7 +158,7 @@ struct VirtualConfigurationResource::MethodCallContext
     }
 };
 
-OCEntityHandlerResult VirtualConfigurationResource::EntityHandlerCB(OCEntityHandlerFlag flag,
+OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEntityHandlerFlag flag,
         OCEntityHandlerRequest *request,
         void *ctx)
 {
@@ -557,4 +572,92 @@ void VirtualConfigurationResource::UpdateConfigurationsCB(ajn::Message &msg, voi
         }
         delete context;
     }
+}
+
+OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntityHandlerFlag flag,
+        OCEntityHandlerRequest *request,
+        void *ctx)
+{
+    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
+        ctx, flag, request, ctx);
+
+    VirtualConfigurationResource *resource = reinterpret_cast<VirtualConfigurationResource *>(ctx);
+    std::lock_guard<std::mutex> lock(resource->m_mutex);
+
+    OCEntityHandlerResult result;
+    switch (request->method)
+    {
+        case OC_REST_POST:
+            {
+                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayload *payload = (OCRepPayload *) request->payload;
+                bool value;
+                if (OCRepPayloadGetPropBool(payload, "fr", &value) && value)
+                {
+                    const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface("org.alljoyn.Config");
+                    assert(iface);
+                    const ajn::InterfaceDescription::Member *member = iface->GetMember("FactoryReset");
+                    assert(member);
+                    QStatus status = resource->MethodCallAsync(*member, NULL, NULL);
+                    if (status != ER_OK)
+                    {
+                        LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                        result = OC_EH_ERROR;
+                        break;
+                    }
+                }
+                if (OCRepPayloadGetPropBool(payload, "rb", &value) && value)
+                {
+                    const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface("org.alljoyn.Config");
+                    assert(iface);
+                    const ajn::InterfaceDescription::Member *member = iface->GetMember("Restart");
+                    assert(member);
+                    QStatus status = resource->MethodCallAsync(*member, NULL, NULL);
+                    if (status != ER_OK)
+                    {
+                        LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                        result = OC_EH_ERROR;
+                        break;
+                    }
+                }
+                /* FALLTHROUGH */
+            }
+        case OC_REST_GET:
+            {
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *payload = ::CreatePayload(request->resource, request->query);
+                if (!payload)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                if (!OCRepPayloadSetPropBool(payload, "fr", resource->m_fr) ||
+                    !OCRepPayloadSetPropBool(payload, "rb", resource->m_rb))
+                {
+                    result = OC_EH_ERROR;
+                    OCRepPayloadDestroy(payload);
+                    payload = NULL;
+                }
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(payload);
+                OCStackResult doResult = DoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    OCRepPayloadDestroy(payload);
+                }
+                break;
+            }
+        default:
+            result = OC_EH_METHOD_NOT_ALLOWED;
+            break;
+    }
+    return result;
 }
