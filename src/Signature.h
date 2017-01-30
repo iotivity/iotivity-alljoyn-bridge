@@ -21,10 +21,13 @@
 #ifndef _SIGNATURE_H
 #define _SIGNATURE_H
 
+#include "octypes.h"
 #include <alljoyn/Status.h>
 #include <stdint.h>
 
 QStatus ParseCompleteType(const char *&sigPtr);
 uint8_t CountCompleteTypes(const char *signature);
+
+void CreateSignature(char *sig, OCRepPayloadValue *value);
 
 #endif

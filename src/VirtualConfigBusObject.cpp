@@ -20,7 +20,9 @@
 
 #include "VirtualConfigBusObject.h"
 
+#include "Payload.h"
 #include "Plugin.h"
+#include "Signature.h"
 #include <alljoyn/BusAttachment.h>
 #include "ocpayload.h"
 #include "oic_malloc.h"
@@ -110,24 +112,38 @@ void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::
                static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB));
 }
 
-static void ToAJDictEntry(ajn::MsgArg *entry, const char *key, const char *value)
+static ajn::MsgArg ToAJDictEntry(const char *key, const char *value)
 {
-    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
-    entry->v_dictEntry.key = new ajn::MsgArg("s", key);
+    ajn::MsgArg entry;
+    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry.v_dictEntry.key = new ajn::MsgArg("s", key);
     ajn::MsgArg *valueArg = new ajn::MsgArg("s", value);
     valueArg->Stabilize();
-    entry->v_dictEntry.val = new ajn::MsgArg("v", valueArg);
-    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    entry.v_dictEntry.val = new ajn::MsgArg("v", valueArg);
+    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    return entry;
 }
 
-static void ToAJDictEntry(ajn::MsgArg *entry, const char *key, size_t numValues, char **values)
+static ajn::MsgArg ToAJDictEntry(const char *key, size_t numValues, char **values)
 {
-    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
-    entry->v_dictEntry.key = new ajn::MsgArg("s", key);
+    ajn::MsgArg entry;
+    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry.v_dictEntry.key = new ajn::MsgArg("s", key);
     ajn::MsgArg *valueArg = new ajn::MsgArg("as", numValues, values);
     valueArg->Stabilize();
-    entry->v_dictEntry.val = new ajn::MsgArg("v", valueArg);
-    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    entry.v_dictEntry.val = new ajn::MsgArg("v", valueArg);
+    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    return entry;
+}
+
+static ajn::MsgArg ToAJDictEntry(const char *key, const ajn::MsgArg *valueArg)
+{
+    ajn::MsgArg entry;
+    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry.v_dictEntry.key = new ajn::MsgArg("s", key);
+    entry.v_dictEntry.val = new ajn::MsgArg("v", valueArg);
+    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    return entry;
 }
 
 /* Called with m_mutex held. */
@@ -136,12 +152,11 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
     LOG(LOG_INFO, "[%p]",
         this);
 
-    ajn::MsgArg entries[7];
-    ajn::MsgArg *entry = entries;
+    std::vector<ajn::MsgArg> entries;
     char *dl = NULL;
     if (OCRepPayloadGetPropString(payload, "dl", &dl))
     {
-        ToAJDictEntry(entry++, "DefaultLanguage", dl);
+        entries.push_back(ToAJDictEntry("DefaultLanguage", dl));
     }
     char *languageTag;
     msg->GetArgs("s", &languageTag);
@@ -166,7 +181,7 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
                 }
             }
         }
-        ToAJDictEntry(entry++, "SupportedLanguages", numLangs, langs);
+        entries.push_back(ToAJDictEntry("SupportedLanguages", numLangs, langs));
         for (size_t i = 0; i < numLangs; ++i)
         {
             OICFree(langs[i]);
@@ -180,34 +195,47 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
     }
     if (n)
     {
-        ToAJDictEntry(entry++, "AppName", n);
+        entries.push_back(ToAJDictEntry("AppName", n));
         char *value;
         if (OCRepPayloadGetPropString(payload, "loc", &value))
         {
-            ToAJDictEntry(entry++, "org.openconnectivity.loc", value);
+            entries.push_back(ToAJDictEntry("org.openconnectivity.loc", value));
             OICFree(value);
         }
         if (OCRepPayloadGetPropString(payload, "locn", &value))
         {
-            ToAJDictEntry(entry++, "org.openconnectivity.locn", value);
+            entries.push_back(ToAJDictEntry("org.openconnectivity.locn", value));
             OICFree(value);
         }
         if (OCRepPayloadGetPropString(payload, "c", &value))
         {
-            ToAJDictEntry(entry++, "org.openconnectivity.c", value);
+            entries.push_back(ToAJDictEntry("org.openconnectivity.c", value));
             OICFree(value);
         }
         if (OCRepPayloadGetPropString(payload, "r", &value))
         {
-            ToAJDictEntry(entry++, "org.openconnectivity.r", value);
+            entries.push_back(ToAJDictEntry("org.openconnectivity.r", value));
             OICFree(value);
+        }
+        /* Vendor-defined properties */
+        for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+        {
+            if (!strncmp(value->name, "x.", 2))
+            {
+                const char *fieldName = value->name + 2; /* Skip the leading x. */
+                char fieldSig[] = "aaaa{sv}";
+                CreateSignature(fieldSig, value);
+                ajn::MsgArg *fieldValue = new ajn::MsgArg();
+                ToAJMsgArg(fieldValue, fieldSig, value);
+                entries.push_back(ToAJDictEntry(fieldName, fieldValue));
+            }
         }
     }
     if (n)
     {
         ajn::MsgArg arg;
         arg.typeId = ajn::ALLJOYN_ARRAY;
-        arg.v_array.SetElements("{sv}", entry - entries, entries);
+        arg.v_array.SetElements("{sv}", entries.size(), &entries[0]);
         QStatus status = MethodReply(msg, &arg, 1);
         if (status != ER_OK)
         {
