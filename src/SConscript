@@ -29,6 +29,7 @@ iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
                                'Signature.cpp',
                                'VirtualBusAttachment.cpp',
                                'VirtualBusObject.cpp',
+                               'VirtualConfigBusObject.cpp',
                                'VirtualDevice.cpp',
                                'VirtualConfigurationResource.cpp',
                                'VirtualResource.cpp']

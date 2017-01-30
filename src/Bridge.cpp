@@ -32,8 +32,9 @@
 #include "Resource.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
-#include "VirtualDevice.h"
+#include "VirtualConfigBusObject.h"
 #include "VirtualConfigurationResource.h"
+#include "VirtualDevice.h"
 #include "VirtualResource.h"
 #include <algorithm>
 #include <deque>
@@ -48,6 +49,7 @@ static bool TranslateResourceType(const char *type)
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH) == 0 ||
              strcmp(type, "oic.r.doxm") == 0 ||
              strcmp(type, "oic.r.pstat") == 0 ||
+             strcmp(type, "oic.r.securemode") == 0 ||
              strcmp(type, "oic.d.bridge") == 0);
 }
 
@@ -789,10 +791,6 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     OCStackResult result = OC_STACK_ERROR;
     OCRepPayload *payload;
     OCCallbackData cbData;
-    bool hasMultipleRts;
-    std::string uri;
-    std::string path;
-    std::string rt;
     if (!response)
     {
         goto exit;
@@ -809,40 +807,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    if (context->m_resources.empty())
-    {
-        goto exit;
-    }
-    hasMultipleRts = context->m_resources.front().m_hasMultipleRts;
-    uri = context->m_resources.front().m_uri;
-    path = uri.substr(0, uri.find("?"));
-    context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
-    rt = uri.substr(uri.find("rt=") + 3);
-    if (!hasMultipleRts)
-    {
-        uri = path;
-    }
-    if (rt.find("oic.d.") == 0)
-    {
-        /* Don't need to issue a GET for device types */
-        thiz->CreateInterface(context, response);
-        return thiz->GetNext(context, response);
-    }
-    else
-    {
-        char targetUri[MAX_URI_LENGTH] = { 0 };
-        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
-        cbData.cb = Bridge::GetCB;
-        cbData.context = context;
-        cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
-        if (result != OC_STACK_OK)
-        {
-            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-            goto exit;
-        }
-        return OC_STACK_DELETE_TRANSACTION;
-    }
+    return thiz->Get(context, response);
 exit:
     if (result != OC_STACK_OK)
     {
@@ -870,7 +835,8 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     {
         thiz->CreateInterface(context, response);
     }
-    return thiz->GetNext(context, response);
+    context->m_resources.pop_front();
+    return thiz->Get(context, response);
 }
 
 OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse *response)
@@ -888,43 +854,70 @@ OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse
     return OC_STACK_OK;
 }
 
-OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientResponse *response)
+OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse *response)
 {
     (void) response;
     OCStackResult result = OC_STACK_ERROR;
 
-    context->m_resources.pop_front();
     if (!context->m_resources.empty())
     {
-        bool hasMultipleRts = context->m_resources.front().m_hasMultipleRts;
         std::string uri = context->m_resources.front().m_uri;
-        std::string path = uri.substr(0, uri.find("?"));
-        if (uri.find(context->m_obj->GetPath()) == std::string::npos)
+        if (context->m_obj && uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
             QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
             if (status != ER_OK)
             {
                 delete context->m_obj;
-                context->m_obj = NULL;
             }
+            context->m_obj = NULL;
+        }
+        std::string path = uri.substr(0, uri.find("?"));
+        if (path == "/oic/con" ||
+            path == "/oic/mnt")
+        {
+            VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
+            if (!obj)
+            {
+                obj = new VirtualConfigBusObject(context->m_bus, context->m_host.c_str());
+                QStatus status = context->m_bus->RegisterBusObject(obj);
+                if (status != ER_OK)
+                {
+                    delete obj;
+                }
+            }
+            context->m_resources.pop_front();
+            return Get(context, response);
+        }
+        if (!context->m_obj)
+        {
             context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
         }
         std::string rt = uri.substr(uri.find("rt=") + 3);
-        if (!hasMultipleRts)
+        if (rt.find("oic.d.") == 0)
         {
-            uri = path;
+            /* Don't need to issue a GET for device types */
+            CreateInterface(context, response);
+            context->m_resources.pop_front();
+            return Get(context, response);
         }
-        char targetUri[MAX_URI_LENGTH] = { 0 };
-        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
-        OCCallbackData cbData;
-        cbData.cb = Bridge::GetCB;
-        cbData.context = context;
-        cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
-        if (result != OC_STACK_OK)
+        else
         {
-            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-            goto exit;
+            if (!context->m_resources.front().m_hasMultipleRts)
+            {
+                uri = path;
+            }
+            char targetUri[MAX_URI_LENGTH] = { 0 };
+            snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
+            OCCallbackData cbData;
+            cbData.cb = Bridge::GetCB;
+            cbData.context = context;
+            cbData.cd = NULL;
+            result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+            if (result != OC_STACK_OK)
+            {
+                LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
+                goto exit;
+            }
         }
     }
     else

@@ -248,6 +248,8 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
                             OCRepPayloadGetPropString(objArray[i], "value", &value))
                         {
                             context->m_appNames[language] = value;
+                            OICFree(language);
+                            OICFree(value);
                         }
                     }
                     /* Copy the value into the response payload */
@@ -315,25 +317,34 @@ void VirtualConfigurationResource::GetSupportedLanguagesCB(ajn::Message &msg, vo
         case ajn::MESSAGE_METHOD_RET:
         {
             const ajn::MsgArg *dict = msg->GetArg(0);
-            size_t numLangs;
-            ajn::MsgArg *langs;
-            QStatus status = dict->GetElement("{sas}", "SupportedLanguages", &numLangs, &langs);
-            if (status == ER_OK)
+            size_t numLangs = 0;
+            ajn::MsgArg *langs = NULL;
+            dict->GetElement("{sas}", "SupportedLanguages", &numLangs, &langs);
+            for (size_t i = 0; i < numLangs; ++i)
             {
-                for (size_t i = 0; i < numLangs; ++i)
-                {
-                    const char *lang;
-                    langs[i].Get("s", &lang);
-                    m_appNames[lang] = "";
-                }
+                const char *lang;
+                langs[i].Get("s", &lang);
+                m_appNames[lang] = "";
+            }
+            const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.alljoyn.Config");
+            assert(iface);
+            const ajn::InterfaceDescription::Member *member = iface->GetMember("GetConfigurations");
+            assert(member);
+            QStatus status;
+            if (!m_appNames.empty())
+            {
                 context->m_appName = m_appNames.begin();
-                const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.alljoyn.Config");
-                assert(iface);
-                const ajn::InterfaceDescription::Member *member = iface->GetMember("GetConfigurations");
-                assert(member);
+                ajn::MsgArg lang("s", context->m_appName->first.c_str());
                 status = MethodCallAsync(*member,
                                          this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualConfigurationResource::GetAppNameCB),
-                                         &langs[0], 1, context);
+                                         &lang, 1, context);
+            }
+            else
+            {
+                ajn::MsgArg lang("s", "");
+                status = MethodCallAsync(*member,
+                                         this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualConfigurationResource::GetConfigurationsCB),
+                                         &lang, 1, context);
             }
             if (status == ER_OK)
             {
@@ -446,36 +457,45 @@ void VirtualConfigurationResource::GetConfigurationsCB(ajn::Message &msg, void *
                     success = success && OCRepPayloadSetPropString(context->m_payload, keys[i].oc, value);
                 }
             }
-            size_t dim[MAX_REP_ARRAY_DEPTH] = { m_appNames.size(), 0, 0 };
-            OCRepPayload** objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
-            if (!objArray)
+            if (!m_appNames.empty())
             {
-                success = false;
-            }
-            else
-            {
-                size_t i = 0;
-                for (std::map<std::string, std::string>::iterator it = m_appNames.begin(); success && it != m_appNames.end(); ++it)
+                size_t dim[MAX_REP_ARRAY_DEPTH] = { m_appNames.size(), 0, 0 };
+                OCRepPayload** objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
+                if (!objArray)
                 {
-                    OCRepPayload *value = OCRepPayloadCreate();
-                    if (!value)
+                    success = false;
+                }
+                else
+                {
+                    size_t i = 0;
+                    for (std::map<std::string, std::string>::iterator it = m_appNames.begin(); success && it != m_appNames.end(); ++it)
                     {
-                        success = false;
-                        break;
+                        OCRepPayload *value = OCRepPayloadCreate();
+                        if (!value)
+                        {
+                            success = false;
+                            break;
+                        }
+                        success = OCRepPayloadSetPropString(value, "language", it->first.c_str()) &&
+                            OCRepPayloadSetPropString(value, "value", it->second.c_str());
+                        objArray[i++] = value;
                     }
-                    success = OCRepPayloadSetPropString(value, "language", it->first.c_str()) &&
-                        OCRepPayloadSetPropString(value, "value", it->second.c_str());
-                    objArray[i++] = value;
+                }
+                if (success)
+                {
+                    success = OCRepPayloadSetPropObjectArrayAsOwner(context->m_payload, "ln", objArray, dim);
+                }
+                else
+                {
+                    OICFree(objArray);
                 }
             }
             if (success)
             {
-                OCRepPayloadSetPropObjectArrayAsOwner(context->m_payload, "ln", objArray, dim);
                 context->m_response->ehResult = OC_EH_OK;
             }
             else
             {
-                OICFree(objArray);
                 context->m_response->ehResult = OC_EH_ERROR;
                 OCRepPayloadDestroy(context->m_payload);
                 context->m_payload = NULL;

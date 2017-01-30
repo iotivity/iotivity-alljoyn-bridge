@@ -43,6 +43,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         void SetAboutData(const char *uri, OCRepPayload *payload);
         const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, bool emitsChanged, OCPayload *payload);
         QStatus RegisterBusObject(VirtualBusObject *busObject);
+        VirtualBusObject *GetBusObject(const char *path);
         QStatus Announce();
         void Stop();
 

@@ -391,6 +391,18 @@ QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject)
     return status;
 }
 
+VirtualBusObject *VirtualBusAttachment::GetBusObject(const char *path)
+{
+    for (VirtualBusObject *busObject : m_virtualBusObjects)
+    {
+        if (!strcmp(busObject->GetPath(), path))
+        {
+            return busObject;
+        }
+    }
+    return NULL;
+}
+
 QStatus VirtualBusAttachment::Announce()
 {
     LOG(LOG_INFO, "[%p]",
