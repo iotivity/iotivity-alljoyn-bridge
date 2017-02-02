@@ -42,15 +42,16 @@
 
 static bool TranslateResourceType(const char *type)
 {
-    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_RES) == 0 ||
+    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_INTROSPECTION) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RD) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RES) == 0 ||
+             strcmp(type, "oic.d.bridge") == 0 ||
              strcmp(type, "oic.r.doxm") == 0 ||
              strcmp(type, "oic.r.pstat") == 0 ||
-             strcmp(type, "oic.r.securemode") == 0 ||
-             strcmp(type, "oic.d.bridge") == 0);
+             strcmp(type, "oic.r.securemode") == 0);
 }
 
 Bridge::Bridge(const char *name, Protocol protocols)
