@@ -18,21 +18,42 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _BRIDGESECURITY_H
-#define _BRIDGESECURITY_H
+#ifndef _SECURITY_H
+#define _SECURITY_H
 
+#include <alljoyn/AboutObj.h>
 #include <alljoyn/AuthListener.h>
+#include <alljoyn/PermissionConfigurationListener.h>
 
-class BusAuthListener : public ajn::AuthListener
+class AllJoynSecurity : public ajn::DefaultECDHEAuthListener
+    , public ajn::PermissionConfigurationListener
 {
 public:
-    virtual ~BusAuthListener() { }
-    virtual QStatus RequestCredentialsAsync(const char* authMechanism, const char* peerName, uint16_t authCount,
-                                            const char* userName, uint16_t credMask, void* authContext);
-    virtual QStatus VerifyCredentialsAsync(const char* authMechanism, const char* peerName, const Credentials& credentials,
-                                           void* authContext);
+    AllJoynSecurity(ajn::BusAttachment *bus);
+    virtual ~AllJoynSecurity() { }
+
+    bool IsClaimed();
+    bool SetClaimable();
+
+private:
+    ajn::BusAttachment *m_bus;
+
     virtual void SecurityViolation(QStatus status, const ajn::Message& msg);
     virtual void AuthenticationComplete(const char* authMechanism, const char* peerName, bool success);
+    virtual QStatus FactoryReset();
+    virtual void PolicyChanged();
+    virtual void StartManagement();
+    virtual void EndManagement();
 };
+
+class OCSecurity
+{
+public:
+    bool Init();
+
+private:
+    static void DisplayPinCB(char *pin, size_t pinSize, void *context);
+};
+
 
 #endif

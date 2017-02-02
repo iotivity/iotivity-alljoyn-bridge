@@ -25,11 +25,11 @@
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include <alljoyn/AllJoynStd.h>
-#include "BridgeSecurity.h"
 #include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
 #include "Resource.h"
+#include "Security.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
 #include "VirtualConfigBusObject.h"
@@ -55,21 +55,24 @@ static bool TranslateResourceType(const char *type)
 }
 
 Bridge::Bridge(const char *name, Protocol protocols)
-    : m_announcedCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
+    : m_announcedCb(NULL), m_sessionLostCb(NULL), m_protocols(protocols), m_sender(NULL),
+      m_bus(NULL), m_ajSecurity(NULL), m_ocSecurity(NULL), m_discoverHandle(NULL),
+      m_discoverNextTick(0), m_secureMode(false)
 {
     m_bus = new ajn::BusAttachment(name, true);
+    m_ajState = CREATED;
+    m_ajSecurity = new AllJoynSecurity(m_bus);
+    m_ocSecurity = new OCSecurity();
 }
 
 Bridge::Bridge(const char *name, const char *uuid, const char *sender)
-    : m_announcedCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_authListener(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
+    : m_announcedCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender), m_bus(NULL),
+      m_ajSecurity(NULL), m_ocSecurity(NULL), m_discoverHandle(NULL), m_discoverNextTick(0),
+      m_secureMode(false)
 {
     std::string nm = std::string(name) + uuid;
     m_bus = new ajn::BusAttachment(nm.c_str(), true);
-    m_authListener = new BusAuthListener();
+    m_ajState = CREATED;
 }
 
 Bridge::~Bridge()
@@ -97,6 +100,8 @@ Bridge::~Bridge()
         }
         m_virtualDevices.clear();
     }
+    delete m_ajSecurity;
+    delete m_ocSecurity;
     delete m_bus;
 }
 
@@ -165,8 +170,12 @@ bool Bridge::Start()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (!m_sender)
+    if (IsConsumer())
     {
+        if (!m_ocSecurity->Init())
+        {
+            return false;
+        }
         OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
         if (!handle)
         {
@@ -195,6 +204,13 @@ bool Bridge::Start()
     {
         m_bus->RegisterAboutListener(*this);
         m_bus->RegisterBusListener(*this);
+        QStatus status = m_bus->Start();
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
+            return false;
+        }
+        m_ajState = STARTED;
     }
     return true;
 }
@@ -223,42 +239,43 @@ bool Bridge::Process()
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_protocols & AJ)
     {
-        if (!m_bus->IsStarted())
+        QStatus status;
+        switch (m_ajState)
         {
-            QStatus status = m_bus->Start();
+        case CREATED:
+            LOG(LOG_ERR, "[%p] Bridge not started", this);
+            break;
+        case STARTED:
+            status = m_bus->Connect();
             if (status != ER_OK)
             {
-                LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
+                LOG(LOG_INFO, "[%p] Connect() - %s", this, QCC_StatusText(status));
+                break;
             }
-            status = m_bus->EnablePeerSecurity("ALLJOYN_ECDHE_ECDSA ALLJOYN_ECDHE_NULL ALLJOYN_ECDHE_PSK ALLJOYN_ECDHE_SPEKE "
-                                               "ALLJOYN_SRP_KEYX ALLJOYN_SRP_LOGON "
-                                               "GSSAPI",
-                                               m_authListener); // TODO NULL, true, permissionConfigurationListener);
-            if (status != ER_OK)
+            m_ajState = CONNECTED;
+            /* FALLTHROUGH */
+        case CONNECTED:
+            if (!IsConsumer() || m_ajSecurity->IsClaimed())
             {
-                LOG(LOG_ERR, "EnablePeerSecurity - %s", QCC_StatusText(status));
+                WhoImplements();
+                m_ajState = RUNNING;
+                break;
             }
-        }
-        bool wasConnected = m_bus->IsConnected();
-        if (m_bus->IsStarted() && !m_bus->IsConnected())
-        {
-            if (m_bus->Connect() == ER_OK)
+            else
             {
-                LOG(LOG_INFO, "[%p] Connected", this);
+                m_ajSecurity->SetClaimable();
+                m_ajState = CLAIMABLE;
+                /* FALLTHROUGH */
             }
-        }
-        if (!wasConnected && m_bus->IsConnected())
-        {
-            std::string matchRule = "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
-            if (m_sender)
+        case CLAIMABLE:
+            if (m_ajSecurity->IsClaimed())
             {
-                matchRule += ",sender='" + std::string(m_sender) + "'";
+                WhoImplements();
+                m_ajState = RUNNING;
             }
-            QStatus status = m_bus->AddMatch(matchRule.c_str());
-            if (status != ER_OK)
-            {
-                LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
-            }
+            break;
+        case RUNNING:
+            break;
         }
     }
     if (m_protocols & OC)
@@ -321,6 +338,21 @@ void Bridge::BusDisconnected()
         LOG(LOG_INFO, "[%p] %s absent", this, id.c_str());
         Destroy(id.c_str());
     }
+    m_ajState = STARTED;
+}
+
+void Bridge::WhoImplements()
+{
+    std::string matchRule = "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
+    if (m_sender)
+    {
+        matchRule += ",sender='" + std::string(m_sender) + "'";
+    }
+    QStatus status = m_bus->AddMatch(matchRule.c_str());
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
+    }
 }
 
 struct AnnouncedContext
@@ -379,7 +411,7 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
         }
     }
 
-    if (!m_sender)
+    if (IsConsumer())
     {
         m_mutex.unlock();
         if (m_announcedCb)

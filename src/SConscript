@@ -21,11 +21,11 @@
 Import('env')
 
 iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
-                               'BridgeSecurity.cpp',
                                'Name.cpp',
                                'Payload.cpp',
                                'Presence.cpp',
                                'Resource.cpp',
+                               'Security.cpp',
                                'Signature.cpp',
                                'VirtualBusAttachment.cpp',
                                'VirtualBusObject.cpp',

@@ -30,7 +30,8 @@
 #include <vector>
 #include <set>
 
-class BusAuthListener;
+class AllJoynSecurity;
+class OCSecurity;
 class Presence;
 class VirtualBusAttachment;
 class VirtualBusObject;
@@ -74,9 +75,11 @@ class Bridge : private ajn::AboutListener
 
         std::mutex m_mutex;
         Protocol m_protocols;
+        enum { CREATED, STARTED, CONNECTED, CLAIMABLE, RUNNING } m_ajState;
         const char *m_sender;
         ajn::BusAttachment *m_bus;
-        BusAuthListener *m_authListener;
+        AllJoynSecurity *m_ajSecurity;
+        OCSecurity *m_ocSecurity;
         OCDoHandle m_discoverHandle;
         time_t m_discoverNextTick;
         std::vector<Presence *> m_presence;
@@ -87,6 +90,8 @@ class Bridge : private ajn::AboutListener
         std::set<DiscoverContext *> m_discovered;
         bool m_secureMode;
 
+        bool IsConsumer() { return !m_sender; }
+        void WhoImplements();
         void Destroy(const char *id);
         virtual void BusDisconnected();
         virtual void Announced(const char *name, uint16_t version, ajn::SessionPort port,
