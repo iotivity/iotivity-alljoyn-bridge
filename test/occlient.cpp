@@ -296,8 +296,8 @@ int main(int, char **)
         {
             for (size_t i = 0; i < g_resources.size(); ++i)
             {
-                std::cout << "[" << i << "]" << std::endl;
-                std::cout << "\tcoap://" << g_resources[i].uri << std::endl;
+                std::cout << "[" << i << "] "
+                          << "coap://" << g_resources[i].uri << std::endl;
             }
         }
         else if (cmd == "find")

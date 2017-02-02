@@ -21,6 +21,7 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/tokenizer.hpp>
 #include <iostream>
+#include <map>
 #include <poll.h>
 
 #include "cbor.h"
@@ -30,6 +31,9 @@
 #include "oic_string.h"
 #include "ocpayload.h"
 #include "ocstack.h"
+
+#define OC_RSRVD_SOFTWARE_VERSION        "sv"
+#define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
 
 extern "C" OCStackResult OCConvertPayload(OCPayload *payload, uint8_t **outPayload, size_t *size);
 
@@ -63,11 +67,656 @@ static void LogPayload(OCPayload *payload)
     OICFree(buffer);
 }
 
-typedef struct Resource {
+struct Configuration
+{
+    std::string n;
+    std::string loc;
+    std::string locn;
+    std::string c;
+    std::string r;
+    std::string dl;
+    std::map<std::string, std::string> ln;
+};
+
+static OCEntityHandlerResult configurationHandler(OCEntityHandlerFlag flag,
+        OCEntityHandlerRequest *request,
+        void *ctx)
+{
+    (void) flag;
+    Configuration *resource = (Configuration *) ctx;
+    OCEntityHandlerResult ehResult;
+    OCStackResult result;
+
+    switch (request->method)
+    {
+        case OC_REST_DISCOVER:
+        case OC_REST_GET:
+        case OC_REST_OBSERVE:
+            std::cout << "GET" << std::endl;
+            break;
+        case OC_REST_POST:
+            std::cout << "POST" << std::endl;
+            break;
+        default:
+            std::cout << request->method << std::endl;
+            break;
+    }
+    std::cout << "Uri-Path: " << OCGetResourceUri(request->resource) << std::endl;
+    std::cout << "Uri-Query: " << (request->query ? request->query : "") << std::endl;
+
+    std::string itf;
+    OCRepPayload *payload = NULL;
+    uint8_t n;
+    char** array = NULL;
+    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0, 0, 0 };
+
+    ehResult = OC_EH_BAD_REQ;
+    std::string queryStr = request->query;
+    boost::tokenizer<boost::char_separator<char>>
+        queries(queryStr, boost::char_separator<char>(OC_QUERY_SEPARATOR));
+    for (auto query = queries.begin(); query != queries.end(); ++query)
+    {
+        boost::tokenizer<boost::char_separator<char>>
+            params(*query, boost::char_separator<char>("="));
+        auto param = params.begin();
+        std::string key, value;
+        key = *param++;
+        if (param != params.end())
+        {
+            value = *param++;
+        }
+        if (key == OC_RSRVD_INTERFACE && itf.empty())
+        {
+            itf = value;
+        }
+        else
+        {
+            goto error;
+        }
+    }
+    if (!itf.empty())
+    {
+        result = OCGetNumberOfResourceInterfaces(request->resource, &n);
+        if (result != OC_STACK_OK)
+        {
+            ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+            goto error;
+        }
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            const char *itfName = OCGetResourceInterfaceName(request->resource, i);
+            if (!itfName)
+            {
+                ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                goto error;
+            }
+            if (itf == itfName)
+            {
+                ehResult = OC_EH_OK;
+                break;
+            }
+        }
+        if (ehResult != OC_EH_OK)
+        {
+            goto error;
+        }
+    }
+
+    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+    switch (request->method)
+    {
+    case OC_REST_GET:
+    {
+        OCEntityHandlerResponse response;
+        memset(&response, 0, sizeof(response));
+        response.requestHandle = request->requestHandle;
+        response.resourceHandle = request->resource;
+
+        payload = OCRepPayloadCreate();
+        if (!payload)
+        {
+            goto error;
+        }
+        if (itf == OC_RSRVD_INTERFACE_DEFAULT)
+        {
+            // oic.r.core (all ReadOnly)
+            // rt
+            result = OCGetNumberOfResourceTypes(request->resource, &n);
+            if (result != OC_STACK_OK)
+            {
+                goto error;
+            }
+            array = (char**)OICCalloc(n, sizeof(char*));
+            if (!array)
+            {
+                goto error;
+            }
+            for (uint8_t i = 0; i < n; ++i)
+            {
+                array[i] = OICStrdup(OCGetResourceTypeName(request->resource, i));
+                if (!array[i])
+                {
+                    goto error;
+                }
+            }
+            dim[0] = n;
+            if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_RESOURCE_TYPE, array, dim))
+            {
+                goto error;
+            }
+            array = NULL;
+            // if
+            result = OCGetNumberOfResourceInterfaces(request->resource, &n);
+            if (result != OC_STACK_OK)
+            {
+                goto error;
+            }
+            array = (char**)OICCalloc(n, sizeof(char*));
+            if (!array)
+            {
+                goto error;
+            }
+            for (uint8_t i = 0; i < n; ++i)
+            {
+                array[i] = OICStrdup(OCGetResourceInterfaceName(request->resource, i));
+                if (!array[i])
+                {
+                    goto error;
+                }
+            }
+            dim[0] = n;
+            if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_INTERFACE, array, dim))
+            {
+                goto error;
+            }
+            array = NULL;
+            // n
+            if (!OCRepPayloadSetPropString(payload, OC_RSRVD_FRIENDLY_NAME, resource->n.c_str()))
+            {
+                goto error;
+            }
+            // TODO id
+        }
+        // oic.wk.con
+        if (!OCRepPayloadSetPropString(payload, "loc", resource->loc.c_str()))
+        {
+            goto error;
+        }
+        if (!OCRepPayloadSetPropString(payload, "locn", resource->locn.c_str()))
+        {
+            goto error;
+        }
+        if (!OCRepPayloadSetPropString(payload, "c", resource->c.c_str()))
+        {
+            goto error;
+        }
+        if (!OCRepPayloadSetPropString(payload, "r", resource->r.c_str()))
+        {
+            goto error;
+        }
+        if (!OCRepPayloadSetPropString(payload, "dl", resource->dl.c_str()))
+        {
+            goto error;
+        }
+        size_t dim[MAX_REP_ARRAY_DEPTH] = { resource->ln.size(), 0, 0 };
+        OCRepPayload** objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
+        if (!objArray)
+        {
+            goto error;
+        }
+        else
+        {
+            size_t i = 0;
+            for (std::map<std::string, std::string>::iterator it = resource->ln.begin(); it != resource->ln.end(); ++it)
+            {
+                OCRepPayload *value = OCRepPayloadCreate();
+                if (!value)
+                {
+                    goto error;
+                }
+                if (!OCRepPayloadSetPropString(value, "language", it->first.c_str()) ||
+                    !OCRepPayloadSetPropString(value, "value", it->second.c_str()))
+                {
+                    goto error;
+                }
+                objArray[i++] = value;
+            }
+        }
+        if (!OCRepPayloadSetPropObjectArrayAsOwner(payload, "ln", objArray, dim))
+        {
+            goto error;
+        }
+        // vendor-defined property
+        if (!OCRepPayloadSetPropString(payload, "x.example.vendor", "Vendor-defined property"))
+        {
+            goto error;
+        }
+
+        ehResult = OC_EH_OK;
+        response.ehResult = ehResult;
+        response.payload = reinterpret_cast<OCPayload *>(payload);
+        result = OCDoResponse(&response);
+        if (result != OC_STACK_OK)
+        {
+            std::cout << "OCDoResponse - " << result << std::endl;
+            OCRepPayloadDestroy(payload);
+        }
+        payload = NULL;
+        break;
+    }
+    case OC_REST_POST:
+    {
+        OCEntityHandlerResponse response;
+        memset(&response, 0, sizeof(response));
+        response.requestHandle = request->requestHandle;
+        response.resourceHandle = request->resource;
+
+        payload = OCRepPayloadCreate();
+        if (!payload)
+        {
+            goto error;
+        }
+        if (request->payload)
+        {
+            LogPayload(request->payload);
+            OCRepPayload *reqPayload = (OCRepPayload *) request->payload;
+            ehResult = OC_EH_OK;
+            char *s;
+            if (OCRepPayloadGetPropString(reqPayload, OC_RSRVD_FRIENDLY_NAME, &s))
+            {
+                resource->n = s;
+                if (!OCRepPayloadSetPropString(payload, OC_RSRVD_FRIENDLY_NAME, s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            if (OCRepPayloadGetPropString(reqPayload, "loc", &s))
+            {
+                resource->loc = s;
+                if (!OCRepPayloadSetPropString(payload, "loc", s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            if (OCRepPayloadGetPropString(reqPayload, "locn", &s))
+            {
+                resource->locn = s;
+                if (!OCRepPayloadSetPropString(payload, "locn", s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            if (OCRepPayloadGetPropString(reqPayload, "c", &s))
+            {
+                resource->c = s;
+                if (!OCRepPayloadSetPropString(payload, "c", s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            if (OCRepPayloadGetPropString(reqPayload, "r", &s))
+            {
+                resource->r = s;
+                if (!OCRepPayloadSetPropString(payload, "r", s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            if (OCRepPayloadGetPropString(reqPayload, "dl", &s))
+            {
+                resource->dl = s;
+                if (!OCRepPayloadSetPropString(payload, "dl", s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
+            OCRepPayload **objArray = NULL;
+            if (OCRepPayloadGetPropObjectArray(reqPayload, "ln", &objArray, dim))
+            {
+                size_t dimTotal = calcDimTotal(dim);
+                for (size_t i = 0; i < dimTotal; ++i)
+                {
+                    char *language;
+                    char *value;
+                    if (OCRepPayloadGetPropString(objArray[i], "language", &language) &&
+                        OCRepPayloadGetPropString(objArray[i], "value", &value))
+                    {
+                        resource->ln[language] = value;
+                    }
+                }
+                /* Copy the value into the response payload */
+                if (!OCRepPayloadSetPropObjectArrayAsOwner(payload, "ln", objArray, dim))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+        }
+        else
+        {
+            ehResult = OC_EH_BAD_REQ;
+        }
+
+        response.ehResult = ehResult;
+        if (ehResult != OC_EH_OK)
+        {
+            OCRepPayloadDestroy(payload);
+            payload = NULL;
+        }
+        response.payload = reinterpret_cast<OCPayload *>(payload);
+        result = OCDoResponse(&response);
+        if (result != OC_STACK_OK)
+        {
+            std::cout << "OCDoResponse - " << result << std::endl;
+            OCRepPayloadDestroy(payload);
+        }
+        payload = NULL;
+        break;
+    }
+    default:
+        ehResult = OC_EH_METHOD_NOT_ALLOWED;
+        goto error;
+    }
+
+    return ehResult;
+
+error:
+    if (array)
+    {
+        for(uint8_t i = 0; i < n; ++i)
+        {
+            OICFree(array[i]);
+        }
+        OICFree(array);
+    }
+    OCRepPayloadDestroy(payload);
+    return ehResult;
+}
+
+struct Maintenance
+{
+    std::string n;
+};
+
+static OCEntityHandlerResult maintenanceHandler(OCEntityHandlerFlag flag,
+        OCEntityHandlerRequest *request,
+        void *ctx)
+{
+    (void) flag;
+    Maintenance *resource = (Maintenance *) ctx;
+    OCEntityHandlerResult ehResult;
+    OCStackResult result;
+
+    switch (request->method)
+    {
+        case OC_REST_DISCOVER:
+        case OC_REST_GET:
+        case OC_REST_OBSERVE:
+            std::cout << "GET" << std::endl;
+            break;
+        case OC_REST_POST:
+            std::cout << "POST" << std::endl;
+            break;
+        default:
+            std::cout << request->method << std::endl;
+            break;
+    }
+    std::cout << "Uri-Path: " << OCGetResourceUri(request->resource) << std::endl;
+    std::cout << "Uri-Query: " << (request->query ? request->query : "") << std::endl;
+
+    std::string itf;
+    OCRepPayload *payload = NULL;
+    uint8_t n;
+    char** array = NULL;
+    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0, 0, 0 };
+
+    ehResult = OC_EH_BAD_REQ;
+    std::string queryStr = request->query;
+    boost::tokenizer<boost::char_separator<char>>
+        queries(queryStr, boost::char_separator<char>(OC_QUERY_SEPARATOR));
+    for (auto query = queries.begin(); query != queries.end(); ++query)
+    {
+        boost::tokenizer<boost::char_separator<char>>
+            params(*query, boost::char_separator<char>("="));
+        auto param = params.begin();
+        std::string key, value;
+        key = *param++;
+        if (param != params.end())
+        {
+            value = *param++;
+        }
+        if (key == OC_RSRVD_INTERFACE && itf.empty())
+        {
+            itf = value;
+        }
+        else
+        {
+            goto error;
+        }
+    }
+    if (!itf.empty())
+    {
+        result = OCGetNumberOfResourceInterfaces(request->resource, &n);
+        if (result != OC_STACK_OK)
+        {
+            ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+            goto error;
+        }
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            const char *itfName = OCGetResourceInterfaceName(request->resource, i);
+            if (!itfName)
+            {
+                ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                goto error;
+            }
+            if (itf == itfName)
+            {
+                ehResult = OC_EH_OK;
+                break;
+            }
+        }
+        if (ehResult != OC_EH_OK)
+        {
+            goto error;
+        }
+    }
+
+    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+    switch (request->method)
+    {
+    case OC_REST_GET:
+    {
+        OCEntityHandlerResponse response;
+        memset(&response, 0, sizeof(response));
+        response.requestHandle = request->requestHandle;
+        response.resourceHandle = request->resource;
+
+        payload = OCRepPayloadCreate();
+        if (!payload)
+        {
+            goto error;
+        }
+        if (itf == OC_RSRVD_INTERFACE_DEFAULT)
+        {
+            // oic.r.core (all ReadOnly)
+            // rt
+            result = OCGetNumberOfResourceTypes(request->resource, &n);
+            if (result != OC_STACK_OK)
+            {
+                goto error;
+            }
+            array = (char**)OICCalloc(n, sizeof(char*));
+            if (!array)
+            {
+                goto error;
+            }
+            for (uint8_t i = 0; i < n; ++i)
+            {
+                array[i] = OICStrdup(OCGetResourceTypeName(request->resource, i));
+                if (!array[i])
+                {
+                    goto error;
+                }
+            }
+            dim[0] = n;
+            if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_RESOURCE_TYPE, array, dim))
+            {
+                goto error;
+            }
+            array = NULL;
+            // if
+            result = OCGetNumberOfResourceInterfaces(request->resource, &n);
+            if (result != OC_STACK_OK)
+            {
+                goto error;
+            }
+            array = (char**)OICCalloc(n, sizeof(char*));
+            if (!array)
+            {
+                goto error;
+            }
+            for (uint8_t i = 0; i < n; ++i)
+            {
+                array[i] = OICStrdup(OCGetResourceInterfaceName(request->resource, i));
+                if (!array[i])
+                {
+                    goto error;
+                }
+            }
+            dim[0] = n;
+            if (!OCRepPayloadSetStringArrayAsOwner(payload, OC_RSRVD_INTERFACE, array, dim))
+            {
+                goto error;
+            }
+            array = NULL;
+            // n
+            if (!OCRepPayloadSetPropString(payload, OC_RSRVD_FRIENDLY_NAME, resource->n.c_str()))
+            {
+                goto error;
+            }
+            // TODO id
+        }
+        // oic.wk.mnt
+        if (!OCRepPayloadSetPropBool(payload, "fr", false))
+        {
+            goto error;
+        }
+        if (!OCRepPayloadSetPropBool(payload, "rb", false))
+        {
+            goto error;
+        }
+
+        ehResult = OC_EH_OK;
+        response.ehResult = ehResult;
+        response.payload = reinterpret_cast<OCPayload *>(payload);
+        result = OCDoResponse(&response);
+        if (result != OC_STACK_OK)
+        {
+            std::cout << "OCDoResponse - " << result << std::endl;
+            OCRepPayloadDestroy(payload);
+        }
+        payload = NULL;
+        break;
+    }
+    case OC_REST_POST:
+    {
+        OCEntityHandlerResponse response;
+        memset(&response, 0, sizeof(response));
+        response.requestHandle = request->requestHandle;
+        response.resourceHandle = request->resource;
+
+        payload = OCRepPayloadCreate();
+        if (!payload)
+        {
+            goto error;
+        }
+        if (request->payload)
+        {
+            LogPayload(request->payload);
+            OCRepPayload *reqPayload = (OCRepPayload *) request->payload;
+            ehResult = OC_EH_OK;
+            char *s;
+            if (OCRepPayloadGetPropString(reqPayload, OC_RSRVD_FRIENDLY_NAME, &s))
+            {
+                resource->n = s;
+                if (!OCRepPayloadSetPropString(payload, OC_RSRVD_FRIENDLY_NAME, s))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            bool b;
+            if (OCRepPayloadGetPropBool(reqPayload, "fr", &b))
+            {
+                if (!OCRepPayloadSetPropBool(payload, "fr", b))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+            if (OCRepPayloadGetPropBool(reqPayload, "rb", &b))
+            {
+                if (!OCRepPayloadSetPropBool(payload, "rb", b))
+                {
+                    ehResult = OC_EH_INTERNAL_SERVER_ERROR;
+                    goto error;
+                }
+            }
+        }
+        else
+        {
+            ehResult = OC_EH_BAD_REQ;
+        }
+
+        response.ehResult = ehResult;
+        if (ehResult != OC_EH_OK)
+        {
+            OCRepPayloadDestroy(payload);
+            payload = NULL;
+        }
+        response.payload = reinterpret_cast<OCPayload *>(payload);
+        result = OCDoResponse(&response);
+        if (result != OC_STACK_OK)
+        {
+            std::cout << "OCDoResponse - " << result << std::endl;
+            OCRepPayloadDestroy(payload);
+        }
+        payload = NULL;
+        break;
+    }
+    default:
+        ehResult = OC_EH_METHOD_NOT_ALLOWED;
+        goto error;
+    }
+
+    return ehResult;
+
+error:
+    if (array)
+    {
+        for(uint8_t i = 0; i < n; ++i)
+        {
+            OICFree(array[i]);
+        }
+        OICFree(array);
+    }
+    OCRepPayloadDestroy(payload);
+    return ehResult;
+}
+
+struct Resource {
     const char *n;
     const char *id;
     bool value;
-} Resource;
+};
 
 static OCEntityHandlerResult entityHandler(OCEntityHandlerFlag flag,
         OCEntityHandlerRequest *request,
@@ -119,10 +768,6 @@ static OCEntityHandlerResult entityHandler(OCEntityHandlerFlag flag,
         if (key == OC_RSRVD_INTERFACE && itf.empty())
         {
             itf = value;
-        }
-        else
-        {
-            goto error;
         }
     }
     if (!itf.empty())
@@ -337,14 +982,92 @@ int main(int, char **)
         return EXIT_FAILURE;
     }
 
-    // TODO SetDeviceInfo
-    // TODO SetPlatformInfo
-    Resource resource = { "Friendly Name", "Instance ID", false };
     OCResourceHandle handle;
-    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/BinarySwitchResURI",
+    OCStackResult result;
+    /* Add device types */
+    handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+    if (!handle)
+    {
+        std::cerr << "OCGetResourceHandleAtUri(" << OC_RSRVD_DEVICE_URI << ") failed" << std::endl;
+        return EXIT_FAILURE;
+    }
+    result = OCBindResourceTypeToResource(handle, "oic.d.light");
+    if (result != OC_STACK_OK)
+    {
+        std::cerr << "OCBindResourceTypeToResource() - " << result << std::endl;
+        return EXIT_FAILURE;
+    }
+    result = OCBindResourceTypeToResource(handle, "x.example.-fan---device");
+    if (result != OC_STACK_OK)
+    {
+        std::cerr << "OCBindResourceTypeToResource() - " << result << std::endl;
+        return EXIT_FAILURE;
+    }
+    /* Set device info */
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, "device-name");
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_ID, OCGetServerInstanceIDString());
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SOFTWARE_VERSION, "software-version");
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, "model-num");
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, "x.example.foo", "bar");
+    /* Set platform info */
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, "platform-id");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_URL, "mfg-url");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_DATE, "mfg-date");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_VERSION, "platform-version");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_OS_VERSION, "os-version");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_HARDWARE_VERSION, "hw-version");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_FIRMWARE_VERSION, "fw-version");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SUPPORT_URL, "support-url");
+    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SYSTEM_TIME, "system-time");
+    /* Create configuration resource */
+    Configuration configuration;
+    configuration.n = "My Friendly Device Name";
+    configuration.loc = "My Location Information";
+    configuration.locn = "My Location Name";
+    configuration.c = "USD";
+    configuration.r = "MyRegion";
+    configuration.dl = "en";
+    configuration.ln["en"] = "My Friendly Device Name";
+    configuration.ln["es"] = "My Friendly Device Name";
+    if (OCCreateResource(&handle, "oic.wk.con", "oic.if.rw", "/oic/con",
+                         configurationHandler, &configuration, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
+    {
+        std::cerr << "OCCreateResource error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    /* Create maintenance resource */
+    Maintenance maintenance;
+    maintenance.n = "My Maintenance Actions";
+    if (OCCreateResource(&handle, "oic.wk.mnt", "oic.if.rw", "/oic/mnt",
+                         maintenanceHandler, &maintenance, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
+    {
+        std::cerr << "OCCreateResource error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    /* Create resources */
+    Resource resource = { "Friendly Name", "Instance ID", false };
+    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/switch/0",
                          entityHandler, &resource, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
     {
         std::cerr << "OCCreateResource error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCCreateResource(&handle, "x.example.-binary-switch", "oic.if.a", "/switch/1",
+                         entityHandler, &resource, OC_DISCOVERABLE) != OC_STACK_OK)
+    {
+        std::cerr << "OCCreateResource error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/switch/2",
+                         entityHandler, &resource, OC_DISCOVERABLE) != OC_STACK_OK)
+    {
+        std::cerr << "OCCreateResource error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    result = OCBindResourceTypeToResource(handle, "x.example.-binary-switch");
+    if (result != OC_STACK_OK)
+    {
+        std::cerr << "OCBindResourceTypeToResource() - " << result << std::endl;
         return EXIT_FAILURE;
     }
 
