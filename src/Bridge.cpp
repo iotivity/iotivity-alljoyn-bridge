@@ -54,6 +54,26 @@ static bool TranslateResourceType(const char *type)
              strcmp(type, "oic.r.securemode") == 0);
 }
 
+struct Bridge::DiscoverContext
+{
+    Bridge *m_bridge;
+    std::string m_di;
+    std::string m_host;
+    VirtualBusAttachment *m_bus;
+    struct Resource {
+        Resource(std::string uri, uint8_t bitmap, bool hasMultipleRts)
+            : m_uri(uri), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
+        std::string m_uri;
+        uint8_t m_bitmap;
+        bool m_hasMultipleRts;
+    };
+    std::deque<Resource> m_resources;
+    VirtualBusObject *m_obj;
+    DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
+        m_obj(NULL) { }
+    ~DiscoverContext() { delete m_obj; delete m_bus; }
+};
+
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_announcedCb(NULL), m_sessionLostCb(NULL),
       m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
@@ -74,6 +94,8 @@ Bridge::Bridge(const char *name, const char *uuid, const char *sender)
 
 Bridge::~Bridge()
 {
+    LOG(LOG_INFO, "[%p]", this);
+
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (Presence *presence : m_presence)
@@ -81,6 +103,11 @@ Bridge::~Bridge()
             delete presence;
         }
         m_presence.clear();
+        for (DiscoverContext *discoverContext : m_discovered)
+        {
+            delete discoverContext;
+        }
+        m_discovered.clear();
         for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
         {
             delete busAttachment;
@@ -201,6 +228,8 @@ bool Bridge::Start()
 
 bool Bridge::Stop()
 {
+    LOG(LOG_INFO, "[%p]", this);
+
     std::lock_guard<std::mutex> lock(m_mutex);
     for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
     {
@@ -583,26 +612,6 @@ void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::Session
         m_sessionLostCb();
     }
 }
-
-struct Bridge::DiscoverContext
-{
-    Bridge *m_bridge;
-    std::string m_di;
-    std::string m_host;
-    VirtualBusAttachment *m_bus;
-    struct Resource {
-        Resource(std::string uri, uint8_t bitmap, bool hasMultipleRts)
-            : m_uri(uri), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
-        std::string m_uri;
-        uint8_t m_bitmap;
-        bool m_hasMultipleRts;
-    };
-    std::deque<Resource> m_resources;
-    VirtualBusObject *m_obj;
-    DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
-        m_obj(NULL) { }
-    ~DiscoverContext() { delete m_obj; delete m_bus; }
-};
 
 OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
