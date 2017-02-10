@@ -188,8 +188,7 @@ static OCStackApplicationResult onDiscover(void *, OCDoHandle,
         while (payload)
         {
             Resource r;
-            r.uri = payload->baseURI ? payload->baseURI : host.str();
-            r.uri += payload->uri ? payload->uri : "/oic/res";
+            r.uri = (payload->baseURI ? payload->baseURI : host.str()) + "/oic/res";
             g_resources.push_back(r);
             OCResourcePayload *resource = (OCResourcePayload *) payload->resources;
             while (resource)
