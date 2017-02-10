@@ -60,7 +60,8 @@ struct Bridge::DiscoverContext
     std::string m_di;
     std::string m_host;
     VirtualBusAttachment *m_bus;
-    struct Resource {
+    struct Resource
+    {
         Resource(std::string uri, uint8_t bitmap, bool hasMultipleRts)
             : m_uri(uri), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
         std::string m_uri;
@@ -278,7 +279,8 @@ bool Bridge::Process()
         }
         if (!wasConnected && m_bus->IsConnected())
         {
-            std::string matchRule = "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
+            std::string matchRule =
+                "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
             if (m_sender)
             {
                 matchRule += ",sender='" + std::string(m_sender) + "'";
@@ -307,7 +309,8 @@ bool Bridge::Process()
             cbData.cb = Bridge::DiscoverCB;
             cbData.context = this;
             cbData.cd = NULL;
-            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER, OC_RSRVD_WELL_KNOWN_URI, NULL, 0,
+            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER, OC_RSRVD_WELL_KNOWN_URI,
+                                              NULL, 0,
                                               &cbData);
             if (result != OC_STACK_OK)
             {
@@ -489,8 +492,8 @@ static bool ComparePath(const char *a, const char *b)
 }
 
 VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus,
-                                               const char *name, ajn::SessionId sessionId, const char *path,
-                                               const char *ajSoftwareVersion)
+        const char *name, ajn::SessionId sessionId, const char *path,
+        const char *ajSoftwareVersion)
 {
     if (!strcmp(path, "/Config"))
     {
@@ -715,7 +718,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         {
             LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
         }
-    next:
+next:
         if (result != OC_STACK_OK)
         {
             thiz->m_discovered.erase(context);
@@ -828,7 +831,7 @@ exit:
 }
 
 OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
+                                       OCClientResponse *response)
 {
     (void) handle;
     DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
@@ -838,7 +841,8 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_resources.front().m_uri.c_str(),
+        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}",
+            context->m_resources.front().m_uri.c_str(),
             response, response ? response->payload : 0, response ? response->result : 0);
     }
     else
@@ -934,7 +938,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
     {
         /* Done */
         OCPresence *presence = new OCPresence(&response->devAddr, context->m_bus->GetDi().c_str(),
-            DISCOVER_PERIOD_SECS);
+                                              DISCOVER_PERIOD_SECS);
         if (!presence)
         {
             result = OC_STACK_ERROR;
@@ -993,8 +997,8 @@ bool Bridge::PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged)
 }
 
 OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
-                                              OCEntityHandlerRequest *request,
-                                              void *ctx)
+        OCEntityHandlerRequest *request,
+        void *ctx)
 {
     LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
         ctx, flag, request, ctx);

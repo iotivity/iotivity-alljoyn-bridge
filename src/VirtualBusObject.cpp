@@ -170,7 +170,8 @@ OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handl
 {
     ObserveContext *context = reinterpret_cast<ObserveContext *>(ctx);
     LOG(LOG_INFO, "[%p] ctx=%p,handle=%p,response=%p,{payload=%p,result=%d}",
-        context->m_obj, ctx, handle, response, response ? response->payload : 0, response ? response->result : 0);
+        context->m_obj, ctx, handle, response, response ? response->payload : 0,
+        response ? response->result : 0);
 
     std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
     if (response && response->result == OC_STACK_OK && response->payload)
@@ -337,7 +338,8 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
 {
     DoResourceContext *context = reinterpret_cast<DoResourceContext *>(ctx);
     LOG(LOG_INFO, "[%p] ctx=%p,handle=%p,response=%p,{payload=%p,result=%d}",
-        context->m_obj, ctx, handle, response, response ? response->payload : 0, response ? response->result : 0);
+        context->m_obj, ctx, handle, response, response ? response->payload : 0,
+        response ? response->result : 0);
 
     std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
     if (!response || response->result > OC_STACK_RESOURCE_CHANGED || !response->payload)

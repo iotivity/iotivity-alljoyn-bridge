@@ -25,14 +25,16 @@
 
 class BusAuthListener : public ajn::AuthListener
 {
-public:
-    virtual ~BusAuthListener() { }
-    virtual QStatus RequestCredentialsAsync(const char* authMechanism, const char* peerName, uint16_t authCount,
-                                            const char* userName, uint16_t credMask, void* authContext);
-    virtual QStatus VerifyCredentialsAsync(const char* authMechanism, const char* peerName, const Credentials& credentials,
-                                           void* authContext);
-    virtual void SecurityViolation(QStatus status, const ajn::Message& msg);
-    virtual void AuthenticationComplete(const char* authMechanism, const char* peerName, bool success);
+    public:
+        virtual ~BusAuthListener() { }
+        virtual QStatus RequestCredentialsAsync(const char *authMechanism, const char *peerName,
+                                                uint16_t authCount,
+                                                const char *userName, uint16_t credMask, void *authContext);
+        virtual QStatus VerifyCredentialsAsync(const char *authMechanism, const char *peerName,
+                                               const Credentials &credentials,
+                                               void *authContext);
+        virtual void SecurityViolation(QStatus status, const ajn::Message &msg);
+        virtual void AuthenticationComplete(const char *authMechanism, const char *peerName, bool success);
 };
 
 #endif

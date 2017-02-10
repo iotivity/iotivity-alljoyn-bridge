@@ -57,7 +57,8 @@ void LogWriteln(
     }
     va_list ap;
     va_start(ap, fmt);
-    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", getpid(), levels[severity], basename, line, function);
+    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", getpid(), levels[severity], basename, line,
+            function);
     vfprintf(fps[severity], fmt, ap);
     fprintf(fps[severity], "\n");
     fflush(fps[severity]);

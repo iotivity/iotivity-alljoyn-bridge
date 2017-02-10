@@ -66,14 +66,14 @@ VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const ch
     assert(m_iface);
     ajn::BusObject::AddInterface(*m_iface, ajn::BusObject::ANNOUNCED);
     const MethodEntry methodEntries[] =
-        {
-            { m_iface->GetMember("FactoryReset"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::FactoryReset) },
-            { m_iface->GetMember("GetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::GetConfigurations) },
-            { m_iface->GetMember("ResetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::ResetConfigurations) },
-            { m_iface->GetMember("Restart"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::Restart) },
-            { m_iface->GetMember("SetPasscode"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::SetPasscode) },
-            { m_iface->GetMember("UpdateConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::UpdateConfigurations) },
-        };
+    {
+        { m_iface->GetMember("FactoryReset"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::FactoryReset) },
+        { m_iface->GetMember("GetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::GetConfigurations) },
+        { m_iface->GetMember("ResetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::ResetConfigurations) },
+        { m_iface->GetMember("Restart"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::Restart) },
+        { m_iface->GetMember("SetPasscode"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::SetPasscode) },
+        { m_iface->GetMember("UpdateConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::UpdateConfigurations) },
+    };
     AddMethodHandlers(methodEntries, sizeof(methodEntries) / sizeof(methodEntries[0]));
 }
 
@@ -83,7 +83,7 @@ VirtualConfigBusObject::~VirtualConfigBusObject()
         this);
 }
 
-QStatus VirtualConfigBusObject::Get(const char* ifaceName, const char* propName, ajn::MsgArg& val)
+QStatus VirtualConfigBusObject::Get(const char *ifaceName, const char *propName, ajn::MsgArg &val)
 {
     if (!strcmp(ifaceName, "org.alljoyn.Config"))
     {
@@ -102,7 +102,8 @@ QStatus VirtualConfigBusObject::Get(const char* ifaceName, const char* propName,
     }
 }
 
-void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::Member* member, ajn::Message& msg)
+void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
 {
     LOG(LOG_INFO, "[%p] member=%p",
         this, member);
@@ -254,7 +255,8 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
     OICFree(dl);
 }
 
-void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescription::Member* member, ajn::Message& msg)
+void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
 {
     LOG(LOG_INFO, "[%p] member=%p",
         this, member);
@@ -304,7 +306,7 @@ void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescriptio
                 languageTag = defaultLanguage;
             }
             size_t dim[MAX_REP_ARRAY_DEPTH] = { 1, 0, 0 };
-            OCRepPayload** objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
+            OCRepPayload **objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
             if (!objArray)
             {
                 goto error;
@@ -347,7 +349,8 @@ void VirtualConfigBusObject::UpdateConfigurationsCB(ajn::Message &msg, OCRepPayl
     }
 }
 
-void VirtualConfigBusObject::ResetConfigurations(const ajn::InterfaceDescription::Member* member, ajn::Message& msg)
+void VirtualConfigBusObject::ResetConfigurations(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
 {
     (void) msg;
     LOG(LOG_INFO, "[%p] member=%p",
@@ -355,7 +358,8 @@ void VirtualConfigBusObject::ResetConfigurations(const ajn::InterfaceDescription
     MethodReply(msg, ER_NOT_IMPLEMENTED);
 }
 
-void VirtualConfigBusObject::SetPasscode(const ajn::InterfaceDescription::Member* member, ajn::Message& msg)
+void VirtualConfigBusObject::SetPasscode(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
 {
     (void) msg;
     LOG(LOG_INFO, "[%p] member=%p",
@@ -363,7 +367,8 @@ void VirtualConfigBusObject::SetPasscode(const ajn::InterfaceDescription::Member
     MethodReply(msg, ER_NOT_IMPLEMENTED);
 }
 
-void VirtualConfigBusObject::FactoryReset(const ajn::InterfaceDescription::Member* member, ajn::Message& msg)
+void VirtualConfigBusObject::FactoryReset(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
 {
     (void) msg;
     LOG(LOG_INFO, "[%p] member=%p",
@@ -402,7 +407,8 @@ void VirtualConfigBusObject::FactoryResetCB(ajn::Message &msg, OCRepPayload *pay
     }
 }
 
-void VirtualConfigBusObject::Restart(const ajn::InterfaceDescription::Member* member, ajn::Message& msg)
+void VirtualConfigBusObject::Restart(const ajn::InterfaceDescription::Member *member,
+                                     ajn::Message &msg)
 {
     (void) msg;
     LOG(LOG_INFO, "[%p] member=%p",

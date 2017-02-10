@@ -22,7 +22,7 @@
 
 #include "Name.h"
 
-class NameTranslationTest : public ::testing::TestWithParam<const char*> { };
+class NameTranslationTest : public ::testing::TestWithParam<const char *> { };
 
 TEST_P(NameTranslationTest, RoundTrip)
 {
@@ -33,20 +33,20 @@ TEST_P(NameTranslationTest, RoundTrip)
 INSTANTIATE_TEST_CASE_P(FromSpec,
                         NameTranslationTest,
                         ::testing::Values("example.Widget",
-                                          "example.my_widget",
-                                          "example.My_Widget",
-                                          "xn_p1ai.example",
-                                          "xn__90ae.example",
-                                          "example.myName_1"));
+                                "example.my_widget",
+                                "example.My_Widget",
+                                "xn_p1ai.example",
+                                "xn__90ae.example",
+                                "example.myName_1"));
 
 INSTANTIATE_TEST_CASE_P(Extras,
                         NameTranslationTest,
                         ::testing::Values("oneTwoThree",
-                                          "One_Two_Three",
-                                          "",
-                                          "x",
-                                          "example.foo_",
-                                          "example.foo__"));
+                                "One_Two_Three",
+                                "",
+                                "x",
+                                "example.foo_",
+                                "example.foo__"));
 
 TEST(NameTranslationTest, BoundsCheck)
 {

@@ -41,7 +41,7 @@ class VirtualConfigurationResource : public VirtualResource
                                      const char *ajSoftwareVersion);
 
         OCStackResult Create();
-        void IntrospectCB(QStatus status, ProxyBusObject* obj, void* context);
+        void IntrospectCB(QStatus status, ProxyBusObject *obj, void *context);
         void GetSupportedLanguagesCB(ajn::Message &msg, void *ctx);
         void GetAppNameCB(ajn::Message &msg, void *ctx);
         void GetConfigurationsCB(ajn::Message &msg, void *ctx);

@@ -62,7 +62,7 @@ void VirtualDevice::StartPresence()
 }
 
 void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
-                                             ajn::AboutData &aboutData)
+        ajn::AboutData &aboutData)
 {
     char *deviceId;
     aboutData.GetDeviceId(&deviceId);
@@ -100,7 +100,8 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
     }
     delete[] paths;
     std::string dmv;
-    for (std::set<std::string>::iterator it = dataModelVersions.begin(); it != dataModelVersions.end(); ++it)
+    for (std::set<std::string>::iterator it = dataModelVersions.begin(); it != dataModelVersions.end();
+         ++it)
     {
         if (it != dataModelVersions.begin())
         {

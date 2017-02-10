@@ -54,7 +54,8 @@ static void ToAppId(const char *di, uint8_t *appId)
     }
 }
 
-VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid, bool isGoldenUnit)
+VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid,
+        bool isGoldenUnit)
 {
     QStatus status;
     ajn::SessionOpts opts;

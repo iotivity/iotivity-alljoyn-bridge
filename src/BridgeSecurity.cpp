@@ -22,10 +22,12 @@
 
 #include "Plugin.h"
 
-QStatus BusAuthListener::RequestCredentialsAsync(const char* authMechanism, const char* peerName, uint16_t authCount,
-                                                 const char* userName, uint16_t credMask, void* authContext)
+QStatus BusAuthListener::RequestCredentialsAsync(const char *authMechanism, const char *peerName,
+        uint16_t authCount,
+        const char *userName, uint16_t credMask, void *authContext)
 {
-    LOG(LOG_INFO, "[%p] authMechanism=%s,peerName=%s,authCount=%u,userName=%s,credMask=0x%x,authContext=%p",
+    LOG(LOG_INFO,
+        "[%p] authMechanism=%s,peerName=%s,authCount=%u,userName=%s,credMask=0x%x,authContext=%p",
         this, authMechanism, peerName, authCount, userName, credMask, authContext);
 
     bool accept = true;
@@ -43,8 +45,9 @@ QStatus BusAuthListener::RequestCredentialsAsync(const char* authMechanism, cons
     return ER_OK;
 }
 
-QStatus BusAuthListener::VerifyCredentialsAsync(const char* authMechanism, const char* peerName, const Credentials& credentials,
-                                                void* authContext)
+QStatus BusAuthListener::VerifyCredentialsAsync(const char *authMechanism, const char *peerName,
+        const Credentials &credentials,
+        void *authContext)
 {
     (void) credentials;
     LOG(LOG_INFO, "[%p] authMechanism=%s,peerName=%s,credentials=,authContext=%p",
@@ -59,13 +62,14 @@ QStatus BusAuthListener::VerifyCredentialsAsync(const char* authMechanism, const
     return ER_OK;
 }
 
-void BusAuthListener::SecurityViolation(QStatus status, const ajn::Message& msg)
+void BusAuthListener::SecurityViolation(QStatus status, const ajn::Message &msg)
 {
     LOG(LOG_INFO, "[%p] status=%s,msg=%s",
         this, QCC_StatusText(status), msg->ToString().c_str());
 }
 
-void BusAuthListener::AuthenticationComplete(const char* authMechanism, const char* peerName, bool success)
+void BusAuthListener::AuthenticationComplete(const char *authMechanism, const char *peerName,
+        bool success)
 {
     LOG(LOG_INFO, "[%p] authMechanism=%s,peerName=%s,success=%d",
         this, authMechanism, peerName, success);

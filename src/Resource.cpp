@@ -32,7 +32,7 @@ OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query)
     OCStackResult result;
     OCRepPayload *payload = NULL;
     uint8_t n;
-    char** array = NULL;
+    char **array = NULL;
     size_t dim[MAX_REP_ARRAY_DEPTH] = { 0, 0, 0 };
 
     payload = OCRepPayloadCreate();
@@ -51,7 +51,7 @@ OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query)
         {
             goto error;
         }
-        array = (char**)OICCalloc(n, sizeof(char*));
+        array = (char **)OICCalloc(n, sizeof(char *));
         if (!array)
         {
             goto error;
@@ -75,7 +75,7 @@ OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query)
         {
             goto error;
         }
-        array = (char**)OICCalloc(n, sizeof(char*));
+        array = (char **)OICCalloc(n, sizeof(char *));
         if (!array)
         {
             goto error;
@@ -100,7 +100,7 @@ OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query)
 error:
     if (array)
     {
-        for(uint8_t i = 0; i < n; ++i)
+        for (uint8_t i = 0; i < n; ++i)
         {
             OICFree(array[i]);
         }

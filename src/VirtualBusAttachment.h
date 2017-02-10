@@ -41,7 +41,8 @@ class VirtualBusAttachment : public ajn::BusAttachment
         std::string GetDi() { return m_di; }
         std::string GetProtocolIndependentId() { return m_piid; }
         void SetAboutData(const char *uri, OCRepPayload *payload);
-        const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, bool emitsChanged, OCPayload *payload);
+        const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, bool emitsChanged,
+                OCPayload *payload);
         QStatus RegisterBusObject(VirtualBusObject *busObject);
         VirtualBusObject *GetBusObject(const char *path);
         QStatus Announce();
@@ -50,15 +51,15 @@ class VirtualBusAttachment : public ajn::BusAttachment
     private:
         class AboutData : public ajn::AboutData
         {
-        public:
-            AboutData()
-            {
-                SetNewFieldDetails("com.intel.Virtual", ajn::AboutData::ANNOUNCED, "b");
-            }
-            QStatus SetNewFieldDetails(const char* name, AboutFieldMask mask, const char* signature)
-            {
-                return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
-            }
+            public:
+                AboutData()
+                {
+                    SetNewFieldDetails("com.intel.Virtual", ajn::AboutData::ANNOUNCED, "b");
+                }
+                QStatus SetNewFieldDetails(const char *name, AboutFieldMask mask, const char *signature)
+                {
+                    return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
+                }
         };
 
         std::string m_di;

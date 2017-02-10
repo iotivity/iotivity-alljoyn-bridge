@@ -1245,7 +1245,8 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
             {
                 rts[i] = OCGetResourceTypeName(context->m_response->resourceHandle, i);
             }
-            if (!OCRepPayloadSetStringArray(context->m_payload, OC_RSRVD_RESOURCE_TYPE, (const char **)rts, dim))
+            if (!OCRepPayloadSetStringArray(context->m_payload, OC_RSRVD_RESOURCE_TYPE, (const char **)rts,
+                                            dim))
             {
                 context->m_response->ehResult = OC_EH_ERROR;
                 goto exit;
@@ -1274,7 +1275,7 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
                 goto exit;
             }
         }
-    exit:
+exit:
         if (context->m_response->ehResult == OC_EH_OK)
         {
             context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
