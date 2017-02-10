@@ -32,22 +32,28 @@
 class VirtualBusObject : public ajn::BusObject
 {
     public:
-        VirtualBusObject(ajn::BusAttachment *bus, const char *uri, OCDevAddr *devAddr);
+        VirtualBusObject(ajn::BusAttachment *bus, const char *uri, const char *host);
         virtual ~VirtualBusObject();
         QStatus AddInterface(const ajn::InterfaceDescription *iface);
-        void Observe();
-        void CancelObserve();
-        void Stop();
+        virtual void Observe();
+        virtual void CancelObserve();
+        virtual void Stop();
+
+    protected:
+        typedef void (VirtualBusObject::*DoResourceHandler)(ajn::Message &msg, OCRepPayload *payload);
+
+        std::mutex m_mutex;
+
+        void DoResource(OCMethod method, const char *uri, OCRepPayload *payload, ajn::Message &msg,
+                        DoResourceHandler cb);
 
     private:
-        typedef void (VirtualBusObject::*DoResourceHandler)(ajn::Message &msg, OCRepPayload *payload);
         class DoResourceContext;
         class ObserveContext;
 
-        std::mutex m_mutex;
         std::condition_variable m_cond;
         ajn::BusAttachment *m_bus;
-        OCDevAddr m_devAddr;
+        std::string m_host;
         std::vector<const ajn::InterfaceDescription *> m_ifaces;
         std::set<ObserveContext *> m_observes;
         size_t m_pending;
@@ -58,8 +64,6 @@ class VirtualBusObject : public ajn::BusObject
         void GetPropCB(ajn::Message &msg, OCRepPayload *payload);
         void SetPropCB(ajn::Message &msg, OCRepPayload *payload);
         void GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload);
-        void DoResource(OCMethod method, const char *uri, OCRepPayload *payload, ajn::Message &msg,
-                        DoResourceHandler cb);
         static OCStackApplicationResult DoResourceCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult ObserveCB(void *ctx, OCDoHandle handle, OCClientResponse *response);

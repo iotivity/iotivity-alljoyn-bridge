@@ -20,6 +20,7 @@
 
 #include "VirtualResource.h"
 
+#include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
 #include <alljoyn/AllJoynStd.h>
@@ -46,16 +47,6 @@ static bool TranslateInterface(const char *ifaceName)
              strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
              strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
              strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
-}
-
-static std::string GetResourceTypeName(std::string ifaceName, std::string suffix)
-{
-    return std::string("x.") + ifaceName + "." + suffix;
-}
-
-static std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix)
-{
-    return GetResourceTypeName(iface->GetName(), suffix);
 }
 
 static std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
@@ -237,8 +228,18 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
         }
         delete[] names;
         delete[] values;
+        if (!numProps && !numMembers)
+        {
+            std::string rt = GetResourceTypeName(ifaceName);
+            m_rts[rt] |= READ;
+        }
     }
     delete[] ifaces;
+    if (m_rts.empty())
+    {
+        LOG(LOG_INFO, "No translatable interfaces");
+        return;
+    }
 
     const ajn::InterfaceDescription *iface = m_bus->GetInterface(
                 ::ajn::org::freedesktop::DBus::Properties::InterfaceName);
@@ -266,6 +267,15 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
     {
         LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s",
             this, GetPath().c_str());
+        result = RDPublish();
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "RDPublish - %d", result);
+        }
+    }
+    else
+    {
+        LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
     }
 }
 
@@ -348,19 +358,6 @@ static uint8_t GetAccess(std::map<std::string, std::string> &query,
         }
     }
     return access;
-}
-
-static std::string GetInterface(std::string &rt)
-{
-    std::string::size_type b, e;
-    b = rt.find('.') + 1;
-    e = rt.rfind('.');
-    return rt.substr(b, e - b);
-}
-
-static std::string GetMember(std::string &rt)
-{
-    return rt.substr(rt.rfind('.') + 1);
 }
 
 /* Filter properties based on resource type and interface requested. */
@@ -772,10 +769,20 @@ handleRequest:
                             break;
                         }
                     }
+                    qcc::String propName = GetPropName(member, "validity");
+                    OCRepPayload *payload = (OCRepPayload *) request->payload;
+                    for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+                    {
+                        if (propName == value->name && (value->type != OCREP_PROP_BOOL || !value->b))
+                        {
+                            success = false;
+                            break;
+                        }
+                    }
                     const char *signature = member->signature.c_str();
                     const char *argSignature = signature;
                     const char *argNames = member->argNames.c_str();
-                    for (size_t i = 0; i < numArgs; ++i)
+                    for (size_t i = 0; success && i < numArgs; ++i)
                     {
                         ParseCompleteType(signature);
                         qcc::String sig(argSignature, signature - argSignature);

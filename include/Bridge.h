@@ -30,6 +30,7 @@
 #include <vector>
 #include <set>
 
+class BusAuthListener;
 class Presence;
 class VirtualBusAttachment;
 class VirtualBusObject;
@@ -48,8 +49,16 @@ class Bridge : private ajn::AboutListener
             AJ = (1 << 0),
             OC = (1 << 1),
         };
-        Bridge(Protocol protocols);
+        Bridge(const char *name, Protocol protocols);
+        Bridge(const char *name, const char *uuid, const char *sender);
         ~Bridge();
+
+        typedef void (*AnnouncedCB)(const char *uuid, const char *sender);
+        void SetAnnouncedCB(AnnouncedCB cb) { m_announcedCb = cb; }
+        typedef void (*SessionLostCB)();
+        void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
+        void SetGoldenUnit(bool isGoldenUnit) { m_isGoldenUnit = isGoldenUnit; }
+        void SetWhitelistAddress(const char *addr) { if (addr) m_whitelistAddr = addr; }
 
         bool Start();
         bool Stop();
@@ -58,9 +67,16 @@ class Bridge : private ajn::AboutListener
     private:
         static const time_t DISCOVER_PERIOD_SECS = 5;
 
+        AnnouncedCB m_announcedCb;
+        SessionLostCB m_sessionLostCb;
+        bool m_isGoldenUnit;
+        std::string m_whitelistAddr;
+
         std::mutex m_mutex;
         Protocol m_protocols;
+        const char *m_sender;
         ajn::BusAttachment *m_bus;
+        BusAuthListener *m_authListener;
         OCDoHandle m_discoverHandle;
         time_t m_discoverNextTick;
         std::vector<Presence *> m_presence;
@@ -69,6 +85,7 @@ class Bridge : private ajn::AboutListener
         std::vector<VirtualBusAttachment *> m_virtualBusAttachments;
         struct DiscoverContext;
         std::set<DiscoverContext *> m_discovered;
+        bool m_secureMode;
 
         void Destroy(const char *id);
         virtual void BusDisconnected();
@@ -78,7 +95,15 @@ class Bridge : private ajn::AboutListener
                                    void *context);
         void GetAboutDataCB(ajn::Message &msg, void *ctx);
         virtual void SessionLost(ajn::SessionId sessionId, ajn::SessionListener::SessionLostReason reason);
+        VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus,
+                                               const char *name, ajn::SessionId sessionId, const char *path,
+                                               const char *ajSoftwareVersion);
 
+        OCRepPayload *GetSecureMode(OCEntityHandlerRequest *request);
+        bool PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged);
+        static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
+                OCEntityHandlerRequest *request,
+                void *context);
         static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult GetPlatformCB(void *context, OCDoHandle handle,
@@ -88,7 +113,7 @@ class Bridge : private ajn::AboutListener
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
         OCStackResult CreateInterface(DiscoverContext *context, OCClientResponse *response);
-        OCStackApplicationResult GetNext(DiscoverContext *context, OCClientResponse *response);
+        OCStackApplicationResult Get(DiscoverContext *context, OCClientResponse *response);
 };
 
 #endif

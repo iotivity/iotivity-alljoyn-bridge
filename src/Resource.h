@@ -1,6 +1,6 @@
 //******************************************************************
 //
-// Copyright 2016 Intel Corporation All Rights Reserved.
+// Copyright 2017 Intel Corporation All Rights Reserved.
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //
@@ -18,16 +18,11 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _SIGNATURE_H
-#define _SIGNATURE_H
+#ifndef _RESOURCE_H
+#define _RESOURCE_h
 
 #include "octypes.h"
-#include <alljoyn/Status.h>
-#include <stdint.h>
 
-QStatus ParseCompleteType(const char *&sigPtr);
-uint8_t CountCompleteTypes(const char *signature);
-
-void CreateSignature(char *sig, OCRepPayloadValue *value);
+OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query);
 
 #endif

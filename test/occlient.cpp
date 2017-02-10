@@ -22,6 +22,7 @@
 #include <boost/tokenizer.hpp>
 #include <iostream>
 #include <poll.h>
+#include <sstream>
 
 #include "ocstack.h"
 #include "ocpayload.h"
@@ -171,7 +172,6 @@ static void LogResponse(OCMethod method, OCClientResponse *response)
 
 struct Resource
 {
-    OCDevAddr host;
     std::string uri;
 };
 static std::vector<Resource> g_resources;
@@ -182,19 +182,20 @@ static OCStackApplicationResult onDiscover(void *, OCDoHandle,
     LogResponse(OC_REST_DISCOVER, response);
     if (response)
     {
+        std::ostringstream host;
+        host << response->devAddr.addr << ":" << response->devAddr.port;
         OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload;
         while (payload)
         {
             Resource r;
-            r.host = response->devAddr;
-            r.uri = payload->uri ? payload->uri : "/oic/res";
+            r.uri = (payload->baseURI ? payload->baseURI : host.str()) + "/oic/res";
             g_resources.push_back(r);
             OCResourcePayload *resource = (OCResourcePayload *) payload->resources;
             while (resource)
             {
                 Resource r;
-                r.host = response->devAddr;
-                r.uri = resource->uri;
+                r.uri = payload->baseURI ? payload->baseURI : host.str();
+                r.uri += resource->uri;
                 g_resources.push_back(r);
                 resource = resource->next;
             }
@@ -294,9 +295,8 @@ int main(int, char **)
         {
             for (size_t i = 0; i < g_resources.size(); ++i)
             {
-                std::cout << "[" << i << "]" << std::endl;
-                std::cout << "\tcoap://" << g_resources[i].host.addr << ":" << g_resources[i].host.port <<
-                          g_resources[i].uri << std::endl;
+                std::cout << "[" << i << "] "
+                          << "coap://" << g_resources[i].uri << std::endl;
             }
         }
         else if (cmd == "find")
@@ -335,10 +335,9 @@ int main(int, char **)
             cbData.cb = onGet;
             cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(NULL, OC_REST_GET, uri.c_str(), &g_resources[i].host,
+            OCStackResult result = OCDoResource(NULL, OC_REST_GET, uri.c_str(), NULL,
                                                 NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
-            std::cout << "get " << g_resources[i].host.addr << ":" << g_resources[i].host.port <<
-                      g_resources[i].uri << " - " << result << std::endl;
+            std::cout << "get " << g_resources[i].uri << " - " << result << std::endl;
         }
         else if (cmd == "put")
         {
@@ -382,10 +381,9 @@ int main(int, char **)
             cbData.cb = onPost;
             cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(NULL, OC_REST_POST, uri.c_str(), &g_resources[i].host,
+            OCStackResult result = OCDoResource(NULL, OC_REST_POST, uri.c_str(), NULL,
                                                 (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
-            std::cout << "post " << g_resources[i].host.addr << ":" << g_resources[i].host.port <<
-                      g_resources[i].uri << " - " << result << std::endl;
+            std::cout << "post " << g_resources[i].uri << " - " << result << std::endl;
         }
         else if (cmd == "observe")
         {
@@ -413,10 +411,9 @@ int main(int, char **)
             cbData.cb = onObserve;
             cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(&handle, OC_REST_OBSERVE, uri.c_str(), &g_resources[i].host,
+            OCStackResult result = OCDoResource(&handle, OC_REST_OBSERVE, uri.c_str(), NULL,
                                                 NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
-            std::cout << "observe " << g_resources[i].host.addr << ":" << g_resources[i].host.port <<
-                      g_resources[i].uri << " (" << handle << ") - " << result << std::endl;
+            std::cout << "observe " << g_resources[i].uri << " (" << handle << ") - " << result << std::endl;
         }
         else if (cmd == "cancel")
         {

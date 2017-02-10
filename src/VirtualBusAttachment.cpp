@@ -21,7 +21,9 @@
 #include "VirtualBusAttachment.h"
 
 #include "Bridge.h"
+#include "Payload.h"
 #include "Plugin.h"
+#include "Signature.h"
 #include "VirtualBusObject.h"
 #include "ocstack.h"
 #include "ocpayload.h"
@@ -52,11 +54,11 @@ static void ToAppId(const char *di, uint8_t *appId)
     }
 }
 
-VirtualBusAttachment *VirtualBusAttachment::Create(const char *di)
+VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid, bool isGoldenUnit)
 {
     QStatus status;
     ajn::SessionOpts opts;
-    VirtualBusAttachment *busAttachment = new VirtualBusAttachment(di);
+    VirtualBusAttachment *busAttachment = new VirtualBusAttachment(di, piid, isGoldenUnit);
     {
         std::lock_guard<std::mutex> lock(busAttachment->m_mutex);
         status = busAttachment->Start();
@@ -87,11 +89,16 @@ exit:
     return busAttachment;
 }
 
-VirtualBusAttachment::VirtualBusAttachment(const char *di)
+VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, bool isGoldenUnit)
     : ajn::BusAttachment(di), m_di(di), m_numSessions(0), m_aboutObj(NULL)
 {
-    LOG(LOG_INFO, "[%p] di=%s",
-        this, di);
+    LOG(LOG_INFO, "[%p] di=%s,piid=%s",
+        this, di, piid);
+
+    if (piid)
+    {
+        m_piid = piid;
+    }
 
     m_aboutData.SetDefaultLanguage("");
     m_aboutData.SetDescription("");
@@ -111,6 +118,12 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di)
     ToAppId(di, appId);
     m_aboutData.SetAppId(appId, 16);
     m_aboutData.SetAppName("");
+
+    if (!isGoldenUnit)
+    {
+        ajn::MsgArg value("b", true);
+        m_aboutData.SetField("com.intel.Virtual", value);
+    }
 }
 
 VirtualBusAttachment::~VirtualBusAttachment()
@@ -151,53 +164,73 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_ID, &value))
         {
             uint8_t appId[16];
-            ToAppId((char *)value, appId);
+            ToAppId(value, appId);
             m_aboutData.SetAppId(appId, 16);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MFG_NAME, &value))
         {
-            m_aboutData.SetManufacturer((char *)value);
+            m_aboutData.SetManufacturer(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
         {
-            m_aboutData.SetModelNumber((char *)value);
+            m_aboutData.SetModelNumber(value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
+        {
+            m_aboutData.SetDateOfManufacture(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_SOFTWARE_VERSION, &value))
         {
-            m_aboutData.SetDateOfManufacture((char *)value);
+            m_aboutData.SetSoftwareVersion(value);
             OICFree(value);
             value = NULL;
+        }
+        /* Vendor-defined properties */
+        for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+        {
+            if (!strncmp(value->name, "x.", 2))
+            {
+                const char *fieldName = value->name + 2; /* Skip the leading x. */
+                char fieldSig[] = "aaaa{sv}";
+                CreateSignature(fieldSig, value);
+                ajn::MsgArg fieldValue;
+                ToAJMsgArg(&fieldValue, fieldSig, value);
+                m_aboutData.SetNewFieldDetails(fieldName, 0, fieldSig);
+                m_aboutData.SetField(fieldName, fieldValue);
+            }
         }
     }
     if (!strcmp(uri, OC_RSRVD_PLATFORM_URI))
     {
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_ID, &value))
         {
-            m_aboutData.SetDeviceId((char *)value);
+            m_aboutData.SetDeviceId(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
         {
-            m_aboutData.SetDateOfManufacture((char *)value);
+            m_aboutData.SetDateOfManufacture(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_HARDWARE_VERSION, &value))
         {
-            m_aboutData.SetHardwareVersion((char *)value);
+            m_aboutData.SetHardwareVersion(value);
             OICFree(value);
             value = NULL;
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_SUPPORT_URL, &value))
         {
-            m_aboutData.SetSupportUrl((char *)value);
+            m_aboutData.SetSupportUrl(value);
             OICFree(value);
             value = NULL;
         }
@@ -232,64 +265,8 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
     }
 }
 
-static void CreateSignature(char *sig, OCRepPayloadValue *value)
-{
-    switch (value->type)
-    {
-        case OCREP_PROP_NULL:
-            assert(0); /* Explicitly not supported */
-            break;
-        case OCREP_PROP_INT:
-            strcpy(sig, "i");
-            break;
-        case OCREP_PROP_DOUBLE:
-            strcpy(sig, "d");
-            break;
-        case OCREP_PROP_BOOL:
-            strcpy(sig, "b");
-            break;
-        case OCREP_PROP_STRING:
-            strcpy(sig, "s");
-            break;
-        case OCREP_PROP_BYTE_STRING:
-            strcpy(sig, "ay");
-            break;
-        case OCREP_PROP_OBJECT:
-            strcpy(sig, "a{sv}");
-            break;
-        case OCREP_PROP_ARRAY:
-            for (size_t i = 0; i < MAX_REP_ARRAY_DEPTH; ++i)
-            {
-                if (value->arr.dimensions[i])
-                {
-                    *sig++ = 'a';
-                }
-            }
-            switch (value->arr.type)
-            {
-                case OCREP_PROP_NULL:
-                case OCREP_PROP_INT:
-                case OCREP_PROP_DOUBLE:
-                case OCREP_PROP_BOOL:
-                case OCREP_PROP_STRING:
-                case OCREP_PROP_BYTE_STRING:
-                case OCREP_PROP_OBJECT:
-                    {
-                        OCRepPayloadValue valueArr;
-                        valueArr.type = value->arr.type;
-                        CreateSignature(sig, &valueArr);
-                        break;
-                    }
-                case OCREP_PROP_ARRAY:
-                    assert(0); /* Not supported - dimensions provide for arrays of arrays */
-                    break;
-            }
-            break;
-    }
-}
-
 const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char *ifaceName,
-        OCPayload *payload)
+        bool emitsChanged, OCPayload *payload)
 {
     LOG(LOG_INFO, "[%p] ifaceName=%s,payload=%p",
         this, ifaceName, payload);
@@ -328,7 +305,8 @@ const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const cha
             return NULL;
         }
         status = iface->AddPropertyAnnotation(value->name,
-                                              ajn::org::freedesktop::DBus::AnnotateEmitsChanged, "true");
+                                              ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
+                                              emitsChanged ? "true" : "false");
         if (status != ER_OK)
         {
             LOG(LOG_ERR, "AddPropertyAnnotation - %s", QCC_StatusText(status));
@@ -356,6 +334,18 @@ QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject)
         LOG(LOG_ERR, "RegisterBusObject - %s", QCC_StatusText(status));
     }
     return status;
+}
+
+VirtualBusObject *VirtualBusAttachment::GetBusObject(const char *path)
+{
+    for (VirtualBusObject *busObject : m_virtualBusObjects)
+    {
+        if (!strcmp(busObject->GetPath(), path))
+        {
+            return busObject;
+        }
+    }
+    return NULL;
 }
 
 QStatus VirtualBusAttachment::Announce()

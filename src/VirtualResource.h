@@ -19,7 +19,7 @@
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 #ifndef _VIRTUALRESOURCE_H
-#define _VIRTUALRESOURCE_h
+#define _VIRTUALRESOURCE_H
 
 #include <inttypes.h>
 #include <alljoyn/BusAttachment.h>
@@ -29,7 +29,7 @@
 #include <vector>
 
 class VirtualResource : public ajn::ProxyBusObject
-    , private ajn::ProxyBusObject::Listener
+    , protected ajn::ProxyBusObject::Listener
     , private ajn::BusAttachment::AddMatchAsyncCB
     , private ajn::BusAttachment::RemoveMatchAsyncCB
 {
@@ -39,17 +39,19 @@ class VirtualResource : public ajn::ProxyBusObject
                                        const char *ajSoftwareVersion);
         virtual ~VirtualResource();
 
-    private:
+    protected:
         std::mutex m_mutex;
         ajn::BusAttachment *m_bus;
-        std::string m_ajSoftwareVersion;
-        std::map<std::string, uint8_t> m_rts;
-        std::map<std::string, std::vector<OCObservationId>> m_observers;
-        std::map<OCObservationId, std::string> m_matchRules;
 
         VirtualResource(ajn::BusAttachment *bus,
                         const char *name, ajn::SessionId sessionId, const char *path,
                         const char *ajSoftwareVersion);
+
+    private:
+        std::string m_ajSoftwareVersion;
+        std::map<std::string, uint8_t> m_rts;
+        std::map<std::string, std::vector<OCObservationId>> m_observers;
+        std::map<OCObservationId, std::string> m_matchRules;
 
         OCStackResult Create();
         void IntrospectCB(ajn::Message &msg, void *ctx);

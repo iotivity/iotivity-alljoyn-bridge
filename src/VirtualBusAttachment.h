@@ -36,25 +36,41 @@ class VirtualBusAttachment : public ajn::BusAttachment
     , private ajn::SessionListener
 {
     public:
-        static VirtualBusAttachment *Create(const char *di);
+        static VirtualBusAttachment *Create(const char *di, const char *piid, bool isGoldenUnit = false);
         virtual ~VirtualBusAttachment();
         std::string GetDi() { return m_di; }
+        std::string GetProtocolIndependentId() { return m_piid; }
         void SetAboutData(const char *uri, OCRepPayload *payload);
-        const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, OCPayload *payload);
+        const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, bool emitsChanged, OCPayload *payload);
         QStatus RegisterBusObject(VirtualBusObject *busObject);
+        VirtualBusObject *GetBusObject(const char *path);
         QStatus Announce();
         void Stop();
 
     private:
+        class AboutData : public ajn::AboutData
+        {
+        public:
+            AboutData()
+            {
+                SetNewFieldDetails("com.intel.Virtual", ajn::AboutData::ANNOUNCED, "b");
+            }
+            QStatus SetNewFieldDetails(const char* name, AboutFieldMask mask, const char* signature)
+            {
+                return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
+            }
+        };
+
         std::string m_di;
+        std::string m_piid;
         std::mutex m_mutex;
-        ajn::AboutData m_aboutData;
+        AboutData m_aboutData;
         ajn::SessionPort m_port;
         uint32_t m_numSessions;
         std::vector<VirtualBusObject *> m_virtualBusObjects;
         ajn::AboutObj *m_aboutObj;
 
-        VirtualBusAttachment(const char *di);
+        VirtualBusAttachment(const char *di, const char *piid, bool isGoldenUnit);
         virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
                                          const ajn::SessionOpts &opts);
         virtual void SessionJoined(ajn::SessionPort port, ajn::SessionId id, const char *name);

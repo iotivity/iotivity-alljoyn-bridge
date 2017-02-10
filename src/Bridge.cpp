@@ -20,12 +20,20 @@
 
 #include "Bridge.h"
 
+#include "ocpayload.h"
 #include "ocstack.h"
+#include "oic_malloc.h"
+#include "oic_string.h"
 #include <alljoyn/AllJoynStd.h>
+#include "BridgeSecurity.h"
+#include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
+#include "Resource.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
+#include "VirtualConfigBusObject.h"
+#include "VirtualConfigurationResource.h"
 #include "VirtualDevice.h"
 #include "VirtualResource.h"
 #include <algorithm>
@@ -34,14 +42,34 @@
 
 static bool TranslateResourceType(const char *type)
 {
-    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0);
+    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_INTROSPECTION) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RD) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH) == 0 ||
+             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RES) == 0 ||
+             strcmp(type, "oic.d.bridge") == 0 ||
+             strcmp(type, "oic.r.doxm") == 0 ||
+             strcmp(type, "oic.r.pstat") == 0 ||
+             strcmp(type, "oic.r.securemode") == 0);
 }
 
-Bridge::Bridge(Protocol protocols)
-    : m_protocols(protocols), m_bus(NULL), m_discoverHandle(NULL), m_discoverNextTick(0)
+Bridge::Bridge(const char *name, Protocol protocols)
+    : m_announcedCb(NULL), m_sessionLostCb(NULL),
+      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
 {
-    m_bus = new ajn::BusAttachment("Bridge", true);
+    m_bus = new ajn::BusAttachment(name, true);
+}
+
+Bridge::Bridge(const char *name, const char *uuid, const char *sender)
+    : m_announcedCb(NULL), m_sessionLostCb(NULL),
+      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_authListener(NULL),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
+{
+    std::string nm = std::string(name) + uuid;
+    m_bus = new ajn::BusAttachment(nm.c_str(), true);
+    m_authListener = new BusAuthListener();
 }
 
 Bridge::~Bridge()
@@ -137,17 +165,29 @@ bool Bridge::Start()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-    if (!handle)
+    if (!m_sender)
     {
-        LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-        return false;
-    }
-    OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-        return false;
+        OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+        if (!handle)
+        {
+            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            return false;
+        }
+        OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+            return false;
+        }
+        result = CreateResource("/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
+                                OC_RSRVD_INTERFACE_READ_WRITE,
+                                Bridge::EntityHandlerCB, this,
+                                OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "CreateResource() - %d", result);
+            return false;
+        }
     }
     LOG(LOG_INFO, "di=%s", OCGetServerInstanceIDString());
 
@@ -190,6 +230,14 @@ bool Bridge::Process()
             {
                 LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
             }
+            status = m_bus->EnablePeerSecurity("ALLJOYN_ECDHE_ECDSA ALLJOYN_ECDHE_NULL ALLJOYN_ECDHE_PSK ALLJOYN_ECDHE_SPEKE "
+                                               "ALLJOYN_SRP_KEYX ALLJOYN_SRP_LOGON "
+                                               "GSSAPI",
+                                               m_authListener); // TODO NULL, true, permissionConfigurationListener);
+            if (status != ER_OK)
+            {
+                LOG(LOG_ERR, "EnablePeerSecurity - %s", QCC_StatusText(status));
+            }
         }
         bool wasConnected = m_bus->IsConnected();
         if (m_bus->IsStarted() && !m_bus->IsConnected())
@@ -201,10 +249,15 @@ bool Bridge::Process()
         }
         if (!wasConnected && m_bus->IsConnected())
         {
-            QStatus status = m_bus->WhoImplements(NULL, 0);
+            std::string matchRule = "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
+            if (m_sender)
+            {
+                matchRule += ",sender='" + std::string(m_sender) + "'";
+            }
+            QStatus status = m_bus->AddMatch(matchRule.c_str());
             if (status != ER_OK)
             {
-                LOG(LOG_ERR, "WhoImplements - %s", QCC_StatusText(status));
+                LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
             }
         }
     }
@@ -285,14 +338,37 @@ struct AnnouncedContext
 void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port,
                        const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
 {
-    (void) aboutDataArg;
-    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u", this, name, version, port);
-
-    m_mutex.lock();
     QStatus status;
     AnnouncedContext *context;
     ajn::SessionOpts opts;
 
+    ajn::AboutData aboutData(aboutDataArg);
+    char *deviceId;
+    aboutData.GetDeviceId(&deviceId);
+    uint8_t *appId;
+    size_t n;
+    aboutData.GetAppId(&appId, &n);
+    OCUUIdentity id;
+    DeriveUniqueId(&id, deviceId, appId, n);
+    char piid[UUID_IDENTITY_SIZE * 2 + 5];
+    snprintf(piid, UUID_IDENTITY_SIZE * 2 + 5,
+             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
+             id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
+
+    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piid);
+
+    ajn::MsgArg *value;
+    bool isVirtual;
+    if (aboutData.GetField("com.intel.Virtual", value) == ER_OK &&
+        value->Get("b", &isVirtual) == ER_OK &&
+        isVirtual)
+    {
+        LOG(LOG_INFO, "[%p] Ignoring virtual application", this);
+        return;
+    }
+
+    m_mutex.lock();
     /* Ignore Announce from self */
     for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
     {
@@ -301,6 +377,16 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
             m_mutex.unlock();
             return;
         }
+    }
+
+    if (!m_sender)
+    {
+        m_mutex.unlock();
+        if (m_announcedCb)
+        {
+            m_announcedCb(piid, name);
+        }
+        return;
     }
 
     /* Check if we've seen this Announce before */
@@ -373,6 +459,20 @@ static bool ComparePath(const char *a, const char *b)
     return (strcmp(a, b) < 0);
 }
 
+VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus,
+                                               const char *name, ajn::SessionId sessionId, const char *path,
+                                               const char *ajSoftwareVersion)
+{
+    if (!strcmp(path, "/Config"))
+    {
+        return VirtualConfigurationResource::Create(bus, name, sessionId, path, ajSoftwareVersion);
+    }
+    else
+    {
+        return VirtualResource::Create(bus, name, sessionId, path, ajSoftwareVersion);
+    }
+}
+
 void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
 {
     LOG(LOG_INFO, "[%p]", this);
@@ -428,7 +528,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
                                 std::inserter(add, add.begin()), ComparePath);
             for (size_t i = 0; i < add.size(); ++i)
             {
-                VirtualResource *resource = VirtualResource::Create(m_bus,
+                VirtualResource *resource = CreateVirtualResource(m_bus,
                                             context->m_name.c_str(), msg->GetSessionId(), add[i],
                                             ajSoftwareVersion);
                 if (resource)
@@ -449,7 +549,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             objectDescription.GetPaths(paths, numPaths);
             for (size_t i = 0; i < numPaths; ++i)
             {
-                VirtualResource *resource = VirtualResource::Create(m_bus,
+                VirtualResource *resource = CreateVirtualResource(m_bus,
                                             context->m_name.c_str(), msg->GetSessionId(), paths[i],
                                             ajSoftwareVersion);
                 if (resource)
@@ -477,18 +577,31 @@ void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::Session
             break;
         }
     }
+
+    if (m_sessionLostCb)
+    {
+        m_sessionLostCb();
+    }
 }
 
 struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
-    OCPresence *m_presence;
+    std::string m_di;
+    std::string m_host;
     VirtualBusAttachment *m_bus;
-    std::deque<std::string> m_uris;
+    struct Resource {
+        Resource(std::string uri, uint8_t bitmap, bool hasMultipleRts)
+            : m_uri(uri), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
+        std::string m_uri;
+        uint8_t m_bitmap;
+        bool m_hasMultipleRts;
+    };
+    std::deque<Resource> m_resources;
     VirtualBusObject *m_obj;
-    DiscoverContext(Bridge *bridge) : m_bridge(bridge), m_presence(NULL), m_bus(NULL),
+    DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
         m_obj(NULL) { }
-    ~DiscoverContext() { delete m_obj; delete m_bus; delete m_presence; }
+    ~DiscoverContext() { delete m_obj; delete m_bus; }
 };
 
 OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
@@ -496,95 +609,115 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
 {
     (void) handle;
     Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
-    LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
-    DiscoverContext *context = NULL;
-    OCCallbackData cbData;
+    if (!response || response->result != OC_STACK_OK)
+    {
+        return OC_STACK_KEEP_TRANSACTION;
+    }
+    if (!thiz->m_whitelistAddr.empty() && (thiz->m_whitelistAddr != response->devAddr.addr))
+    {
+        LOG(LOG_INFO, "[%p] Ignoring %s:%d", thiz, response->devAddr.addr, response->devAddr.port);
+        return OC_STACK_KEEP_TRANSACTION;
+    }
     OCDiscoveryPayload *payload;
-    if (!response || !response->payload || response->result != OC_STACK_OK)
+    for (payload = (OCDiscoveryPayload *) response->payload; payload; payload = payload->next)
     {
-        goto exit;
-    }
-    payload = (OCDiscoveryPayload *) response->payload;
-    if (!strcmp(payload->sid, GetServerInstanceIDString()))
-    {
-        /* Ignore responses from self */
-        goto exit;
-    }
+        DiscoverContext *context = NULL;
+        OCCallbackData cbData;
+        char targetUri[MAX_URI_LENGTH] = { 0 };
+        std::deque<DiscoverContext::Resource> resources;
 
-    /* Check if we've seen this response before */
-    for (std::vector<VirtualBusAttachment *>::iterator it = thiz->m_virtualBusAttachments.begin();
-         it != thiz->m_virtualBusAttachments.end(); ++it)
-    {
-        if ((*it)->GetDi() == payload->sid)
+        if (!strcmp(payload->sid, GetServerInstanceIDString()))
         {
-            goto exit;
+            /* Ignore responses from self */
+            goto next;
         }
-    }
-    for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
-         it != thiz->m_discovered.end(); ++it)
-    {
-        if ((*it)->m_bus->GetDi() == payload->sid)
-        {
-            goto exit;
-        }
-    }
 
-    context = new DiscoverContext(thiz);
-    context->m_presence = new OCPresence(&response->devAddr, payload->sid);
-    if (!context->m_presence)
-    {
-        goto exit;
-    }
-    context->m_bus = VirtualBusAttachment::Create(payload->sid);
-    if (!context->m_bus)
-    {
-        goto exit;
-    }
-    for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-         resource = resource->next)
-    {
-        bool multipleRts = resource->types && resource->types->next;
-        for (OCStringLL *type = resource->types; type; type = type->next)
+        /* Update presence status */
+        for (std::vector<Presence *>::iterator it = thiz->m_presence.begin();
+             it != thiz->m_presence.end(); ++it)
         {
-            if (!TranslateResourceType(type->value))
+            if ((*it)->GetId() == payload->sid)
             {
-                continue;
+                (*it)->Seen();
             }
-            std::string uri = resource->uri;
-            if (multipleRts)
+        }
+
+        /* Check if we've seen this response before */
+        for (std::vector<VirtualBusAttachment *>::iterator it = thiz->m_virtualBusAttachments.begin();
+             it != thiz->m_virtualBusAttachments.end(); ++it)
+        {
+            if ((*it)->GetDi() == payload->sid)
             {
+                goto next;
+            }
+        }
+        for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
+             it != thiz->m_discovered.end(); ++it)
+        {
+            if ((*it)->m_di == payload->sid)
+            {
+                goto next;
+            }
+        }
+
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            bool hasMultipleRts = resource->types && resource->types->next;
+            for (OCStringLL *type = resource->types; type; type = type->next)
+            {
+                if (!TranslateResourceType(type->value))
+                {
+                    continue;
+                }
+                std::string uri = resource->uri;
                 uri += std::string("?rt=") + type->value;
+                resources.push_back(DiscoverContext::Resource(uri, resource->bitmap, hasMultipleRts));
             }
-            else
-            {
-                uri += std::string("?rt=!") + type->value;
-            }
-            context->m_uris.push_back(uri);
         }
-    }
-    thiz->m_discovered.insert(context);
+        if (resources.empty())
+        {
+            continue;
+        }
 
-    cbData.cb = Bridge::GetPlatformCB;
-    cbData.context = context;
-    cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-    }
-exit:
-    if (result != OC_STACK_OK)
-    {
-        thiz->m_discovered.erase(context);
-        delete context;
+        context = new DiscoverContext(thiz, payload->sid);
+        if (payload->baseURI)
+        {
+            context->m_host = payload->baseURI;
+        }
+        else
+        {
+            char host[MAX_URI_LENGTH] = { 0 };
+            snprintf(host, MAX_URI_LENGTH, "%s:%d", response->devAddr.addr, response->devAddr.port);
+            context->m_host = host;
+        }
+        context->m_resources = resources;
+        thiz->m_discovered.insert(context);
+
+        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_DEVICE_URI);
+        cbData.cb = Bridge::GetDeviceCB;
+        cbData.context = context;
+        cbData.cd = NULL;
+        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
+        }
+    next:
+        if (result != OC_STACK_OK)
+        {
+            thiz->m_discovered.erase(context);
+            delete context;
+            context = NULL;
+        }
     }
     return OC_STACK_KEEP_TRANSACTION;
 }
 
-OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
+OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
     (void) handle;
@@ -594,27 +727,46 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
+    char targetUri[MAX_URI_LENGTH] = { 0 };
     OCCallbackData cbData;
     OCRepPayload *payload;
+    char *value = NULL;
     if (!response)
     {
         goto exit;
     }
     if (response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_INFO, "[%p] Missing /oic/p", thiz);
+        LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
     }
-    if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+    if (response->payload && response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
-        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", thiz,
+        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", thiz,
             response->payload->type);
+        goto exit;
     }
     payload = (OCRepPayload *) response->payload;
-    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    cbData.cb = Bridge::GetDeviceCB;
+    if (OCRepPayloadGetPropString(payload, "x.com.intel.virtual", &value))
+    {
+        LOG(LOG_INFO, "[%p] Ignoring virtual resource", thiz);
+        OICFree(value);
+        value = NULL;
+        goto exit;
+    }
+    OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value);
+    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value, thiz->m_isGoldenUnit);
+    OICFree(value);
+    value = NULL;
+    if (!context->m_bus)
+    {
+        goto exit;
+    }
+    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
+    snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_PLATFORM_URI);
+    cbData.cb = Bridge::GetPlatformCB;
     cbData.context = context;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_DEVICE_URI, &response->devAddr, NULL, &cbData);
+    result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
     if (result != OC_STACK_OK)
     {
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -628,7 +780,7 @@ exit:
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
+OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
     (void) handle;
@@ -640,56 +792,23 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     OCStackResult result = OC_STACK_ERROR;
     OCRepPayload *payload;
     OCCallbackData cbData;
-    std::string uri;
-    std::string path;
-    std::string rt;
     if (!response)
     {
         goto exit;
     }
     if (response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
+        LOG(LOG_INFO, "[%p] Missing /oic/p", thiz);
     }
-    if (response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+    if (response->payload && response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
-        LOG(LOG_INFO, "[%p] Unexpected /oic/d payload type: %d", thiz,
+        LOG(LOG_INFO, "[%p] Unexpected /oic/p payload type: %d", thiz,
             response->payload->type);
-    }
-    payload = (OCRepPayload *) response->payload;
-    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
-    if (context->m_uris.empty())
-    {
         goto exit;
     }
-    uri = context->m_uris.front();
-    path = uri.substr(0, uri.find("?"));
-    context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
-    rt = uri.substr(uri.find("rt=") + 3);
-    if (rt[0] == '!')
-    {
-        uri = path;
-        rt = rt.substr(1);
-    }
-    if (rt.find("oic.d.") == 0)
-    {
-        /* Don't need to issue a GET for device types */
-        thiz->CreateInterface(context, response);
-        return thiz->GetNext(context, response);
-    }
-    else
-    {
-        cbData.cb = Bridge::GetCB;
-        cbData.context = context;
-        cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
-        if (result != OC_STACK_OK)
-        {
-            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-            goto exit;
-        }
-        return OC_STACK_DELETE_TRANSACTION;
-    }
+    payload = (OCRepPayload *) response->payload;
+    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
+    return thiz->Get(context, response);
 exit:
     if (result != OC_STACK_OK)
     {
@@ -710,25 +829,24 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
-        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_uris.front().c_str(),
+        LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}", context->m_resources.front().m_uri.c_str(),
             response, response ? response->payload : 0, response ? response->result : 0);
     }
     else
     {
         thiz->CreateInterface(context, response);
     }
-    return thiz->GetNext(context, response);
+    context->m_resources.pop_front();
+    return thiz->Get(context, response);
 }
 
 OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse *response)
 {
-    std::string uri = context->m_uris.front();
+    bool isObservable = context->m_resources.front().m_bitmap & OC_OBSERVABLE;
+    std::string uri = context->m_resources.front().m_uri;
     std::string rt = uri.substr(uri.find("rt=") + 3);
-    if (rt[0] == '!')
-    {
-        rt = rt.substr(1);
-    }
-    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(rt.c_str(), response->payload);
+    const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(ToAJName(rt).c_str(),
+            isObservable, response->payload);
     if (!iface)
     {
         return OC_STACK_ERROR;
@@ -737,44 +855,83 @@ OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse
     return OC_STACK_OK;
 }
 
-OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientResponse *response)
+OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse *response)
 {
+    (void) response;
     OCStackResult result = OC_STACK_ERROR;
 
-    context->m_uris.pop_front();
-    if (!context->m_uris.empty())
+    if (!context->m_resources.empty())
     {
-        std::string uri = context->m_uris.front();
-        std::string path = uri.substr(0, uri.find("?"));
-        if (uri.find(context->m_obj->GetPath()) == std::string::npos)
+        std::string uri = context->m_resources.front().m_uri;
+        if (context->m_obj && uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
             QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
             if (status != ER_OK)
             {
                 delete context->m_obj;
-                context->m_obj = NULL;
             }
-            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), &response->devAddr);
+            context->m_obj = NULL;
+        }
+        std::string path = uri.substr(0, uri.find("?"));
+        if (path == "/oic/con" ||
+            path == "/oic/mnt")
+        {
+            VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
+            if (!obj)
+            {
+                obj = new VirtualConfigBusObject(context->m_bus, context->m_host.c_str());
+                QStatus status = context->m_bus->RegisterBusObject(obj);
+                if (status != ER_OK)
+                {
+                    delete obj;
+                }
+            }
+            context->m_resources.pop_front();
+            return Get(context, response);
+        }
+        if (!context->m_obj)
+        {
+            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
         }
         std::string rt = uri.substr(uri.find("rt=") + 3);
-        if (rt[0] == '!')
+        if (rt.find("oic.d.") == 0)
         {
-            uri = path;
+            /* Don't need to issue a GET for device types */
+            CreateInterface(context, response);
+            context->m_resources.pop_front();
+            return Get(context, response);
         }
-        OCCallbackData cbData;
-        cbData.cb = Bridge::GetCB;
-        cbData.context = context;
-        cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, uri.c_str(), &response->devAddr, NULL, &cbData);
-        if (result != OC_STACK_OK)
+        else
         {
-            LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
-            goto exit;
+            if (!context->m_resources.front().m_hasMultipleRts)
+            {
+                uri = path;
+            }
+            char targetUri[MAX_URI_LENGTH] = { 0 };
+            snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
+            OCCallbackData cbData;
+            cbData.cb = Bridge::GetCB;
+            cbData.context = context;
+            cbData.cd = NULL;
+            result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+            if (result != OC_STACK_OK)
+            {
+                LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
+                goto exit;
+            }
         }
     }
     else
     {
         /* Done */
+        OCPresence *presence = new OCPresence(&response->devAddr, context->m_bus->GetDi().c_str(),
+            DISCOVER_PERIOD_SECS);
+        if (!presence)
+        {
+            result = OC_STACK_ERROR;
+            goto exit;
+        }
+        m_presence.push_back(presence);
         QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
         if (status != ER_OK)
         {
@@ -789,8 +946,6 @@ OCStackApplicationResult Bridge::GetNext(DiscoverContext *context, OCClientRespo
         }
         m_virtualBusAttachments.push_back(context->m_bus);
         context->m_bus = NULL; /* context->m_bus now belongs to thiz */
-        m_presence.push_back(context->m_presence);
-        context->m_presence = NULL; /* context->m_presence now belongs to thiz */
         result = OC_STACK_OK;
         m_discovered.erase(context);
         delete context;
@@ -802,4 +957,104 @@ exit:
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCRepPayload *Bridge::GetSecureMode(OCEntityHandlerRequest *request)
+{
+    OCRepPayload *payload = CreatePayload(request->resource, request->query);
+    if (!OCRepPayloadSetPropBool(payload, "secureMode", m_secureMode))
+    {
+        OCRepPayloadDestroy(payload);
+        payload = NULL;
+    }
+    return payload;
+}
+
+bool Bridge::PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged)
+{
+    OCRepPayload *payload = (OCRepPayload *) request->payload;
+    bool secureMode;
+    if (!OCRepPayloadGetPropBool(payload, "secureMode", &secureMode))
+    {
+        return false;
+    }
+    hasChanged = (m_secureMode != secureMode);
+    m_secureMode = secureMode;
+    return true;
+}
+
+OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
+                                              OCEntityHandlerRequest *request,
+                                              void *ctx)
+{
+    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
+        ctx, flag, request, ctx);
+
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    thiz->m_mutex.lock();
+    bool hasChanged = false;
+    OCEntityHandlerResult result;
+    switch (request->method)
+    {
+        case OC_REST_GET:
+            {
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *payload = thiz->GetSecureMode(request);
+                if (!payload)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(payload);
+                OCStackResult doResult = DoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    OCRepPayloadDestroy(payload);
+                }
+                break;
+            }
+        case OC_REST_POST:
+            {
+                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                if (!thiz->PostSecureMode(request, hasChanged))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *outPayload = thiz->GetSecureMode(request);
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(outPayload);
+                OCStackResult doResult = DoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    OCRepPayloadDestroy(outPayload);
+                }
+                break;
+            }
+        default:
+            result = OC_EH_METHOD_NOT_ALLOWED;
+            break;
+    }
+    thiz->m_mutex.unlock();
+    if (hasChanged)
+    {
+        OCNotifyAllObservers(request->resource, OC_NA_QOS);
+    }
+    return result;
 }

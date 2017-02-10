@@ -56,7 +56,7 @@ if env.get('VERBOSE') == False:
 env['TARGET_OS'] = platform.system().lower()
 
 # these must agree with options used in building IoTivity
-env['CPPDEFINES'] = ['ROUTING_EP']
+env['CPPDEFINES'] = ['ROUTING_EP', 'RD_SERVER', 'RD_CLIENT']
 
 if env['TARGET_OS'] == 'linux':
 
@@ -123,7 +123,9 @@ iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_malloc/include',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_string/include',
                                '${IOTIVITY_BASE}/resource/c_common',
+                               '${IOTIVITY_BASE}/resource/csdk/include',
                                '${IOTIVITY_BASE}/resource/csdk/logger/include',
+                               '${IOTIVITY_BASE}/resource/csdk/resource-directory/include',
                                '${IOTIVITY_BASE}/resource/csdk/stack/include',
                                '${IOTIVITY_BASE}/resource/include',
                                '${IOTIVITY_BASE}/resource/oc_logger/include']
@@ -140,7 +142,7 @@ env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
 env['LIBPATH'] = ['${ALLJOYN_DIST}/cpp/lib',
                   '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
 
-alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/bridge', exports= 'env', duplicate=0)
+alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/src', exports= 'env', duplicate=0)
 env.Install('${BUILD_DIR}/libs', alljoynplugin_lib)
 
 # build examples
@@ -148,3 +150,6 @@ env.SConscript('examples/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/exa
 
 # build tests
 env.SConscript('test/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/test', exports= ['env', 'iotivity_resource_inc_paths'], duplicate=0)
+
+# build unit tests
+env.SConscript('unittest/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/unittests', exports=['env'], duplicate=0)

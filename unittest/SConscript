@@ -1,6 +1,6 @@
 #******************************************************************
 #
-# Copyright 2016 Intel Corporation All Rights Reserved.
+# Copyright 2017 Intel Corporation All Rights Reserved.
 #
 #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 #
@@ -19,18 +19,14 @@
 #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 Import('env')
-Import('iotivity_resource_inc_paths')
-Import('alljoynplugin_lib')
 
-alljoyn_libs = ['alljoyn', 'ajrouter']
-oic_libs = ['octbstack', 'connectivity_abstraction', 'resource_directory']
-
-env_bridge = env.Clone()
-bridge_cpp = ['Plugin.cpp',
-              'AllJoynBridge.cpp']
-manager_cpp = ['PluginManager.cpp']
-env_bridge.AppendUnique(LIBS = [alljoyn_libs, oic_libs, alljoynplugin_lib])
-examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp),
-                 env_bridge.Program('PluginManager', manager_cpp)]
-
-env.Install('#/${BUILD_DIR}/bin', examples_bins)
+env_unittest = env.Clone();
+env_unittest.VariantDir('src', '../src')
+unittest_cpp = ['AllJoynBridgeTest.cpp',
+                'src/Name.cpp',
+                '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
+                '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
+env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include', '#/src'])
+env_unittest.AppendUnique(LIBS = ['pthread'])
+unittest_bins = env_unittest.Program('AllJoynBridgeTest', unittest_cpp)
+env.Install('#/${BUILD_DIR}/bin', unittest_bins)

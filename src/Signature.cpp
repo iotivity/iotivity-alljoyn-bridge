@@ -102,3 +102,59 @@ uint8_t CountCompleteTypes(const char *signature)
     }
     return count;
 }
+
+void CreateSignature(char *sig, OCRepPayloadValue *value)
+{
+    switch (value->type)
+    {
+        case OCREP_PROP_NULL:
+            assert(0); /* Explicitly not supported */
+            break;
+        case OCREP_PROP_INT:
+            strcpy(sig, "i");
+            break;
+        case OCREP_PROP_DOUBLE:
+            strcpy(sig, "d");
+            break;
+        case OCREP_PROP_BOOL:
+            strcpy(sig, "b");
+            break;
+        case OCREP_PROP_STRING:
+            strcpy(sig, "s");
+            break;
+        case OCREP_PROP_BYTE_STRING:
+            strcpy(sig, "ay");
+            break;
+        case OCREP_PROP_OBJECT:
+            strcpy(sig, "a{sv}");
+            break;
+        case OCREP_PROP_ARRAY:
+            for (size_t i = 0; i < MAX_REP_ARRAY_DEPTH; ++i)
+            {
+                if (value->arr.dimensions[i])
+                {
+                    *sig++ = 'a';
+                }
+            }
+            switch (value->arr.type)
+            {
+                case OCREP_PROP_NULL:
+                case OCREP_PROP_INT:
+                case OCREP_PROP_DOUBLE:
+                case OCREP_PROP_BOOL:
+                case OCREP_PROP_STRING:
+                case OCREP_PROP_BYTE_STRING:
+                case OCREP_PROP_OBJECT:
+                    {
+                        OCRepPayloadValue valueArr;
+                        valueArr.type = value->arr.type;
+                        CreateSignature(sig, &valueArr);
+                        break;
+                    }
+                case OCREP_PROP_ARRAY:
+                    assert(0); /* Not supported - dimensions provide for arrays of arrays */
+                    break;
+            }
+            break;
+    }
+}

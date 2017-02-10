@@ -22,6 +22,7 @@
 
 #include "ocpayload.h"
 #include "ocstack.h"
+#include "rd_client.h"
 #include <map>
 #include <stdarg.h>
 #include <stdio.h>
@@ -31,8 +32,7 @@
 #include <openssl/sha.h>
 #endif
 
-static std::map<std::string, OCResourceHandle> g_resources;
-static uint32_t g_presence;
+std::string gRD;
 
 void LogWriteln(
     const char *file,
@@ -43,7 +43,7 @@ void LogWriteln(
     ...
 )
 {
-    static FILE *fps[] = { NULL, NULL, NULL, stderr, NULL, NULL, stdout };
+    static FILE *fps[] = { NULL, NULL, NULL, stderr, NULL, NULL, stderr };
     static const char *levels[] = { NULL, NULL, NULL, "ERR ", NULL, NULL, "INFO" };
 
     const char *basename = strrchr(file, '/');
@@ -57,9 +57,10 @@ void LogWriteln(
     }
     va_list ap;
     va_start(ap, fmt);
-    fprintf(fps[severity], "%s %s:%d::%s - ", levels[severity], basename, line, function);
+    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", getpid(), levels[severity], basename, line, function);
     vfprintf(fps[severity], fmt, ap);
     fprintf(fps[severity], "\n");
+    fflush(fps[severity]);
     va_end(ap);
 }
 
@@ -68,7 +69,8 @@ const char *GetServerInstanceIDString()
     return OCGetServerInstanceIDString();
 }
 
-static void DeriveDi(OCUUIdentity *di, const char *name)
+void DeriveUniqueId(OCUUIdentity *id, const char *deviceId,
+                    uint8_t *appId, size_t n)
 {
     static const OCUUIdentity ns =
     {
@@ -85,7 +87,11 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
     }
     if (ret)
     {
-        ret = SHA1_Update(&ctx, name, strlen(name));
+        ret = SHA1_Update(&ctx, deviceId, strlen(deviceId));
+    }
+    if (ret && appId && n)
+    {
+        ret = SHA1_Update(&ctx, appId, n);
     }
     if (ret)
     {
@@ -93,7 +99,7 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
     }
     if (!ret)
     {
-        LOG(LOG_ERR, "SHA1 - %d\n", ret);
+        LOG(LOG_ERR, "SHA1 - %d", ret);
     }
 #elif _WIN32
     BCRYPT_ALG_HANDLE hAlg = NULL;
@@ -119,7 +125,11 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
     }
     if (BCRYPT_SUCCESS(status))
     {
-        status = BCryptHashData(hHash, (PUCHAR)name, strlen(name), 0);
+        status = BCryptHashData(hHash, (PUCHAR)deviceId, strlen(deviceId), 0);
+    }
+    if (BCRYPT_SUCCESS(status) && appId && n)
+    {
+        status = BCryptHashData(hHash, (PUCHAR)appId, n, 0);
     }
     if (BCRYPT_SUCCESS(status))
     {
@@ -127,7 +137,7 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
     }
     if (!BCRYPT_SUCCESS(status))
     {
-        LOG(LOG_ERR, "SHA1 - 0x%x\n", status);
+        LOG(LOG_ERR, "SHA1 - 0x%x", status);
     }
     if (hAlg)
     {
@@ -143,172 +153,17 @@ static void DeriveDi(OCUUIdentity *di, const char *name)
 #endif
     digest[7] = (digest[7] & 0x0f) | 0x50;
     digest[8] = (digest[8] & 0x3f) | 0x80;
-    memcpy(di->id, digest, UUID_IDENTITY_SIZE);
-}
-
-OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
-                                       ajn::AboutData &aboutData)
-{
-    char *deviceId;
-    aboutData.GetDeviceId(&deviceId);
-    OCUUIdentity di;
-    DeriveDi(&di, deviceId);
-
-    char *value = NULL;
-    aboutData.GetAppName(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, value);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, "0.3");
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_ID, OCGetServerInstanceIDString());
-    std::set<std::string> dataModelVersions;
-    size_t numPaths = objectDescription.GetPaths(NULL, 0);
-    const char **paths = new const char *[numPaths];
-    objectDescription.GetPaths(paths, numPaths);
-    for (size_t p = 0; p < numPaths; ++p)
-    {
-        size_t numIfaces = objectDescription.GetInterfaces(paths[p], NULL, 0);
-        const char **ifaces = new const char *[numIfaces];
-        objectDescription.GetInterfaces(paths[p], ifaces, numIfaces);
-        for (size_t i = 0; i < numIfaces; ++i)
-        {
-            dataModelVersions.insert(std::string(ifaces[i]) + ".1");
-        }
-        delete[] ifaces;
-    }
-    delete[] paths;
-    OCStringLL *dmv = NULL;
-    for (std::string dataModelVersion : dataModelVersions)
-    {
-        OCResourcePayloadAddStringLL(&dmv, dataModelVersion.c_str());
-    }
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, dmv);
-    OCFreeOCStringLL(dmv);
-    value = NULL;
-    aboutData.GetSoftwareVersion(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SOFTWARE_VERSION, value);
-    value = NULL;
-    aboutData.GetManufacturer(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MFG_NAME, value);
-    value = NULL;
-    aboutData.GetModelNumber(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, value);
-
-    unsigned int id[16];
-    if (sscanf(deviceId, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-               &id[0], &id[1], &id[2], &id[3], &id[4], &id[5], &id[6], &id[7],
-               &id[8], &id[9], &id[10], &id[11], &id[12], &id[13], &id[14], &id[15]) == 16)
-    {
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, deviceId);
-    }
-    else if (sscanf(deviceId, "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-                    &id[0], &id[1], &id[2], &id[3], &id[4], &id[5], &id[6], &id[7],
-                    &id[8], &id[9], &id[10], &id[11], &id[12], &id[13], &id[14], &id[15]) == 16)
-    {
-        char uuid[UUID_IDENTITY_SIZE * 2 + 5];
-        snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
-                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 id[0], id[1], id[2], id[3], id[4], id[5], id[6], id[7],
-                 id[8], id[9], id[10], id[11], id[12], id[13], id[14], id[15]);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
-    }
-    else
-    {
-        char uuid[UUID_IDENTITY_SIZE * 2 + 5];
-        snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
-                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 di.id[0], di.id[1], di.id[2], di.id[3], di.id[4], di.id[5], di.id[6], di.id[7],
-                 di.id[8], di.id[9], di.id[10], di.id[11], di.id[12], di.id[13], di.id[14], di.id[15]);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
-    }
-    value = NULL;
-    aboutData.GetManufacturer(&value);
-    if (value)
-    {
-        char mfgName[17];
-        strncpy(mfgName, value, 17);
-        mfgName[16] = '\0';
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, mfgName);
-    }
-    ajn::MsgArg *valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.mnml", valueArg);
-    if (valueArg)
-    {
-        value = NULL;
-        valueArg->Get("s", &value);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_URL, value);
-    }
-    value = NULL;
-    aboutData.GetModelNumber(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MODEL_NUM, value);
-    value = NULL;
-    aboutData.GetDateOfManufacture(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_DATE, value);
-    valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.mnpv", valueArg);
-    if (valueArg)
-    {
-        value = NULL;
-        valueArg->Get("s", &value);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_VERSION, value);
-    }
-    valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.mnos", valueArg);
-    if (valueArg)
-    {
-        value = NULL;
-        valueArg->Get("s", &value);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_OS_VERSION, value);
-    }
-    value = NULL;
-    aboutData.GetHardwareVersion(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_HARDWARE_VERSION, value);
-    valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.mnfv", valueArg);
-    if (valueArg)
-    {
-        value = NULL;
-        valueArg->Get("s", &value);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_FIRMWARE_VERSION, value);
-    }
-    value = NULL;
-    aboutData.GetSupportUrl(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SUPPORT_URL, value);
-    valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.st", valueArg);
-    if (valueArg)
-    {
-        value = NULL;
-        valueArg->Get("s", &value);
-        OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SYSTEM_TIME, value);
-    }
-    value = NULL;
-    aboutData.GetDeviceId(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_VID, value);
-
-    return OC_STACK_OK;
+    memcpy(id->id, digest, UUID_IDENTITY_SIZE);
 }
 
 OCStackResult StartPresence()
 {
-    if (g_presence++ == 0)
-    {
-        return OCStartPresence(0);
-    }
-    else
-    {
-        return OC_STACK_OK;
-    }
+    return OC_STACK_OK;
 }
 
 OCStackResult StopPresence()
 {
-    if (g_presence > 0 && --g_presence == 0)
-    {
-        return OCStopPresence();
-    }
-    else
-    {
-        return OC_STACK_OK;
-    }
+    return OC_STACK_OK;
 }
 
 OCStackResult CreateResource(const char *uri,
@@ -318,47 +173,35 @@ OCStackResult CreateResource(const char *uri,
                              void *callbackParam,
                              uint8_t properties)
 {
-    OCResourceHandle handle;
-    OCStackResult result = OCCreateResource(&handle, typeName, interfaceName, uri,
-                                            entityHandler, callbackParam, properties);
-    if (result == OC_STACK_OK)
+    OCStackResult result;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
+    if (handle)
     {
-        g_resources[uri] = handle;
+        result = OC_STACK_OK;
+    }
+    else
+    {
+        result = OCCreateResource(&handle, typeName, interfaceName, uri,
+                                  entityHandler, callbackParam, properties);
     }
     return result;
 }
 
 OCStackResult DestroyResource(const char *uri)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = g_resources.find(uri);
-    if (it == g_resources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
-    g_resources.erase(it);
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCDeleteResource(handle);
 }
 
 OCStackResult AddResourceType(const char *uri, const char *typeName)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = g_resources.find(uri);
-    if (it == g_resources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCBindResourceTypeToResource(handle, typeName);
 }
 
 OCStackResult AddInterface(const char *uri, const char *interfaceName)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = g_resources.find(uri);
-    if (it == g_resources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCBindResourceInterfaceToResource(handle, interfaceName);
 }
 
@@ -388,12 +231,42 @@ OCStackResult NotifyListOfObservers(const char *uri,
                                     uint8_t numberOfIds,
                                     OCRepPayload *payload)
 {
-    std::map<std::string, OCResourceHandle>::iterator it = g_resources.find(uri);
-    if (it == g_resources.end())
-    {
-        return OC_STACK_ERROR;
-    }
-    OCResourceHandle handle = it->second;
+    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
     return OCNotifyListOfObservers(handle, obsIdList, numberOfIds, payload,
                                    OC_HIGH_QOS);
+}
+
+static OCStackApplicationResult RDPublishCB(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    (void) ctx;
+    (void) handle;
+    LOG(LOG_INFO, "response=%p,response->result=%d",
+        response, response ? response->result : 0);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackResult RDPublish()
+{
+    uint8_t nr;
+    OCStackResult result = OCGetNumberOfResources(&nr);
+    if (result != OC_STACK_OK)
+    {
+        return result;
+    }
+    OCResourceHandle hs[nr];
+    uint8_t nhs = 0;
+    for (uint8_t i = 0; i < nr; ++i)
+    {
+        OCResourceHandle h = OCGetResourceHandle(i);
+        if (OCGetResourceProperties(h) & OC_DISCOVERABLE)
+        {
+            hs[nhs++] = h;
+        }
+    }
+    OCCallbackData cbData;
+    cbData.cb = RDPublishCB;
+    cbData.context = NULL;
+    cbData.cd = NULL;
+    return OCRDPublish(gRD.c_str(), CT_DEFAULT, hs, nhs, &cbData, OC_HIGH_QOS);
 }

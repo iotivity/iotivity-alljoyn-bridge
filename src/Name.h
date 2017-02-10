@@ -1,6 +1,6 @@
 //******************************************************************
 //
-// Copyright 2016 Intel Corporation All Rights Reserved.
+// Copyright 2017 Intel Corporation All Rights Reserved.
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //
@@ -18,16 +18,20 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _SIGNATURE_H
-#define _SIGNATURE_H
+#ifndef _NAME_H
+#define _NAME_H
 
-#include "octypes.h"
-#include <alljoyn/Status.h>
-#include <stdint.h>
+#include <alljoyn/InterfaceDescription.h>
+#include <string>
 
-QStatus ParseCompleteType(const char *&sigPtr);
-uint8_t CountCompleteTypes(const char *signature);
+std::string ToOCName(std::string ajName);
+std::string ToAJName(std::string ocName);
 
-void CreateSignature(char *sig, OCRepPayloadValue *value);
+std::string GetResourceTypeName(std::string ifaceName);
+std::string GetResourceTypeName(std::string ifaceName, std::string suffix);
+std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix);
+
+std::string GetInterface(std::string rt);
+std::string GetMember(std::string rt);
 
 #endif
