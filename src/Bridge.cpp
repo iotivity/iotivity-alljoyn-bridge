@@ -207,6 +207,18 @@ bool Bridge::Start()
             LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
             return false;
         }
+        handle = OCGetResourceHandleAtUri(OC_RSRVD_WELL_KNOWN_URI);
+        if (!handle)
+        {
+            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            return false;
+        }
+        result = OCSetResourceProperties(handle, OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetResourceProperties() - %d", result);
+            return false;
+        }
         result = CreateResource("/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
                                 OC_RSRVD_INTERFACE_READ_WRITE,
                                 Bridge::EntityHandlerCB, this,
