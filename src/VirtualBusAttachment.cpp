@@ -91,7 +91,8 @@ exit:
 }
 
 VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, bool isGoldenUnit)
-    : ajn::BusAttachment(di), m_di(di), m_numSessions(0), m_aboutObj(NULL)
+    : ajn::BusAttachment(di), m_di(di), m_port(ajn::SESSION_PORT_ANY), m_numSessions(0),
+      m_aboutObj(NULL)
 {
     LOG(LOG_INFO, "[%p] di=%s,piid=%s",
         this, di, piid);
