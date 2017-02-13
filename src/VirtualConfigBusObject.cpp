@@ -172,8 +172,8 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
     if (OCRepPayloadGetPropObjectArray(payload, "ln", &objArray, dim))
     {
         size_t numLangs = calcDimTotal(dim);
-        char **langs = new char*[numLangs];
-        memset(langs, 0, numLangs * sizeof(char*));
+        char **langs = new char *[numLangs];
+        memset(langs, 0, numLangs * sizeof(char *));
         for (size_t i = 0; i < numLangs; ++i)
         {
             if (OCRepPayloadGetPropString(objArray[i], "language", &langs[i]))

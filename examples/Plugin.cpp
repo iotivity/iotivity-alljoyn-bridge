@@ -58,7 +58,8 @@ void LogWriteln(
     va_list ap;
     va_start(ap, fmt);
 #ifdef _WIN32
-    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", GetCurrentProcessId(), levels[severity], basename, line,
+    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", GetCurrentProcessId(), levels[severity], basename,
+            line,
             function);
 #else
     fprintf(fps[severity], "[%d] %s %s:%d::%s - ", getpid(), levels[severity], basename, line,
