@@ -21,11 +21,12 @@
 #ifndef _PRESENCE_H
 #define _PRESENCE_H
 
-#include <alljoyn/BusAttachment.h>
-#include "octypes.h"
+#include <inttypes.h>
 #include <mutex>
 #include <string>
 #include <time.h>
+#include <alljoyn/BusAttachment.h>
+#include "octypes.h"
 
 class Presence
 {

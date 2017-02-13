@@ -57,8 +57,13 @@ void LogWriteln(
     }
     va_list ap;
     va_start(ap, fmt);
+#ifdef _WIN32
+    fprintf(fps[severity], "[%d] %s %s:%d::%s - ", GetCurrentProcessId(), levels[severity], basename, line,
+            function);
+#else
     fprintf(fps[severity], "[%d] %s %s:%d::%s - ", getpid(), levels[severity], basename, line,
             function);
+#endif
     vfprintf(fps[severity], fmt, ap);
     fprintf(fps[severity], "\n");
     fflush(fps[severity]);
@@ -255,7 +260,7 @@ OCStackResult RDPublish()
     {
         return result;
     }
-    OCResourceHandle hs[nr];
+    OCResourceHandle *hs = new OCResourceHandle[nr];
     uint8_t nhs = 0;
     for (uint8_t i = 0; i < nr; ++i)
     {
@@ -269,5 +274,7 @@ OCStackResult RDPublish()
     cbData.cb = RDPublishCB;
     cbData.context = NULL;
     cbData.cd = NULL;
-    return OCRDPublish(gRD.c_str(), CT_DEFAULT, hs, nhs, &cbData, OC_HIGH_QOS);
+    result = OCRDPublish(NULL, gRD.c_str(), CT_DEFAULT, hs, nhs, &cbData, OC_HIGH_QOS);
+    delete[] hs;
+    return result;
 }

@@ -30,7 +30,9 @@ bridge_cpp = ['Plugin.cpp',
               'AllJoynBridge.cpp']
 manager_cpp = ['PluginManager.cpp']
 env_bridge.AppendUnique(LIBS = [alljoyn_libs, oic_libs, alljoynplugin_lib])
-examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp),
-                 env_bridge.Program('PluginManager', manager_cpp)]
+
+examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
+if env['TARGET_OS'] == 'linux':
+    examples_bins += [env_bridge.Program('PluginManager', manager_cpp)]
 
 env.Install('#/${BUILD_DIR}/bin', examples_bins)

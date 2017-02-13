@@ -21,6 +21,7 @@
 #ifndef _BRIDGESECURITY_H
 #define _BRIDGESECURITY_H
 
+#include <inttypes.h>
 #include <alljoyn/AuthListener.h>
 
 class BusAuthListener : public ajn::AuthListener

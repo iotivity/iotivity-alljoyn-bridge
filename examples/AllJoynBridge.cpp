@@ -259,7 +259,11 @@ int main(int argc, char **argv)
             fprintf(stderr, "OCProcess - %d\n", result);
             return EXIT_FAILURE;
         }
+#ifdef _WIN32
+        Sleep(10);
+#else
         usleep(10 * 1000);
+#endif
     }
 
     bridge->Stop();
@@ -271,7 +275,7 @@ int main(int argc, char **argv)
         cbData.cb = RDDeleteCB;
         cbData.context = &done;
         cbData.cd = NULL;
-        result = OCRDDelete(gRD.c_str(), CT_DEFAULT, NULL, 0, &cbData, OC_HIGH_QOS);
+        result = OCRDDelete(NULL, gRD.c_str(), CT_DEFAULT, NULL, 0, &cbData, OC_HIGH_QOS);
         while (!done)
         {
             result = OCProcess();
@@ -279,7 +283,11 @@ int main(int argc, char **argv)
             {
                 break;
             }
+#ifdef _WIN32
+            Sleep(10);
+#else
             usleep(10 * 1000);
+#endif
         }
     }
     else

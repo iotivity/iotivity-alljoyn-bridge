@@ -26,6 +26,7 @@
 #include <alljoyn/BusAttachment.h>
 #include "ocpayload.h"
 #include "oic_malloc.h"
+#include <assert.h>
 
 static const char *ifaceXml =
     "<interface name='org.alljoyn.Config'>"
@@ -171,7 +172,8 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
     if (OCRepPayloadGetPropObjectArray(payload, "ln", &objArray, dim))
     {
         size_t numLangs = calcDimTotal(dim);
-        char *langs[numLangs] = { 0 };
+        char **langs = new char*[numLangs];
+        memset(langs, 0, numLangs * sizeof(char*));
         for (size_t i = 0; i < numLangs; ++i)
         {
             if (OCRepPayloadGetPropString(objArray[i], "language", &langs[i]))
@@ -189,6 +191,7 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
             OCRepPayloadDestroy(objArray[i]);
         }
         OICFree(objArray);
+        delete[] langs;
     }
     if (!n && (!strcmp(languageTag, "") || (dl && !strcmp(languageTag, dl))))
     {

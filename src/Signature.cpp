@@ -21,6 +21,7 @@
 #include "Signature.h"
 
 #include <alljoyn/MsgArg.h>
+#include <assert.h>
 
 /*
  * This behaves identically to the AllJoyn implementation and handles
