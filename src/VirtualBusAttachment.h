@@ -36,7 +36,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
     , private ajn::SessionListener
 {
     public:
-        static VirtualBusAttachment *Create(const char *di, const char *piid, bool isGoldenUnit = false);
+        static VirtualBusAttachment *Create(const char *di, const char *piid);
         virtual ~VirtualBusAttachment();
         std::string GetDi() { return m_di; }
         std::string GetProtocolIndependentId() { return m_piid; }
@@ -52,10 +52,6 @@ class VirtualBusAttachment : public ajn::BusAttachment
         class AboutData : public ajn::AboutData
         {
             public:
-                AboutData()
-                {
-                    SetNewFieldDetails("com.intel.Virtual", ajn::AboutData::ANNOUNCED, "b");
-                }
                 QStatus SetNewFieldDetails(const char *name, AboutFieldMask mask, const char *signature)
                 {
                     return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
@@ -71,7 +67,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         std::vector<VirtualBusObject *> m_virtualBusObjects;
         ajn::AboutObj *m_aboutObj;
 
-        VirtualBusAttachment(const char *di, const char *piid, bool isGoldenUnit);
+        VirtualBusAttachment(const char *di, const char *piid);
         virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
                                          const ajn::SessionOpts &opts);
         virtual void SessionJoined(ajn::SessionPort port, ajn::SessionId id, const char *name);

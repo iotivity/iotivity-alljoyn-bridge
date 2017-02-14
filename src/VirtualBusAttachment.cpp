@@ -54,12 +54,11 @@ static void ToAppId(const char *di, uint8_t *appId)
     }
 }
 
-VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid,
-        bool isGoldenUnit)
+VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid)
 {
     QStatus status;
     ajn::SessionOpts opts;
-    VirtualBusAttachment *busAttachment = new VirtualBusAttachment(di, piid, isGoldenUnit);
+    VirtualBusAttachment *busAttachment = new VirtualBusAttachment(di, piid);
     {
         std::lock_guard<std::mutex> lock(busAttachment->m_mutex);
         status = busAttachment->Start();
@@ -90,7 +89,7 @@ exit:
     return busAttachment;
 }
 
-VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, bool isGoldenUnit)
+VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid)
     : ajn::BusAttachment(di), m_di(di), m_port(ajn::SESSION_PORT_ANY), m_numSessions(0),
       m_aboutObj(NULL)
 {
@@ -120,12 +119,6 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, boo
     ToAppId(di, appId);
     m_aboutData.SetAppId(appId, 16);
     m_aboutData.SetAppName("");
-
-    if (!isGoldenUnit)
-    {
-        ajn::MsgArg value("b", true);
-        m_aboutData.SetField("com.intel.Virtual", value);
-    }
 }
 
 VirtualBusAttachment::~VirtualBusAttachment()

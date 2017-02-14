@@ -62,13 +62,12 @@ struct Bridge::DiscoverContext
     VirtualBusAttachment *m_bus;
     struct Resource
     {
-        Resource(std::string uri, uint8_t bitmap, bool hasMultipleRts)
-            : m_uri(uri), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
-        std::string m_uri;
+        Resource(uint8_t bitmap, bool hasMultipleRts)
+            : m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
         uint8_t m_bitmap;
         bool m_hasMultipleRts;
     };
-    std::deque<Resource> m_resources;
+    std::map<std::string, Resource> m_resources;
     VirtualBusObject *m_obj;
     DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
         m_obj(NULL) { }
@@ -402,11 +401,9 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
 
     LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piid);
 
-    ajn::MsgArg *value;
-    bool isVirtual;
-    if (aboutData.GetField("com.intel.Virtual", value) == ER_OK &&
-        value->Get("b", &isVirtual) == ER_OK &&
-        isVirtual)
+    /* Ignore Announce from virtual devices */
+    ajn::AboutObjectDescription objectDescription(objectDescriptionArg);
+    if (objectDescription.HasInterface("oic.d.virtual"))
     {
         LOG(LOG_INFO, "[%p] Ignoring virtual application", this);
         return;
@@ -534,6 +531,19 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
         if (context->m_device)
         {
             context->m_device->SetInfo(objectDescription, aboutData);
+            if (!m_isGoldenUnit)
+            {
+                OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+                if (!handle)
+                {
+                    LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+                }
+                OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
+                if (result != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+                }
+            }
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];
             objectDescription.GetPaths(pa, n);
@@ -587,6 +597,19 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             m_presence.push_back(presence);
             VirtualDevice *device = new VirtualDevice(msg->GetSender(), msg->GetSessionId());
             device->SetInfo(objectDescription, aboutData);
+            if (!m_isGoldenUnit)
+            {
+                OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+                if (!handle)
+                {
+                    LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+                }
+                OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
+                if (result != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+                }
+            }
             m_virtualDevices.push_back(device);
             size_t numPaths = objectDescription.GetPaths(NULL, 0);
             const char **paths = new const char *[numPaths];
@@ -651,7 +674,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         DiscoverContext *context = NULL;
         OCCallbackData cbData;
         char targetUri[MAX_URI_LENGTH] = { 0 };
-        std::deque<DiscoverContext::Resource> resources;
+        std::map<std::string, DiscoverContext::Resource> resources;
 
         if (!strcmp(payload->sid, GetServerInstanceIDString()))
         {
@@ -687,6 +710,20 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             }
         }
 
+        /* Check if this is a virtual device */
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            for (OCStringLL *type = resource->types; type; type = type->next)
+            {
+                if (!strcmp(type->value, "oic.d.virtual"))
+                {
+                    LOG(LOG_INFO, "[%p] Ignoring virtual device", thiz);
+                    goto next;
+                }
+            }
+        }
+
         for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
              resource = resource->next)
         {
@@ -699,12 +736,18 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
                 }
                 std::string uri = resource->uri;
                 uri += std::string("?rt=") + type->value;
-                resources.push_back(DiscoverContext::Resource(uri, resource->bitmap, hasMultipleRts));
+                resources.insert(std::pair<std::string, DiscoverContext::Resource>(uri,
+                                 DiscoverContext::Resource(resource->bitmap, hasMultipleRts)));
             }
         }
         if (resources.empty())
         {
             continue;
+        }
+        if (!thiz->m_isGoldenUnit)
+        {
+            resources.insert(std::pair<std::string, DiscoverContext::Resource>("/oic/d?rt=oic.d.virtual",
+                             DiscoverContext::Resource(OC_DISCOVERABLE, true)));
         }
 
         context = new DiscoverContext(thiz, payload->sid);
@@ -770,15 +813,8 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         goto exit;
     }
     payload = (OCRepPayload *) response->payload;
-    if (OCRepPayloadGetPropString(payload, "x.com.intel.virtual", &value))
-    {
-        LOG(LOG_INFO, "[%p] Ignoring virtual resource", thiz);
-        OICFree(value);
-        value = NULL;
-        goto exit;
-    }
     OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value);
-    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value, thiz->m_isGoldenUnit);
+    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value);
     OICFree(value);
     value = NULL;
     if (!context->m_bus)
@@ -854,21 +890,21 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
         LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}",
-            context->m_resources.front().m_uri.c_str(),
+            context->m_resources.begin()->first.c_str(),
             response, response ? response->payload : 0, response ? response->result : 0);
     }
     else
     {
         thiz->CreateInterface(context, response);
     }
-    context->m_resources.pop_front();
+    context->m_resources.erase(context->m_resources.begin());
     return thiz->Get(context, response);
 }
 
 OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse *response)
 {
-    bool isObservable = context->m_resources.front().m_bitmap & OC_OBSERVABLE;
-    std::string uri = context->m_resources.front().m_uri;
+    bool isObservable = context->m_resources.begin()->second.m_bitmap & OC_OBSERVABLE;
+    std::string uri = context->m_resources.begin()->first;
     std::string rt = uri.substr(uri.find("rt=") + 3);
     const ajn::InterfaceDescription *iface = context->m_bus->CreateInterface(ToAJName(rt).c_str(),
             isObservable, response->payload);
@@ -887,7 +923,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
 
     if (!context->m_resources.empty())
     {
-        std::string uri = context->m_resources.front().m_uri;
+        std::string uri = context->m_resources.begin()->first;
         if (context->m_obj && uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
             QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
@@ -911,7 +947,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
                     delete obj;
                 }
             }
-            context->m_resources.pop_front();
+            context->m_resources.erase(context->m_resources.begin());
             return Get(context, response);
         }
         if (!context->m_obj)
@@ -923,12 +959,12 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
         {
             /* Don't need to issue a GET for device types */
             CreateInterface(context, response);
-            context->m_resources.pop_front();
+            context->m_resources.erase(context->m_resources.begin());
             return Get(context, response);
         }
         else
         {
-            if (!context->m_resources.front().m_hasMultipleRts)
+            if (!context->m_resources.begin()->second.m_hasMultipleRts)
             {
                 uri = path;
             }

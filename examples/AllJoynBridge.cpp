@@ -34,6 +34,7 @@ static const char *gPSPrefix = "AllJoynBridge";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
 static const char *sRD = NULL;
+static bool gIsGoldenUnit = false;
 
 static void SigIntCB(int sig)
 {
@@ -96,8 +97,9 @@ static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
 
 static void AnnouncedCB(const char *uuid, const char *sender)
 {
-    printf("exec --ps %s --uuid %s --sender %s --rd %s\n",
-           gPSPrefix, uuid, sender, OCGetServerInstanceIDString());
+    printf("exec --ps %s --uuid %s --sender %s --rd %s %s\n",
+           gPSPrefix, uuid, sender, OCGetServerInstanceIDString(),
+           gIsGoldenUnit ? "--golden" : "");
     fflush(stdout);
 }
 
@@ -110,7 +112,6 @@ static void SessionLostCB()
 int main(int argc, char **argv)
 {
     int protocols = 0;
-    bool isGoldenUnit = false;
     const char *whitelistAddr = NULL;
     if (argc > 1)
     {
@@ -142,7 +143,7 @@ int main(int argc, char **argv)
             }
             else if (!strcmp(argv[i], "--golden"))
             {
-                isGoldenUnit = true;
+                gIsGoldenUnit = true;
             }
             else if (!strcmp(argv[i], "--whitelist") && (i < (argc - 1)))
             {
@@ -240,9 +241,9 @@ int main(int argc, char **argv)
     {
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetAnnouncedCB(AnnouncedCB);
-        bridge->SetGoldenUnit(isGoldenUnit);
         bridge->SetWhitelistAddress(whitelistAddr);
     }
+    bridge->SetGoldenUnit(gIsGoldenUnit);
     if (!bridge->Start())
     {
         return EXIT_FAILURE;

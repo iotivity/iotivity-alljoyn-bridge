@@ -104,12 +104,12 @@ int main(int argc, char **argv)
 
             if (!strncmp(line, "exec", strlen("exec")))
             {
-                char *args[11];
+                char *args[12] = { 0 };
                 args[0] = path;
                 args[1] = name;
-                sscanf(line, "exec %ms %ms %ms %ms %ms %ms %ms %ms",
-                       &args[2], &args[3], &args[4], &args[5], &args[6], &args[7], &args[8], &args[9]);
-                args[10] = NULL;
+                sscanf(line, "exec %ms %ms %ms %ms %ms %ms %ms %ms %ms",
+                       &args[2], &args[3], &args[4], &args[5], &args[6], &args[7], &args[8], &args[9], &args[10]);
+                args[11] = NULL;
                 pid_t pid = fork();
                 if (pid < 0)
                 {
@@ -122,9 +122,12 @@ int main(int argc, char **argv)
                     perror("execv");
                     return EXIT_FAILURE;
                 }
-                for (int i = 2; i < 10; ++i)
+                for (int i = 2; i < 11; ++i)
                 {
-                    free(args[i]);
+                    if (args[i])
+                    {
+                        free(args[i]);
+                    }
                 }
             }
         }
