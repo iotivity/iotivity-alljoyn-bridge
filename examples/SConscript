@@ -30,6 +30,8 @@ bridge_cpp = ['Plugin.cpp',
               'AllJoynBridge.cpp']
 manager_cpp = ['PluginManager.cpp']
 env_bridge.AppendUnique(LIBS = [alljoyn_libs, oic_libs, alljoynplugin_lib])
+if env['TARGET_OS'] == 'windows':
+    env_bridge.AppendUnique(LIBS = ['sqlite3'])
 
 examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
 if env['TARGET_OS'] == 'linux':

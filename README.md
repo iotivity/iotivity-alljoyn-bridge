@@ -62,9 +62,9 @@ Under Windows, run the AllJoynBridge process directly.  When the first
 process outputs a line beginning with "exec ...", run a second
 AllJoynBridge process with the args specified.  An example is below:
 
-    $ ./out/linux/x86_64/debug/bin/AllJoynBridge
+    $ .\out\windows\amd64\debug\bin\AllJoynBridge.exe
     ...
     exec --uuid b2120146-1c34-1f57-9ba7-ea7d817290fb --sender :svZOhUnr.2 --rd 37b48062-2533-d06a-8a1e-ce9e93739b09
     ...
 
-    $ ./out/linux/x86_64/debug/bin/AllJoynBridge --uuid b2120146-1c34-1f57-9ba7-ea7d817290fb --sender :svZOhUnr.2 --rd 37b48062-2533-d06a-8a1e-ce9e93739b09
+    $ .\out\windows\amd64\debug\bin\AllJoynBridge.exe --uuid b2120146-1c34-1f57-9ba7-ea7d817290fb --sender :svZOhUnr.2 --rd 37b48062-2533-d06a-8a1e-ce9e93739b09

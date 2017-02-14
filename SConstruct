@@ -141,6 +141,8 @@ env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
 # libraries
 env['LIBPATH'] = ['${ALLJOYN_DIST}/cpp/lib',
                   '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
+if env['TARGET_OS'] == 'windows':
+    env.AppendUnique(LIBPATH = '${IOTIVITY_BASE}/extlibs/sqlite3')
 
 alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/src', exports= 'env', duplicate=0)
 env.Install('${BUILD_DIR}/libs', alljoynplugin_lib)
