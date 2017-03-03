@@ -24,16 +24,15 @@
 #include <poll.h>
 #include <sstream>
 
-#include "ocstack.h"
-#include "ocpayload.h"
-#include "payload_logging.h"
+#include "cJSON.h"
+#include "cacommon.h"
 #include "cbor.h"
 #include "cborjson.h"
-#include "cJSON.h"
-
-extern "C" OCStackResult OCParsePayload(OCPayload **outPayload, OCPayloadType payloadType,
-                                        const uint8_t *payload, size_t payloadSize);
-extern "C" OCStackResult OCConvertPayload(OCPayload *payload, uint8_t **outPayload, size_t *size);
+#include "coap/pdu.h"
+#include "ocpayload.h"
+#include "ocpayloadcbor.h"
+#include "ocstack.h"
+#include "payload_logging.h"
 
 static CborError ConvertJSONToCBOR(CborEncoder *encoder, cJSON *json)
 {
@@ -44,6 +43,7 @@ static CborError ConvertJSONToCBOR(CborEncoder *encoder, cJSON *json)
     {
         err = cbor_encode_text_stringz(encoder, json->string);
     }
+
     switch (json->type)
     {
         case cJSON_False:
@@ -112,7 +112,7 @@ static size_t ConvertJSONToCBOR(const char *jsonStr, uint8_t *buffer, size_t siz
     }
 }
 
-static void LogResponse(OCMethod method, OCClientResponse *response)
+static void LogResponse(OCMethod method, OCClientResponse *response, OCPayloadFormat format)
 {
     if (!response)
     {
@@ -145,7 +145,7 @@ static void LogResponse(OCMethod method, OCClientResponse *response)
 
     uint8_t *buffer = NULL;
     size_t size;
-    OCStackResult result = OCConvertPayload(response->payload, &buffer, &size);
+    OCStackResult result = OCConvertPayload(response->payload, format, &buffer, &size);
     if (result != OC_STACK_OK)
     {
         return;
@@ -153,8 +153,8 @@ static void LogResponse(OCMethod method, OCClientResponse *response)
     CborParser parser;
     CborValue it;
     CborError err = cbor_parser_init(buffer, size, CborConvertDefaultFlags, &parser, &it);
-    char value[8192];
-    FILE *fp = fmemopen(value, 8192, "w");
+    char value[32768];
+    FILE *fp = fmemopen(value, 32768, "w");
     while (err == CborNoError)
     {
         err = cbor_value_to_json_advance(fp, &it, CborConvertDefaultFlags);
@@ -168,34 +168,67 @@ static void LogResponse(OCMethod method, OCClientResponse *response)
     OICFree(buffer);
 }
 
-#define DEFAULT_CONTEXT_VALUE 0x99
-
 struct Resource
 {
+    std::string di;
+    OCDevAddr devAddr;
     std::string uri;
 };
 static std::vector<Resource> g_resources;
 
-static OCStackApplicationResult onDiscover(void *, OCDoHandle,
+static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle,
         OCClientResponse *response)
 {
-    LogResponse(OC_REST_DISCOVER, response);
+    uint16_t format = (uint16_t)(uintptr_t)context;
+    switch (format)
+    {
+        case COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR:
+            LogResponse(OC_REST_DISCOVER, response, OC_FORMAT_VND_OCF_CBOR);
+            break;
+        case COAP_MEDIATYPE_APPLICATION_CBOR:
+            LogResponse(OC_REST_DISCOVER, response, OC_FORMAT_CBOR);
+            break;
+    }
     if (response)
     {
-        std::ostringstream host;
-        host << response->devAddr.addr << ":" << response->devAddr.port;
         OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload;
         while (payload)
         {
-            Resource r;
-            r.uri = (payload->baseURI ? payload->baseURI : host.str()) + "/oic/res";
-            g_resources.push_back(r);
             OCResourcePayload *resource = (OCResourcePayload *) payload->resources;
             while (resource)
             {
                 Resource r;
-                r.uri = payload->baseURI ? payload->baseURI : host.str();
-                r.uri += resource->uri;
+                r.di = payload->sid;
+                if (resource->eps)
+                {
+                    OCEndpointPayload *ep = resource->eps;
+                    if (!strcmp(ep->tps, "coap") || !strcmp(ep->tps, "coaps"))
+                    {
+                        r.devAddr.adapter = OC_ADAPTER_IP;
+                    }
+                    else if (!strcmp(ep->tps, "coap+tcp") || !strcmp(ep->tps, "coaps+tcp"))
+                    {
+                        r.devAddr.adapter = OC_ADAPTER_TCP;
+                    }
+                    r.devAddr.flags = ep->family;
+                    r.devAddr.port = ep->port;
+                    strncpy(r.devAddr.addr, ep->addr, MAX_ADDR_STR_SIZE);
+                    r.devAddr.ifindex = 0;
+                    r.devAddr.routeData[0] = '\0';
+                    strncpy(r.devAddr.remoteId, payload->sid, MAX_IDENTITY_SIZE);
+                }
+                else
+                {
+                    r.devAddr = response->devAddr;
+                }
+                if (!strncmp(resource->uri, "ocf://", 6))
+                {
+                    r.uri = strchr(resource->uri + 6, '/');
+                }
+                else
+                {
+                    r.uri = resource->uri;
+                }
                 g_resources.push_back(r);
                 resource = resource->next;
             }
@@ -205,24 +238,33 @@ static OCStackApplicationResult onDiscover(void *, OCDoHandle,
     return OC_STACK_KEEP_TRANSACTION;
 }
 
-static OCStackApplicationResult onGet(void *, OCDoHandle,
-                                      OCClientResponse *response)
-{
-    LogResponse(OC_REST_GET, response);
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
-static OCStackApplicationResult onPost(void *, OCDoHandle,
-                                       OCClientResponse *response)
-{
-    LogResponse(OC_REST_POST, response);
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
-static OCStackApplicationResult onObserve(void *, OCDoHandle,
+static OCStackApplicationResult GetCB(void *, OCDoHandle,
         OCClientResponse *response)
 {
-    LogResponse(OC_REST_OBSERVE, response);
+    LogResponse(OC_REST_GET, response, OC_FORMAT_CBOR);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+static OCStackApplicationResult PostCB(void *context, OCDoHandle,
+        OCClientResponse *response)
+{
+    uint16_t format = (uint16_t)(uintptr_t)context;
+    switch (format)
+    {
+        case COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR:
+            LogResponse(OC_REST_POST, response, OC_FORMAT_VND_OCF_CBOR);
+            break;
+        case COAP_MEDIATYPE_APPLICATION_CBOR:
+            LogResponse(OC_REST_POST, response, OC_FORMAT_CBOR);
+            break;
+    }
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+static OCStackApplicationResult ObserveCB(void *, OCDoHandle,
+        OCClientResponse *response)
+{
+    LogResponse(OC_REST_OBSERVE, response, OC_FORMAT_CBOR);
     if (response->payload)
     {
         return OC_STACK_KEEP_TRANSACTION;
@@ -238,11 +280,11 @@ static void usage()
     std::cout << "Usage:" << std::endl
               << std::endl
               << "Find smart home bridge devices:" << std::endl
-              << "  find /oic/res?rt=oic.d.bridge" << std::endl
+              << "  find rt=oic.d.bridge" << std::endl
               << "Find light devices:" << std::endl
-              << "  find /oic/res?rt=oic.d.light" << std::endl
+              << "  find rt=oic.d.light" << std::endl
               << "Find all devices:" << std::endl
-              << "  find /oic/res" << std::endl
+              << "  find" << std::endl
               << std::endl
               << "List all found devices:" << std::endl
               << "  list" << std::endl
@@ -296,28 +338,69 @@ int main(int, char **)
             for (size_t i = 0; i < g_resources.size(); ++i)
             {
                 std::cout << "[" << i << "] "
-                          << "coap://" << g_resources[i].uri << std::endl;
+                          << g_resources[i].di << " "
+                          << g_resources[i].uri << std::endl;
             }
         }
         else if (cmd == "find")
         {
-            std::string requestURI = *token++;
+            uint16_t optionID = CA_OPTION_ACCEPT;
+            uint16_t format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR;
+            std::string query;
+            while (token != tokens.end())
+            {
+                std::string str = *token++;
+                if (str == "Accept:")
+                {
+                    str = *token++;
+                    if (str == "application/cbor")
+                    {
+                        format = COAP_MEDIATYPE_APPLICATION_CBOR;
+                    }
+                }
+                else
+                {
+                    if (!query.empty())
+                    {
+                        query += ";";
+                    }
+                    query += str;
+                }
+            }
+            std::string uri = "/oic/res";
+            if (!query.empty())
+            {
+                uri += "?" + query;
+            }
             OCCallbackData cbData;
-            cbData.cb = onDiscover;
-            cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
+            cbData.cb = DiscoverCB;
+            cbData.context = (void *)(uintptr_t)format;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(NULL, OC_REST_DISCOVER, requestURI.c_str(), NULL, 0, CT_DEFAULT,
-                                                OC_HIGH_QOS, &cbData, NULL, 0);
-            std::cout << "find " << requestURI << " - " << result << std::endl;
+            OCHeaderOption options[1];
+            size_t numOptions = 0;
+            OCSetHeaderOption(options, &numOptions, optionID, &format, sizeof(format));
+            OCStackResult result = OCDoResource(NULL, OC_REST_DISCOVER, uri.c_str(), NULL, 0,
+                    CT_DEFAULT, OC_HIGH_QOS, &cbData, options, numOptions);
+            std::cout << "find " << uri << " - " << result << std::endl;
         }
         else if (cmd == "get")
         {
+            uint16_t optionID = CA_OPTION_ACCEPT;
+            uint16_t format = COAP_MEDIATYPE_APPLICATION_CBOR;
             size_t i = std::stoi(*token++);
             std::string query;
             while (token != tokens.end())
             {
                 std::string str = *token++;
-                if (str != "{")
+                if (str == "Accept:")
+                {
+                    str = *token++;
+                    if (str == "application/vnd.ocf+cbor")
+                    {
+                        format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR;
+                    }
+                }
+                else
                 {
                     if (!query.empty())
                     {
@@ -331,12 +414,16 @@ int main(int, char **)
             {
                 uri += "?" + query;
             }
+            OCDevAddr *devAddr = &g_resources[i].devAddr;
             OCCallbackData cbData;
-            cbData.cb = onGet;
-            cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
+            cbData.cb = GetCB;
+            cbData.context = NULL;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(NULL, OC_REST_GET, uri.c_str(), NULL,
-                                                NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
+            OCHeaderOption options[1];
+            size_t numOptions = 0;
+            OCSetHeaderOption(options, &numOptions, optionID, &format, sizeof(format));
+            OCStackResult result = OCDoResource(NULL, OC_REST_GET, uri.c_str(), devAddr,
+                    NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, options, numOptions);
             std::cout << "get " << g_resources[i].uri << " - " << result << std::endl;
         }
         else if (cmd == "put")
@@ -369,30 +456,42 @@ int main(int, char **)
                 uri += "?" + query;
             }
             OCRepPayload *payload = NULL;
-            size_t size = 8192;
-            uint8_t buffer[8192];
+            size_t size = 32768;
+            uint8_t buffer[32768];
             size = ConvertJSONToCBOR(body.c_str(), buffer, size);
             if (size)
             {
                 payload = OCRepPayloadCreate();
-                OCParsePayload((OCPayload **) &payload, PAYLOAD_TYPE_REPRESENTATION, buffer, size);
+                OCParsePayload((OCPayload **) &payload, OC_FORMAT_CBOR, PAYLOAD_TYPE_REPRESENTATION,
+                        buffer, size);
             }
+            OCDevAddr *devAddr = &g_resources[i].devAddr;
             OCCallbackData cbData;
-            cbData.cb = onPost;
-            cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
+            cbData.cb = PostCB;
+            cbData.context = NULL;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(NULL, OC_REST_POST, uri.c_str(), NULL,
-                                                (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
+            OCStackResult result = OCDoResource(NULL, OC_REST_POST, uri.c_str(), devAddr,
+                    (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
             std::cout << "post " << g_resources[i].uri << " - " << result << std::endl;
         }
         else if (cmd == "observe")
         {
+            uint16_t optionID = CA_OPTION_ACCEPT;
+            uint16_t format = COAP_MEDIATYPE_APPLICATION_CBOR;
             size_t i = std::stoi(*token++);
             std::string query;
             while (token != tokens.end())
             {
                 std::string str = *token++;
-                if (str.find('=') != std::string::npos)
+                if (str == "Accept:")
+                {
+                    str = *token++;
+                    if (str == "application/vnd.ocf+cbor")
+                    {
+                        format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR;
+                    }
+                }
+                else
                 {
                     if (!query.empty())
                     {
@@ -406,14 +505,19 @@ int main(int, char **)
             {
                 uri += "?" + query;
             }
+            OCDevAddr *devAddr = &g_resources[i].devAddr;
             OCDoHandle handle;
             OCCallbackData cbData;
-            cbData.cb = onObserve;
-            cbData.context = (void *)DEFAULT_CONTEXT_VALUE;
+            cbData.cb = ObserveCB;
+            cbData.context = (void *)(uintptr_t)format;
             cbData.cd = NULL;
-            OCStackResult result = OCDoResource(&handle, OC_REST_OBSERVE, uri.c_str(), NULL,
-                                                NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
-            std::cout << "observe " << g_resources[i].uri << " (" << handle << ") - " << result << std::endl;
+            OCHeaderOption options[1];
+            size_t numOptions = 0;
+            OCSetHeaderOption(options, &numOptions, optionID, &format, sizeof(format));
+            OCStackResult result = OCDoResource(&handle, OC_REST_OBSERVE, uri.c_str(), devAddr,
+                    NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, options, numOptions);
+            std::cout << "observe " << g_resources[i].uri << " (" << handle << ") - " << result
+                      << std::endl;
         }
         else if (cmd == "cancel")
         {

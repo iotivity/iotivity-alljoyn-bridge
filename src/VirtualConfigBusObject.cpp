@@ -56,11 +56,10 @@ static const char *ifaceXml =
 // TODO    "  <annotation name='org.alljoyn.Bus.Secure' value='true'/>"
     "</interface>";
 
-VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const char *host)
-    : VirtualBusObject(bus, "/Config", host)
+VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const OCDevAddr *devAddr)
+    : VirtualBusObject(bus, "/Config", devAddr)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,host=%s",
-        this, bus, host);
+    LOG(LOG_INFO, "[%p] bus=%p", this, bus);
     QStatus status;
     OC_UNUSED(status);
     status = bus->CreateInterfacesFromXml(ifaceXml);

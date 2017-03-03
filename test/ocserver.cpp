@@ -24,18 +24,17 @@
 #include <map>
 #include <poll.h>
 
+#include "cJSON.h"
 #include "cbor.h"
 #include "cborjson.h"
-#include "cJSON.h"
+#include "ocpayload.h"
+#include "ocpayloadcbor.h"
+#include "ocstack.h"
 #include "oic_malloc.h"
 #include "oic_string.h"
-#include "ocpayload.h"
-#include "ocstack.h"
 
 #define OC_RSRVD_SOFTWARE_VERSION        "sv"
 #define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
-
-extern "C" OCStackResult OCConvertPayload(OCPayload *payload, uint8_t **outPayload, size_t *size);
 
 #define OC_RSRVD_FRIENDLY_NAME "n"
 #define OC_RSRVD_INSTANCE_ID "id"
@@ -44,7 +43,7 @@ static void LogPayload(OCPayload *payload)
 {
     uint8_t *buffer = NULL;
     size_t size;
-    OCStackResult result = OCConvertPayload(payload, &buffer, &size);
+    OCStackResult result = OCConvertPayload(payload, OC_FORMAT_CBOR, &buffer, &size);
     if (result != OC_STACK_OK)
     {
         return;

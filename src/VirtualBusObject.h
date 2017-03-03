@@ -32,7 +32,7 @@
 class VirtualBusObject : public ajn::BusObject
 {
     public:
-        VirtualBusObject(ajn::BusAttachment *bus, const char *uri, const char *host);
+        VirtualBusObject(ajn::BusAttachment *bus, const char *uri, const OCDevAddr *devAddr);
         virtual ~VirtualBusObject();
         QStatus AddInterface(const ajn::InterfaceDescription *iface);
         virtual void Observe();
@@ -53,7 +53,7 @@ class VirtualBusObject : public ajn::BusObject
 
         std::condition_variable m_cond;
         ajn::BusAttachment *m_bus;
-        std::string m_host;
+        OCDevAddr m_devAddr;
         std::vector<const ajn::InterfaceDescription *> m_ifaces;
         std::set<ObserveContext *> m_observes;
         size_t m_pending;

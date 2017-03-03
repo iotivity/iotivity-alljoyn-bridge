@@ -26,7 +26,7 @@
 class VirtualConfigBusObject : public VirtualBusObject
 {
     public:
-        VirtualConfigBusObject(ajn::BusAttachment *bus, const char *host);
+        VirtualConfigBusObject(ajn::BusAttachment *bus, const OCDevAddr *devAddr);
         virtual ~VirtualConfigBusObject();
 
     private:

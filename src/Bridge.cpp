@@ -40,6 +40,33 @@
 #include <deque>
 #include <iterator>
 
+static void GetDevAddr(OCDevAddr *addr, const OCDevAddr *srcAddr, const char *di,
+        const OCEndpointPayload *eps)
+{
+    const OCEndpointPayload *ep = eps;
+    if (ep)
+    {
+        if (!strcmp(ep->tps, "coap") || !strcmp(ep->tps, "coaps"))
+        {
+            addr->adapter = OC_ADAPTER_IP;
+        }
+        else if (!strcmp(ep->tps, "coap+tcp") || !strcmp(ep->tps, "coaps+tcp"))
+        {
+            addr->adapter = OC_ADAPTER_TCP;
+        }
+        addr->flags = ep->family;
+        addr->port = ep->port;
+        strncpy(addr->addr, ep->addr, MAX_ADDR_STR_SIZE);
+        addr->ifindex = 0;
+        addr->routeData[0] = '\0';
+        strncpy(addr->remoteId, di, MAX_IDENTITY_SIZE);
+    }
+    else
+    {
+        *addr = *srcAddr;
+    }
+}
+
 static bool TranslateResourceType(const char *type)
 {
     return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0 ||
@@ -58,12 +85,16 @@ struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
     std::string m_di;
-    std::string m_host;
     VirtualBusAttachment *m_bus;
     struct Resource
     {
-        Resource(uint8_t bitmap, bool hasMultipleRts)
-            : m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
+        Resource(const OCDevAddr *srcAddr, const char *di, const OCEndpointPayload *eps,
+                uint8_t bitmap, bool hasMultipleRts)
+            : m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts)
+        {
+            GetDevAddr(&m_devAddr, srcAddr, di, eps);
+        }
+        OCDevAddr m_devAddr;
         uint8_t m_bitmap;
         bool m_hasMultipleRts;
     };
@@ -673,7 +704,6 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     {
         DiscoverContext *context = NULL;
         OCCallbackData cbData;
-        char targetUri[MAX_URI_LENGTH] = { 0 };
         std::map<std::string, DiscoverContext::Resource> resources;
 
         if (!strcmp(payload->sid, GetServerInstanceIDString()))
@@ -737,7 +767,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
                 std::string uri = resource->uri;
                 uri += std::string("?rt=") + type->value;
                 resources.insert(std::pair<std::string, DiscoverContext::Resource>(uri,
-                                 DiscoverContext::Resource(resource->bitmap, hasMultipleRts)));
+                                DiscoverContext::Resource(&response->devAddr, payload->sid, resource->eps, resource->bitmap, hasMultipleRts)));
             }
         }
         if (resources.empty())
@@ -747,28 +777,17 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         if (!thiz->m_isGoldenUnit)
         {
             resources.insert(std::pair<std::string, DiscoverContext::Resource>("/oic/d?rt=oic.d.virtual",
-                             DiscoverContext::Resource(OC_DISCOVERABLE, true)));
+                            DiscoverContext::Resource(&response->devAddr, payload->sid, NULL, OC_DISCOVERABLE, true)));
         }
 
         context = new DiscoverContext(thiz, payload->sid);
-        if (payload->baseURI)
-        {
-            context->m_host = payload->baseURI;
-        }
-        else
-        {
-            char host[MAX_URI_LENGTH] = { 0 };
-            snprintf(host, MAX_URI_LENGTH, "%s:%d", response->devAddr.addr, response->devAddr.port);
-            context->m_host = host;
-        }
         context->m_resources = resources;
         thiz->m_discovered.insert(context);
 
-        snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_DEVICE_URI);
         cbData.cb = Bridge::GetDeviceCB;
         cbData.context = context;
         cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+        result = DoResource(NULL, OC_REST_GET, OC_RSRVD_DEVICE_URI, &response->devAddr, NULL, &cbData);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -794,7 +813,6 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
-    char targetUri[MAX_URI_LENGTH] = { 0 };
     OCCallbackData cbData;
     OCRepPayload *payload;
     char *value = NULL;
@@ -822,11 +840,10 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         goto exit;
     }
     context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
-    snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), OC_RSRVD_PLATFORM_URI);
     cbData.cb = Bridge::GetPlatformCB;
     cbData.context = context;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
     if (result != OC_STACK_OK)
     {
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
@@ -923,6 +940,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
 
     if (!context->m_resources.empty())
     {
+        OCDevAddr *devAddr = &context->m_resources.begin()->second.m_devAddr;
         std::string uri = context->m_resources.begin()->first;
         if (context->m_obj && uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
@@ -940,7 +958,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
             VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
             if (!obj)
             {
-                obj = new VirtualConfigBusObject(context->m_bus, context->m_host.c_str());
+                obj = new VirtualConfigBusObject(context->m_bus, devAddr);
                 QStatus status = context->m_bus->RegisterBusObject(obj);
                 if (status != ER_OK)
                 {
@@ -952,7 +970,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
         }
         if (!context->m_obj)
         {
-            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), context->m_host.c_str());
+            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), devAddr);
         }
         std::string rt = uri.substr(uri.find("rt=") + 3);
         if (rt.find("oic.d.") == 0)
@@ -968,13 +986,11 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
             {
                 uri = path;
             }
-            char targetUri[MAX_URI_LENGTH] = { 0 };
-            snprintf(targetUri, MAX_URI_LENGTH, "%s%s", context->m_host.c_str(), uri.c_str());
             OCCallbackData cbData;
             cbData.cb = Bridge::GetCB;
             cbData.context = context;
             cbData.cd = NULL;
-            result = DoResource(NULL, OC_REST_GET, targetUri, NULL, NULL, &cbData);
+            result = DoResource(NULL, OC_REST_GET, uri.c_str(), devAddr, NULL, &cbData);
             if (result != OC_STACK_OK)
             {
                 LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
