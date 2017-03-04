@@ -261,9 +261,9 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
 #ifdef _WIN32
-        Sleep(10);
+        Sleep(1);
 #else
-        usleep(10 * 1000);
+        usleep(1 * 1000);
 #endif
     }
 
@@ -285,9 +285,9 @@ int main(int argc, char **argv)
                 break;
             }
 #ifdef _WIN32
-            Sleep(10);
+            Sleep(1);
 #else
-            usleep(10 * 1000);
+            usleep(1 * 1000);
 #endif
         }
     }

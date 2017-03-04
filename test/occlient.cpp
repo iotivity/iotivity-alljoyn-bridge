@@ -270,7 +270,7 @@ int main(int, char **)
     for (;;)
     {
         struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
-        int ret = poll(&pfd, 1, 1000);
+        int ret = poll(&pfd, 1, 1);
         if (ret != 1)
         {
             if (OCProcess() != OC_STACK_OK)
