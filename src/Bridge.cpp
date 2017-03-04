@@ -993,12 +993,16 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
             goto exit;
         }
         m_presence.push_back(presence);
-        QStatus status = context->m_bus->RegisterBusObject(context->m_obj);
-        if (status != ER_OK)
+        QStatus status;
+        if (context->m_obj)
         {
-            delete context->m_obj;
+            status = context->m_bus->RegisterBusObject(context->m_obj);
+            if (status != ER_OK)
+            {
+                delete context->m_obj;
+            }
+            context->m_obj = NULL; /* context->m_obj now belongs to context->m_bus */
         }
-        context->m_obj = NULL; /* context->m_obj now belongs to context->m_bus */
         status = context->m_bus->Announce();
         if (status != ER_OK)
         {
