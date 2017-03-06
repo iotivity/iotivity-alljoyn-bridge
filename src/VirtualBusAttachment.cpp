@@ -188,6 +188,13 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
             OICFree(value);
             value = NULL;
         }
+        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value))
+        {
+            ajn::MsgArg valueArg("s", value);
+            m_aboutData.SetField("org.openconnectivity.piid", valueArg);
+            OICFree(value);
+            value = NULL;
+        }
         /* Vendor-defined properties */
         for (OCRepPayloadValue *value = payload->values; value; value = value->next)
         {

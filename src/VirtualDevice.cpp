@@ -77,12 +77,23 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
     aboutData.GetAppId(&appId, &n);
     OCUUIdentity id;
     DeriveUniqueId(&id, deviceId, appId, n);
-    char piid[UUID_IDENTITY_SIZE * 2 + 5];
-    snprintf(piid, UUID_IDENTITY_SIZE * 2 + 5,
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
-             id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, piid);
+    ajn::MsgArg *valueArg = NULL;
+    aboutData.GetField("org.openconnectivity.piid", valueArg);
+    if (valueArg)
+    {
+        value = NULL;
+        valueArg->Get("s", &value);
+        OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, value);
+    }
+    else
+    {
+        char piid[UUID_IDENTITY_SIZE * 2 + 5];
+        snprintf(piid, UUID_IDENTITY_SIZE * 2 + 5,
+                "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
+                id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
+        OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, piid);
+    }
     std::set<std::string> dataModelVersions;
     size_t numPaths = objectDescription.GetPaths(NULL, 0);
     const char **paths = new const char *[numPaths];
@@ -157,7 +168,7 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
         mfgName[16] = '\0';
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, mfgName);
     }
-    ajn::MsgArg *valueArg = NULL;
+    valueArg = NULL;
     aboutData.GetField("org.openconnectivity.mnml", valueArg);
     if (valueArg)
     {
