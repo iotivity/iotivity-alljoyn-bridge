@@ -21,6 +21,7 @@
 #include "Plugin.h"
 
 #include "ocpayload.h"
+#include "ocrandom.h"
 #include "ocstack.h"
 #include "rd_client.h"
 #include <map>
@@ -161,6 +162,27 @@ void DeriveUniqueId(OCUUIdentity *id, const char *deviceId,
     digest[7] = (digest[7] & 0x0f) | 0x50;
     digest[8] = (digest[8] & 0x3f) | 0x80;
     memcpy(id->id, digest, UUID_IDENTITY_SIZE);
+}
+
+bool GetPiid(OCUUIdentity *piid, ajn::AboutData *aboutData)
+{
+    ajn::MsgArg *piidArg = NULL;
+    aboutData->GetField("org.openconnectivity.piid", piidArg);
+    char *piidStr = NULL;
+    if (piidArg && (ER_OK == piidArg->Get("s", &piidStr)))
+    {
+        return (piidStr && OCConvertStringToUuid(piidStr, piid->id));
+    }
+    else
+    {
+        char *deviceId;
+        aboutData->GetDeviceId(&deviceId);
+        uint8_t *appId;
+        size_t n;
+        aboutData->GetAppId(&appId, &n);
+        DeriveUniqueId(piid, deviceId, appId, n);
+        return true;
+    }
 }
 
 OCStackResult StartPresence()

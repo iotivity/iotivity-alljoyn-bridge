@@ -34,7 +34,6 @@ static const char *gPSPrefix = "AllJoynBridge";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
 static const char *sRD = NULL;
-static bool gIsGoldenUnit = false;
 
 static void SigIntCB(int sig)
 {
@@ -42,17 +41,23 @@ static void SigIntCB(int sig)
     sQuitFlag = true;
 }
 
-static FILE *PSOpenCB(const char *defaultPath, const char *mode)
+static std::string GetFilename(const char *uuid, const char *suffix)
 {
     std::string path = gPSPrefix;
-    if (sUUID)
+    if (uuid)
     {
-        path += std::string(sUUID) + ".dat";
+        path += std::string(uuid) + "_";
     }
-    else
+    if (suffix)
     {
-        path += defaultPath;
+        path += suffix;
     }
+    return path;
+}
+
+static FILE *PSOpenCB(const char *suffix, const char *mode)
+{
+    std::string path = GetFilename(sUUID, suffix);
     return fopen(path.c_str(), mode);
 }
 
@@ -95,12 +100,39 @@ static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-static void AnnouncedCB(const char *uuid, const char *sender)
+static void ExecCB(const char *uuid, const char *sender, bool isVirtual)
 {
     printf("exec --ps %s --uuid %s --sender %s --rd %s %s\n",
-           gPSPrefix, uuid, sender, OCGetServerInstanceIDString(),
-           gIsGoldenUnit ? "--golden" : "");
+            gPSPrefix, uuid, sender, OCGetServerInstanceIDString(),
+            isVirtual ? "--virtual" : "");
     fflush(stdout);
+}
+
+static void KillCB(const char *uuid)
+{
+    printf("kill --uuid %s\n", uuid);
+    fflush(stdout);
+}
+
+static Bridge::SeenState GetSeenStateCB(const char *uuid)
+{
+    std::string seenPath = GetFilename(uuid, "seen.state");
+    FILE *fp = fopen(seenPath.c_str(), "r");
+    if (!fp)
+    {
+        return Bridge::NOT_SEEN;
+    }
+    char stateStr[16];
+    fscanf(fp, "%s", stateStr);
+    fclose(fp);
+    if (!strcmp("virtual", stateStr))
+    {
+        return Bridge::SEEN_VIRTUAL;
+    }
+    else
+    {
+        return Bridge::SEEN_NATIVE;
+    }
 }
 
 static void SessionLostCB()
@@ -111,8 +143,14 @@ static void SessionLostCB()
 
 int main(int argc, char **argv)
 {
+    int ret = EXIT_FAILURE;
+    Bridge *bridge = NULL;
+    std::string dbFilename;
+    OCStackResult result;
+    OCPersistentStorage ps = { PSOpenCB, fread, fwrite, fclose, unlink };
+
     int protocols = 0;
-    const char *whitelistAddr = NULL;
+    bool isVirtual = false;
     if (argc > 1)
     {
         for (int i = 1; i < argc; ++i)
@@ -141,13 +179,9 @@ int main(int argc, char **argv)
             {
                 sRD = argv[++i];
             }
-            else if (!strcmp(argv[i], "--golden"))
+            else if (!strcmp(argv[i], "--virtual"))
             {
-                gIsGoldenUnit = true;
-            }
-            else if (!strcmp(argv[i], "--whitelist") && (i < (argc - 1)))
-            {
-                whitelistAddr = argv[++i];
+                isVirtual = true;
             }
         }
     }
@@ -156,6 +190,13 @@ int main(int argc, char **argv)
     {
         protocols = Bridge::AJ | Bridge::OC;
     }
+    std::string seenPath = GetFilename(sUUID, "seen.state");
+    if (sSender)
+    {
+        FILE *fp = fopen(seenPath.c_str(), "w");
+        fprintf(fp, "%s", isVirtual ? "virtual" : "native");
+        fclose(fp);
+    }
 
     signal(SIGINT, SigIntCB);
 
@@ -163,34 +204,33 @@ int main(int argc, char **argv)
     if (status != ER_OK)
     {
         fprintf(stderr, "AllJoynInit - %s\n", QCC_StatusText(status));
-        return EXIT_FAILURE;
+        goto exit;
     }
     status = AllJoynRouterInit();
     if (status != ER_OK)
     {
         fprintf(stderr, "AllJoynRouterInit - %s\n", QCC_StatusText(status));
-        return EXIT_FAILURE;
+        goto exit;
     }
 
-    OCPersistentStorage ps = { PSOpenCB, fread, fwrite, fclose, unlink };
-    OCStackResult result = OCRegisterPersistentStorageHandler(&ps);
+    result = OCRegisterPersistentStorageHandler(&ps);
     if (result != OC_STACK_OK)
     {
         fprintf(stderr, "OCRegisterPersistentStorageHandler - %d\n", result);
-        return EXIT_FAILURE;
+        goto exit;
     }
-    std::string dbFilename = std::string(gPSPrefix) + ".db";
+    dbFilename = GetFilename(NULL, "RD.db");
     result = OCRDDatabaseSetStorageFilename(dbFilename.c_str());
     if (result != OC_STACK_OK)
     {
         fprintf(stderr, "OCRDDatabaseSetStorageFilename - %d\n", result);
-        return EXIT_FAILURE;
+        goto exit;
     }
     result = OCInit1(OC_CLIENT_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS);
     if (result != OC_STACK_OK)
     {
         fprintf(stderr, "OCInit1 - %d\n", result);
-        return EXIT_FAILURE;
+        goto exit;
     }
     if (sSender)
     {
@@ -198,7 +238,7 @@ int main(int argc, char **argv)
         if (result != OC_STACK_OK)
         {
             fprintf(stderr, "OCStopMulticastServer - %d\n", result);
-            return EXIT_FAILURE;
+            goto exit;
         }
         OCCallbackData cbData;
         cbData.cb = DiscoverResourceDirectoryCB;
@@ -209,7 +249,7 @@ int main(int argc, char **argv)
         if (result != OC_STACK_OK)
         {
             fprintf(stderr, "DoResource(OC_REST_DISCOVER) - %d\n", result);
-            return EXIT_FAILURE;
+            goto exit;
         }
         while (!sQuitFlag && gRD.empty())
         {
@@ -217,7 +257,7 @@ int main(int argc, char **argv)
             if (result != OC_STACK_OK)
             {
                 fprintf(stderr, "OCProcess - %d\n", result);
-                return EXIT_FAILURE;
+                goto exit;
             }
         }
     }
@@ -227,11 +267,10 @@ int main(int argc, char **argv)
         if (result != OC_STACK_OK)
         {
             fprintf(stderr, "OCRDStart() - %d\n", result);
-            return EXIT_FAILURE;
+            goto exit;
         }
     }
 
-    Bridge *bridge = NULL;
     if (sUUID && sSender)
     {
         bridge = new Bridge(gPSPrefix, sUUID, sSender);
@@ -240,25 +279,23 @@ int main(int argc, char **argv)
     else
     {
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
-        bridge->SetAnnouncedCB(AnnouncedCB);
-        bridge->SetWhitelistAddress(whitelistAddr);
+        bridge->SetProcessCB(ExecCB, KillCB, GetSeenStateCB);
     }
-    bridge->SetGoldenUnit(gIsGoldenUnit);
     if (!bridge->Start())
     {
-        return EXIT_FAILURE;
+        goto exit;
     }
     while (!sQuitFlag)
     {
         if (!bridge->Process())
         {
-            return EXIT_FAILURE;
+            goto exit;
         }
         OCStackResult result = OCProcess();
         if (result != OC_STACK_OK)
         {
             fprintf(stderr, "OCProcess - %d\n", result);
-            return EXIT_FAILURE;
+            goto exit;
         }
 #ifdef _WIN32
         Sleep(1);
@@ -266,9 +303,14 @@ int main(int argc, char **argv)
         usleep(1 * 1000);
 #endif
     }
+    ret = EXIT_SUCCESS;
 
-    bridge->Stop();
-    delete bridge;
+exit:
+    if (bridge)
+    {
+        bridge->Stop();
+        delete bridge;
+    }
     if (sSender)
     {
         bool done = false;
@@ -290,6 +332,7 @@ int main(int argc, char **argv)
             usleep(1 * 1000);
 #endif
         }
+        remove(seenPath.c_str());
     }
     else
     {
@@ -298,5 +341,5 @@ int main(int argc, char **argv)
     OCStop();
     AllJoynRouterShutdown();
     AllJoynShutdown();
-    return EXIT_SUCCESS;
+    return ret;
 }

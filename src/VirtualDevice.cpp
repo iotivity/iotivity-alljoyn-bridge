@@ -22,6 +22,7 @@
 
 #include "Plugin.h"
 #include "ocpayload.h"
+#include "ocrandom.h"
 #include "ocstack.h"
 
 VirtualDevice::VirtualDevice(const char *name, ajn::SessionId sessionId)
@@ -64,36 +65,16 @@ void VirtualDevice::StartPresence()
 void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
         ajn::AboutData &aboutData)
 {
-    char *deviceId;
-    aboutData.GetDeviceId(&deviceId);
-
     char *value = NULL;
     aboutData.GetAppName(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, "0.3");
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_ID, OCGetServerInstanceIDString());
-    uint8_t *appId;
-    size_t n;
-    aboutData.GetAppId(&appId, &n);
-    OCUUIdentity id;
-    DeriveUniqueId(&id, deviceId, appId, n);
-    ajn::MsgArg *valueArg = NULL;
-    aboutData.GetField("org.openconnectivity.piid", valueArg);
-    if (valueArg)
-    {
-        value = NULL;
-        valueArg->Get("s", &value);
-        OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, value);
-    }
-    else
-    {
-        char piid[UUID_IDENTITY_SIZE * 2 + 5];
-        snprintf(piid, UUID_IDENTITY_SIZE * 2 + 5,
-                "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
-                id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
-        OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, piid);
-    }
+    OCUUIdentity piid;
+    GetPiid(&piid, &aboutData);
+    char piidStr[UUID_STRING_SIZE];
+    OCConvertUuidToString(piid.id, piidStr);
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, piidStr);
     std::set<std::string> dataModelVersions;
     size_t numPaths = objectDescription.GetPaths(NULL, 0);
     const char **paths = new const char *[numPaths];
@@ -131,6 +112,8 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
     aboutData.GetModelNumber(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, value);
 
+    char *deviceId;
+    aboutData.GetDeviceId(&deviceId);
     unsigned int pi[16];
     if (sscanf(deviceId, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
                &pi[0], &pi[1], &pi[2], &pi[3], &pi[4], &pi[5], &pi[6], &pi[7],
@@ -142,21 +125,19 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
                     &pi[0], &pi[1], &pi[2], &pi[3], &pi[4], &pi[5], &pi[6], &pi[7],
                     &pi[8], &pi[9], &pi[10], &pi[11], &pi[12], &pi[13], &pi[14], &pi[15]) == 16)
     {
-        char uuid[UUID_IDENTITY_SIZE * 2 + 5];
-        snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
-                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 pi[0], pi[1], pi[2], pi[3], pi[4], pi[5], pi[6], pi[7],
-                 pi[8], pi[9], pi[10], pi[11], pi[12], pi[13], pi[14], pi[15]);
+        char uuid[UUID_STRING_SIZE];
+        snprintf(uuid, UUID_STRING_SIZE,
+                "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                pi[0], pi[1], pi[2], pi[3], pi[4], pi[5], pi[6], pi[7],
+                pi[8], pi[9], pi[10], pi[11], pi[12], pi[13], pi[14], pi[15]);
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
     }
     else
     {
+        OCUUIdentity id;
         DeriveUniqueId(&id, deviceId, NULL, 0);
-        char uuid[UUID_IDENTITY_SIZE * 2 + 5];
-        snprintf(uuid, UUID_IDENTITY_SIZE * 2 + 5,
-                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
-                 id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
+        char uuid[UUID_STRING_SIZE];
+        OCConvertUuidToString(id.id, uuid);
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, uuid);
     }
     value = NULL;
@@ -168,7 +149,7 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
         mfgName[16] = '\0';
         OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, mfgName);
     }
-    valueArg = NULL;
+    ajn::MsgArg *valueArg = NULL;
     aboutData.GetField("org.openconnectivity.mnml", valueArg);
     if (valueArg)
     {

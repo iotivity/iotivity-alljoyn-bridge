@@ -25,7 +25,9 @@
 #include <alljoyn/AboutListener.h>
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/SessionListener.h>
+#include "ocpayload.h"
 #include "octypes.h"
+#include <list>
 #include <mutex>
 #include <vector>
 #include <set>
@@ -53,24 +55,56 @@ class Bridge : private ajn::AboutListener
         Bridge(const char *name, const char *uuid, const char *sender);
         ~Bridge();
 
-        typedef void (*AnnouncedCB)(const char *uuid, const char *sender);
-        void SetAnnouncedCB(AnnouncedCB cb) { m_announcedCb = cb; }
+        typedef void (*ExecCB)(const char *piid, const char *sender, bool isVirtual);
+        typedef void (*KillCB)(const char *piid);
+        typedef enum { NOT_SEEN = 0, SEEN_NATIVE, SEEN_VIRTUAL } SeenState;
+        typedef SeenState (*GetSeenStateCB)(const char *piid);
+        void SetProcessCB(ExecCB execCb, KillCB killCb, GetSeenStateCB seenStateCb)
+                { m_execCb = execCb; m_killCb = killCb; m_seenStateCb = seenStateCb; }
         typedef void (*SessionLostCB)();
         void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
-        void SetGoldenUnit(bool isGoldenUnit) { m_isGoldenUnit = isGoldenUnit; }
-        void SetWhitelistAddress(const char *addr) { if (addr) m_whitelistAddr = addr; }
 
         bool Start();
         bool Stop();
         bool Process();
 
     private:
+        struct DiscoverContext;
+        struct Task
+        {
+            time_t m_tick;
+            Task(time_t tick) : m_tick(tick) { }
+            virtual ~Task() { }
+            virtual void Run(Bridge *thiz) = 0;
+        };
+        struct AnnouncedTask : public Task {
+            std::string m_name;
+            std::string m_piid;
+            bool m_isVirtual;
+            AnnouncedTask(time_t tick, const char *name, const char *piid, bool isVirtual)
+                : Task(tick), m_name(name), m_piid(piid), m_isVirtual(isVirtual) { }
+            virtual ~AnnouncedTask() { }
+            virtual void Run(Bridge *thiz);
+        };
+        struct DiscoverTask : public Task {
+            std::string m_piid;
+            OCRepPayload *m_payload;
+            OCDevAddr m_devAddr;
+            DiscoverContext *m_context;
+            DiscoverTask(time_t tick, const char *piid, OCRepPayload *payload,
+                    OCDevAddr *devAddr, DiscoverContext *context) : Task(tick), m_piid(piid),
+                    m_payload(OCRepPayloadClone(payload)), m_devAddr(*devAddr),
+                    m_context(context) { }
+            virtual ~DiscoverTask() { OCRepPayloadDestroy(m_payload); }
+            virtual void Run(Bridge *thiz);
+        };
+
         static const time_t DISCOVER_PERIOD_SECS = 5;
 
-        AnnouncedCB m_announcedCb;
+        ExecCB m_execCb;
+        GetSeenStateCB m_seenStateCb;
+        KillCB m_killCb;
         SessionLostCB m_sessionLostCb;
-        bool m_isGoldenUnit;
-        std::string m_whitelistAddr;
 
         std::mutex m_mutex;
         Protocol m_protocols;
@@ -83,9 +117,9 @@ class Bridge : private ajn::AboutListener
         std::vector<VirtualDevice *> m_virtualDevices;
         std::vector<VirtualResource *> m_virtualResources;
         std::vector<VirtualBusAttachment *> m_virtualBusAttachments;
-        struct DiscoverContext;
-        std::set<DiscoverContext *> m_discovered;
+        std::map<OCDoHandle, DiscoverContext *> m_discovered;
         bool m_secureMode;
+        std::list<Task*> m_tasks;
 
         void Destroy(const char *id);
         virtual void BusDisconnected();
@@ -113,7 +147,10 @@ class Bridge : private ajn::AboutListener
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                                               OCClientResponse *response);
         OCStackResult CreateInterface(DiscoverContext *context, OCClientResponse *response);
-        OCStackApplicationResult Get(DiscoverContext *context, OCClientResponse *response);
+        OCStackApplicationResult Get(void *ctx, OCDoHandle handle, OCClientResponse *response);
+
+        SeenState GetSeenState(const char *piid);
+        void DestroyPiid(const char *piid);
 };
 
 #endif

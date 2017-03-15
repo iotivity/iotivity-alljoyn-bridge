@@ -21,6 +21,7 @@
 #include "Bridge.h"
 
 #include "ocpayload.h"
+#include "ocrandom.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
 #include "oic_string.h"
@@ -85,6 +86,7 @@ struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
     std::string m_di;
+    bool m_isVirtual;
     VirtualBusAttachment *m_bus;
     struct Resource
     {
@@ -100,13 +102,13 @@ struct Bridge::DiscoverContext
     };
     std::map<std::string, Resource> m_resources;
     VirtualBusObject *m_obj;
-    DiscoverContext(Bridge *bridge, const char *di) : m_bridge(bridge), m_di(di), m_bus(NULL),
-        m_obj(NULL) { }
+    DiscoverContext(Bridge *bridge, const char *di, bool isVirtual)
+        : m_bridge(bridge), m_di(di), m_isVirtual(isVirtual), m_bus(NULL), m_obj(NULL) { }
     ~DiscoverContext() { delete m_obj; delete m_bus; }
 };
 
 Bridge::Bridge(const char *name, Protocol protocols)
-    : m_announcedCb(NULL), m_sessionLostCb(NULL),
+    : m_execCb(NULL), m_sessionLostCb(NULL),
       m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
 {
@@ -114,7 +116,7 @@ Bridge::Bridge(const char *name, Protocol protocols)
 }
 
 Bridge::Bridge(const char *name, const char *uuid, const char *sender)
-    : m_announcedCb(NULL), m_sessionLostCb(NULL),
+    : m_execCb(NULL), m_sessionLostCb(NULL),
       m_protocols(AJ), m_sender(sender), m_bus(NULL), m_authListener(NULL),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
 {
@@ -134,8 +136,9 @@ Bridge::~Bridge()
             delete presence;
         }
         m_presence.clear();
-        for (DiscoverContext *discoverContext : m_discovered)
+        for (auto &dc : m_discovered)
         {
+            DiscoverContext *discoverContext = dc.second;
             delete discoverContext;
         }
         m_discovered.clear();
@@ -161,6 +164,20 @@ Bridge::~Bridge()
 /* Called with m_mutex held. */
 void Bridge::Destroy(const char *id)
 {
+    std::map<OCDoHandle, DiscoverContext *>::iterator dc = m_discovered.begin();
+    while (dc != m_discovered.end())
+    {
+        DiscoverContext *context = dc->second;
+        if (context->m_di == id)
+        {
+            delete context;
+            dc = m_discovered.erase(dc);
+        }
+        else
+        {
+            ++dc;
+        }
+    }
     std::vector<VirtualBusAttachment *>::iterator vba = m_virtualBusAttachments.begin();
     while (vba != m_virtualBusAttachments.end())
     {
@@ -374,6 +391,20 @@ bool Bridge::Process()
         LOG(LOG_INFO, "[%p] %s absent", this, id.c_str());
         Destroy(id.c_str());
     }
+    std::list<Task *>::iterator task = m_tasks.begin();
+    while (task != m_tasks.end())
+    {
+        if (time(NULL) >= (*task)->m_tick)
+        {
+            (*task)->Run(this);
+            delete (*task);
+            task = m_tasks.erase(task);
+        }
+        else
+        {
+            ++task;
+        }
+    }
     return true;
 }
 
@@ -417,28 +448,12 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
     ajn::SessionOpts opts;
 
     ajn::AboutData aboutData(aboutDataArg);
-    char *deviceId;
-    aboutData.GetDeviceId(&deviceId);
-    uint8_t *appId;
-    size_t n;
-    aboutData.GetAppId(&appId, &n);
-    OCUUIdentity id;
-    DeriveUniqueId(&id, deviceId, appId, n);
-    char piid[UUID_IDENTITY_SIZE * 2 + 5];
-    snprintf(piid, UUID_IDENTITY_SIZE * 2 + 5,
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             id.id[0], id.id[1], id.id[2], id.id[3], id.id[4], id.id[5], id.id[6], id.id[7],
-             id.id[8], id.id[9], id.id[10], id.id[11], id.id[12], id.id[13], id.id[14], id.id[15]);
+    OCUUIdentity piid;
+    GetPiid(&piid, &aboutData);
+    char piidStr[UUID_STRING_SIZE];
+    OCConvertUuidToString(piid.id, piidStr);
 
-    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piid);
-
-    /* Ignore Announce from virtual devices */
-    ajn::AboutObjectDescription objectDescription(objectDescriptionArg);
-    if (objectDescription.HasInterface("oic.d.virtual"))
-    {
-        LOG(LOG_INFO, "[%p] Ignoring virtual application", this);
-        return;
-    }
+    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piidStr);
 
     m_mutex.lock();
     /* Ignore Announce from self */
@@ -453,11 +468,30 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
 
     if (!m_sender)
     {
-        m_mutex.unlock();
-        if (m_announcedCb)
+        bool isVirtual = ajn::AboutObjectDescription(objectDescriptionArg).HasInterface("oic.d.virtual");
+        switch (GetSeenState(piidStr))
         {
-            m_announcedCb(piid, name);
+        case NOT_SEEN:
+            m_execCb(piidStr, name, isVirtual);
+            break;
+        case SEEN_NATIVE:
+            /* Do nothing */
+            break;
+        case SEEN_VIRTUAL:
+            if (isVirtual)
+            {
+                /* Do nothing */
+            }
+            else
+            {
+                /* Delay creating virtual resources from a virtual Announce */
+                LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
+                        this);
+                m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, name, piidStr, isVirtual));
+            }
+            break;
         }
+        m_mutex.unlock();
         return;
     }
 
@@ -562,18 +596,15 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
         if (context->m_device)
         {
             context->m_device->SetInfo(objectDescription, aboutData);
-            if (!m_isGoldenUnit)
+            OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+            if (!handle)
             {
-                OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-                if (!handle)
-                {
-                    LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-                }
-                OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-                if (result != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-                }
+                LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            }
+            OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
+            if (result != OC_STACK_OK)
+            {
+                LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
             }
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];
@@ -628,18 +659,15 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             m_presence.push_back(presence);
             VirtualDevice *device = new VirtualDevice(msg->GetSender(), msg->GetSessionId());
             device->SetInfo(objectDescription, aboutData);
-            if (!m_isGoldenUnit)
+            OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+            if (!handle)
             {
-                OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-                if (!handle)
-                {
-                    LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-                }
-                OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-                if (result != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-                }
+                LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            }
+            OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
+            if (result != OC_STACK_OK)
+            {
+                LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
             }
             m_virtualDevices.push_back(device);
             size_t numPaths = objectDescription.GetPaths(NULL, 0);
@@ -694,16 +722,14 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     {
         return OC_STACK_KEEP_TRANSACTION;
     }
-    if (!thiz->m_whitelistAddr.empty() && (thiz->m_whitelistAddr != response->devAddr.addr))
-    {
-        LOG(LOG_INFO, "[%p] Ignoring %s:%d", thiz, response->devAddr.addr, response->devAddr.port);
-        return OC_STACK_KEEP_TRANSACTION;
-    }
     OCDiscoveryPayload *payload;
     for (payload = (OCDiscoveryPayload *) response->payload; payload; payload = payload->next)
     {
+        bool isVirtual = false;
         DiscoverContext *context = NULL;
+        OCDevAddr devAddr;
         OCCallbackData cbData;
+        OCDoHandle cbHandle = 0;
         std::map<std::string, DiscoverContext::Resource> resources;
 
         if (!strcmp(payload->sid, GetServerInstanceIDString()))
@@ -731,10 +757,10 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
                 goto next;
             }
         }
-        for (std::set<DiscoverContext *>::iterator it = thiz->m_discovered.begin();
+        for (std::map<OCDoHandle, DiscoverContext *>::iterator it = thiz->m_discovered.begin();
              it != thiz->m_discovered.end(); ++it)
         {
-            if ((*it)->m_di == payload->sid)
+            if (it->second->m_di == payload->sid)
             {
                 goto next;
             }
@@ -748,8 +774,8 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             {
                 if (!strcmp(type->value, "oic.d.virtual"))
                 {
-                    LOG(LOG_INFO, "[%p] Ignoring virtual device", thiz);
-                    goto next;
+                    isVirtual = true;
+                    break;
                 }
             }
         }
@@ -760,6 +786,10 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             bool hasMultipleRts = resource->types && resource->types->next;
             for (OCStringLL *type = resource->types; type; type = type->next)
             {
+                if (!strcmp(resource->uri, OC_RSRVD_DEVICE_URI))
+                {
+                    GetDevAddr(&devAddr, &response->devAddr, payload->sid, resource->eps);
+                }
                 if (!TranslateResourceType(type->value))
                 {
                     continue;
@@ -774,28 +804,28 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         {
             continue;
         }
-        if (!thiz->m_isGoldenUnit)
-        {
-            resources.insert(std::pair<std::string, DiscoverContext::Resource>("/oic/d?rt=oic.d.virtual",
-                            DiscoverContext::Resource(&response->devAddr, payload->sid, NULL, OC_DISCOVERABLE, true)));
-        }
+        resources.insert(std::pair<std::string, DiscoverContext::Resource>("/oic/d?rt=oic.d.virtual",
+                        DiscoverContext::Resource(&response->devAddr, payload->sid, NULL, OC_DISCOVERABLE, true)));
 
-        context = new DiscoverContext(thiz, payload->sid);
+        context = new DiscoverContext(thiz, payload->sid, isVirtual);
         context->m_resources = resources;
-        thiz->m_discovered.insert(context);
 
         cbData.cb = Bridge::GetDeviceCB;
-        cbData.context = context;
+        cbData.context = thiz;
         cbData.cd = NULL;
-        result = DoResource(NULL, OC_REST_GET, OC_RSRVD_DEVICE_URI, &response->devAddr, NULL, &cbData);
-        if (result != OC_STACK_OK)
+        result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_DEVICE_URI, &devAddr, NULL, &cbData);
+        if (result == OC_STACK_OK)
+        {
+            thiz->m_discovered[cbHandle] = context;
+        }
+        else
         {
             LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
         }
 next:
         if (result != OC_STACK_OK)
         {
-            thiz->m_discovered.erase(context);
+            thiz->m_discovered.erase(handle);
             delete context;
             context = NULL;
         }
@@ -806,16 +836,22 @@ next:
 OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
-    (void) handle;
-    DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
-    Bridge *thiz = context->m_bridge;
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
     LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    DiscoverContext *context = NULL;
     OCStackResult result = OC_STACK_ERROR;
     OCCallbackData cbData;
+    OCDoHandle cbHandle = 0;
     OCRepPayload *payload;
-    char *value = NULL;
+    char *piid = NULL;
+    std::map<OCDoHandle, DiscoverContext *>::iterator it = thiz->m_discovered.find(handle);
+    if (it == thiz->m_discovered.end())
+    {
+        goto exit;
+    }
+    context = it->second;
     if (!response)
     {
         goto exit;
@@ -823,6 +859,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     if (response->result != OC_STACK_OK || !response->payload)
     {
         LOG(LOG_INFO, "[%p] Missing /oic/d", thiz);
+        goto exit;
     }
     if (response->payload && response->payload->type != PAYLOAD_TYPE_REPRESENTATION)
     {
@@ -831,27 +868,53 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
         goto exit;
     }
     payload = (OCRepPayload *) response->payload;
-    OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value);
-    context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), value);
-    OICFree(value);
-    value = NULL;
+    OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &piid);
+    switch (thiz->GetSeenState(piid))
+    {
+        case NOT_SEEN:
+            context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), piid,
+                    context->m_isVirtual);
+            break;
+        case SEEN_NATIVE:
+            /* Do nothing */
+            goto exit;
+        case SEEN_VIRTUAL:
+            if (context->m_isVirtual)
+            {
+                /* Do nothing */
+            }
+            else
+            {
+                /* Delay creating virtual objects from a virtual device */
+                LOG(LOG_INFO, "[%p] Delaying creation of virtual objects from a virtual device",
+                        thiz);
+                thiz->m_tasks.push_back(new DiscoverTask(time(NULL) + 10, piid, payload, &response->devAddr, context));
+                result = OC_STACK_OK;
+            }
+            goto exit;
+    }
     if (!context->m_bus)
     {
         goto exit;
     }
     context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
     cbData.cb = Bridge::GetPlatformCB;
-    cbData.context = context;
+    cbData.context = thiz;
     cbData.cd = NULL;
-    result = DoResource(NULL, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
-    if (result != OC_STACK_OK)
+    result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
+    if (result == OC_STACK_OK)
+    {
+        thiz->m_discovered[cbHandle] = context;
+    }
+    else
     {
         LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
     }
 exit:
+    thiz->m_discovered.erase(handle);
+    OICFree(piid);
     if (result != OC_STACK_OK)
     {
-        thiz->m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
@@ -860,15 +923,21 @@ exit:
 OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
-    (void) handle;
-    DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
-    Bridge *thiz = context->m_bridge;
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
     LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    std::map<OCDoHandle, DiscoverContext *>::iterator it;
+    DiscoverContext *context = NULL;
     OCStackResult result = OC_STACK_ERROR;
     OCRepPayload *payload;
     OCCallbackData cbData;
+    it = thiz->m_discovered.find(handle);
+    if (it == thiz->m_discovered.end())
+    {
+        goto exit;
+    }
+    context = it->second;
     if (!response)
     {
         goto exit;
@@ -885,11 +954,11 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     }
     payload = (OCRepPayload *) response->payload;
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    return thiz->Get(context, response);
+    return thiz->Get(ctx, handle, response);
 exit:
+    thiz->m_discovered.erase(handle);
     if (result != OC_STACK_OK)
     {
-        thiz->m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
@@ -898,12 +967,18 @@ exit:
 OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
                                        OCClientResponse *response)
 {
-    (void) handle;
-    DiscoverContext *context = reinterpret_cast<DiscoverContext *>(ctx);
-    Bridge *thiz = context->m_bridge;
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
     LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    std::map<OCDoHandle, DiscoverContext *>::iterator it;
+    DiscoverContext *context = NULL;
+    it = thiz->m_discovered.find(handle);
+    if (it == thiz->m_discovered.end())
+    {
+        goto exit;
+    }
+    context = it->second;
     if (!response || response->result != OC_STACK_OK || !response->payload)
     {
         LOG(LOG_ERR, "GetCB (%s) response=%p {payload=%p,result=%d}",
@@ -915,9 +990,14 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
         thiz->CreateInterface(context, response);
     }
     context->m_resources.erase(context->m_resources.begin());
-    return thiz->Get(context, response);
+    return thiz->Get(ctx, handle, response);
+exit:
+    thiz->m_discovered.erase(handle);
+    delete context;
+    return OC_STACK_DELETE_TRANSACTION;
 }
 
+/* Called with m_mutex held. */
 OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse *response)
 {
     bool isObservable = context->m_resources.begin()->second.m_bitmap & OC_OBSERVABLE;
@@ -933,11 +1013,19 @@ OCStackResult Bridge::CreateInterface(DiscoverContext *context, OCClientResponse
     return OC_STACK_OK;
 }
 
-OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse *response)
+/* Called with m_mutex held. */
+OCStackApplicationResult Bridge::Get(void *ctx, OCDoHandle handle, OCClientResponse *response)
 {
-    (void) response;
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    std::map<OCDoHandle, DiscoverContext *>::iterator it;
+    DiscoverContext *context = NULL;
     OCStackResult result = OC_STACK_ERROR;
-
+    it = thiz->m_discovered.find(handle);
+    if (it == thiz->m_discovered.end())
+    {
+        goto exit;
+    }
+    context = it->second;
     if (!context->m_resources.empty())
     {
         OCDevAddr *devAddr = &context->m_resources.begin()->second.m_devAddr;
@@ -966,7 +1054,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
                 }
             }
             context->m_resources.erase(context->m_resources.begin());
-            return Get(context, response);
+            return Get(ctx, handle, response);
         }
         if (!context->m_obj)
         {
@@ -978,7 +1066,7 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
             /* Don't need to issue a GET for device types */
             CreateInterface(context, response);
             context->m_resources.erase(context->m_resources.begin());
-            return Get(context, response);
+            return Get(ctx, handle, response);
         }
         else
         {
@@ -988,10 +1076,15 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
             }
             OCCallbackData cbData;
             cbData.cb = Bridge::GetCB;
-            cbData.context = context;
+            cbData.context = this;
             cbData.cd = NULL;
-            result = DoResource(NULL, OC_REST_GET, uri.c_str(), devAddr, NULL, &cbData);
-            if (result != OC_STACK_OK)
+            OCDoHandle cbHandle;
+            result = DoResource(&cbHandle, OC_REST_GET, uri.c_str(), devAddr, NULL, &cbData);
+            if (result == OC_STACK_OK)
+            {
+                m_discovered[cbHandle] = context;
+            }
+            else
             {
                 LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
                 goto exit;
@@ -1028,13 +1121,12 @@ OCStackApplicationResult Bridge::Get(DiscoverContext *context, OCClientResponse 
         m_virtualBusAttachments.push_back(context->m_bus);
         context->m_bus = NULL; /* context->m_bus now belongs to thiz */
         result = OC_STACK_OK;
-        m_discovered.erase(context);
         delete context;
     }
 exit:
+    m_discovered.erase(handle);
     if (result != OC_STACK_OK)
     {
-        m_discovered.erase(context);
         delete context;
     }
     return OC_STACK_DELETE_TRANSACTION;
@@ -1138,4 +1230,177 @@ OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
         OCNotifyAllObservers(request->resource, OC_NA_QOS);
     }
     return result;
+}
+
+static const char *SeenStateText[] = { "NOT_SEEN", "SEEN_NATIVE", "SEEN_VIRTUAL" };
+
+/* Called with m_mutex held. */
+Bridge::SeenState Bridge::GetSeenState(const char *piid)
+{
+    SeenState state = NOT_SEEN;
+
+    /* Check what we've seen on the AJ side. */
+    if (piid && (NOT_SEEN == state))
+    {
+        state = m_seenStateCb(piid);
+    }
+
+    /* Check what we've seen on the OC side. */
+    if (piid && (NOT_SEEN == state))
+    {
+        VirtualBusAttachment *bus = NULL;
+        for (auto &dc : m_discovered)
+        {
+            DiscoverContext *discoverContext = dc.second;
+            if (discoverContext->m_bus &&
+                    (discoverContext->m_bus->GetProtocolIndependentId() == piid))
+            {
+                bus = discoverContext->m_bus;
+                break;
+            }
+        }
+        if (!bus)
+        {
+            for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
+            {
+                if (busAttachment->GetProtocolIndependentId() == piid)
+                {
+                    bus = busAttachment;
+                    break;
+                }
+            }
+        }
+        if (bus)
+        {
+            state = bus->IsVirtual() ? SEEN_VIRTUAL : SEEN_NATIVE;
+        }
+    }
+
+    LOG(LOG_INFO, "piid=%s,state=%s", piid, SeenStateText[state]);
+    return state;
+}
+
+/* Called with m_mutex held. */
+void Bridge::AnnouncedTask::Run(Bridge *thiz)
+{
+    switch (thiz->GetSeenState(m_piid.c_str()))
+    {
+        case NOT_SEEN:
+            thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_isVirtual);
+            break;
+        case SEEN_NATIVE:
+            /* Do nothing */
+            break;
+        case SEEN_VIRTUAL:
+            if (m_isVirtual)
+            {
+                /* Do nothing */
+            }
+            else
+            {
+                thiz->DestroyPiid(m_piid.c_str());
+                thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_isVirtual);
+            }
+            break;
+    }
+}
+
+/* Called with m_mutex held. */
+void Bridge::DiscoverTask::Run(Bridge *thiz)
+{
+    OCStackResult result = OC_STACK_ERROR;
+    DiscoverContext *context = NULL;
+    OCCallbackData cbData;
+    OCDoHandle cbHandle = 0;
+    for (std::map<OCDoHandle, DiscoverContext *>::iterator it = thiz->m_discovered.begin();
+         it != thiz->m_discovered.end(); ++it)
+    {
+        if (it->second == m_context)
+        {
+            context = it->second;
+        }
+    }
+    if (!context)
+    {
+        goto exit;
+    }
+    switch (thiz->GetSeenState(m_piid.c_str()))
+    {
+        case NOT_SEEN:
+            context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), m_piid.c_str(),
+                    context->m_isVirtual);
+            break;
+        case SEEN_NATIVE:
+            /* Do nothing */
+            goto exit;
+        case SEEN_VIRTUAL:
+            if (context->m_isVirtual)
+            {
+                /* Do nothing */
+            }
+            else
+            {
+                thiz->DestroyPiid(m_piid.c_str());
+                context->m_bus = VirtualBusAttachment::Create(context->m_di.c_str(), m_piid.c_str(),
+                        context->m_isVirtual);
+            }
+            break;
+    }
+    if (!context->m_bus)
+    {
+        goto exit;
+    }
+    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, m_payload);
+    cbData.cb = Bridge::GetPlatformCB;
+    cbData.context = thiz;
+    cbData.cd = NULL;
+    result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &m_devAddr, NULL, &cbData);
+    if (result == OC_STACK_OK)
+    {
+        thiz->m_discovered[cbHandle] = context;
+    }
+    else
+    {
+        LOG(LOG_ERR, "DoResource(OC_REST_GET) - %d", result);
+    }
+exit:
+    if (result != OC_STACK_OK)
+    {
+        delete context;
+    }
+}
+
+/* Called with m_mutex held. */
+void Bridge::DestroyPiid(const char *piid)
+{
+    /* Destroy virtual OC devices */
+    m_killCb(piid);
+
+    /* Destroy virtual AJ devices */
+    std::string di;
+    for (auto &dc : m_discovered)
+    {
+        DiscoverContext *discoverContext = dc.second;
+        if (discoverContext->m_bus &&
+                (discoverContext->m_bus->GetProtocolIndependentId() == piid))
+        {
+            di = discoverContext->m_bus->GetDi();
+            break;
+        }
+    }
+    if (di.empty())
+    {
+        for (VirtualBusAttachment *busAttachment : m_virtualBusAttachments)
+        {
+            if (busAttachment->GetProtocolIndependentId() == piid)
+            {
+                di = busAttachment->GetDi();
+                break;
+            }
+        }
+    }
+    if (!di.empty())
+    {
+        Destroy(di.c_str());
+    }
 }

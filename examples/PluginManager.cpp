@@ -18,12 +18,18 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include <errno.h>
+#include <map>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "ocrandom.h"
 
 static volatile sig_atomic_t sQuitFlag = false;
 
@@ -31,6 +37,13 @@ static void SigIntCB(int sig)
 {
     (void) sig;
     sQuitFlag = true;
+}
+
+static void SigChldCB(int sig)
+{
+    (void) sig;
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
 }
 
 int main(int argc, char **argv)
@@ -43,6 +56,7 @@ int main(int argc, char **argv)
     char *name = basename(strdup(argv[1]));
 
     signal(SIGINT, SigIntCB);
+    signal(SIGCHLD, SigChldCB);
 
     int pipefd[2];
     if (pipe(pipefd) < 0)
@@ -80,6 +94,7 @@ int main(int argc, char **argv)
     }
     close(pipefd[1]);
 
+    std::map<std::string, pid_t> pids;
     char line[512];
     char *lp = line;
     char c;
@@ -122,6 +137,11 @@ int main(int argc, char **argv)
                     perror("execv");
                     return EXIT_FAILURE;
                 }
+                else
+                {
+                    char *uuid = args[5];
+                    pids[uuid] = pid;
+                }
                 for (int i = 2; i < 11; ++i)
                 {
                     if (args[i])
@@ -130,6 +150,20 @@ int main(int argc, char **argv)
                     }
                 }
             }
+            else if (!strncmp(line, "kill", strlen("kill")))
+            {
+                char uuid[UUID_STRING_SIZE];
+                sscanf(line, "kill --uuid %s", uuid);
+                std::map<std::string, pid_t>::iterator it = pids.find(uuid);
+                if (it != pids.end())
+                {
+                    if (kill(it->second, SIGINT) < 0)
+                    {
+                        perror("kill");
+                    }
+                }
+            }
+
         }
     }
     close(pipefd[0]);

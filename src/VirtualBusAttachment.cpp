@@ -54,11 +54,11 @@ static void ToAppId(const char *di, uint8_t *appId)
     }
 }
 
-VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid)
+VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid, bool isVirtual)
 {
     QStatus status;
     ajn::SessionOpts opts;
-    VirtualBusAttachment *busAttachment = new VirtualBusAttachment(di, piid);
+    VirtualBusAttachment *busAttachment = new VirtualBusAttachment(di, piid, isVirtual);
     {
         std::lock_guard<std::mutex> lock(busAttachment->m_mutex);
         status = busAttachment->Start();
@@ -89,12 +89,12 @@ exit:
     return busAttachment;
 }
 
-VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid)
-    : ajn::BusAttachment(di), m_di(di), m_port(ajn::SESSION_PORT_ANY), m_numSessions(0),
-      m_aboutObj(NULL)
+VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, bool isVirtual)
+    : ajn::BusAttachment(di), m_di(di), m_isVirtual(isVirtual), m_port(ajn::SESSION_PORT_ANY),
+    m_numSessions(0), m_aboutObj(NULL)
 {
-    LOG(LOG_INFO, "[%p] di=%s,piid=%s",
-        this, di, piid);
+    LOG(LOG_INFO, "[%p] di=%s,piid=%s,isVirtual=%d",
+            this, di, piid, isVirtual);
 
     if (piid)
     {

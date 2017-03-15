@@ -36,10 +36,11 @@ class VirtualBusAttachment : public ajn::BusAttachment
     , private ajn::SessionListener
 {
     public:
-        static VirtualBusAttachment *Create(const char *di, const char *piid);
+        static VirtualBusAttachment *Create(const char *di, const char *piid, bool isVirtual);
         virtual ~VirtualBusAttachment();
         std::string GetDi() { return m_di; }
         std::string GetProtocolIndependentId() { return m_piid; }
+        bool IsVirtual() { return m_isVirtual; }
         void SetAboutData(const char *uri, OCRepPayload *payload);
         const ajn::InterfaceDescription *CreateInterface(const char *ifaceName, bool emitsChanged,
                 OCPayload *payload);
@@ -52,6 +53,10 @@ class VirtualBusAttachment : public ajn::BusAttachment
         class AboutData : public ajn::AboutData
         {
             public:
+                AboutData()
+                {
+                    SetNewFieldDetails("org.openconnectivity.piid", ANNOUNCED, "s");
+                }
                 QStatus SetNewFieldDetails(const char *name, AboutFieldMask mask, const char *signature)
                 {
                     return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
@@ -60,6 +65,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
 
         std::string m_di;
         std::string m_piid;
+        bool m_isVirtual;
         std::mutex m_mutex;
         AboutData m_aboutData;
         ajn::SessionPort m_port;
@@ -67,7 +73,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         std::vector<VirtualBusObject *> m_virtualBusObjects;
         ajn::AboutObj *m_aboutObj;
 
-        VirtualBusAttachment(const char *di, const char *piid);
+        VirtualBusAttachment(const char *di, const char *piid, bool isVirtual);
         virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
                                          const ajn::SessionOpts &opts);
         virtual void SessionJoined(ajn::SessionPort port, ajn::SessionId id, const char *name);
