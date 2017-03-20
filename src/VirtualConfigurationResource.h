@@ -26,7 +26,7 @@
 class VirtualConfigurationResource : public VirtualResource
 {
     public:
-        static VirtualResource *Create(ajn::BusAttachment *bus,
+        static VirtualResource *Create(Bridge* bridge, ajn::BusAttachment *bus,
                                        const char *name, ajn::SessionId sessionId, const char *path,
                                        const char *ajSoftwareVersion);
         virtual ~VirtualConfigurationResource();
@@ -36,7 +36,7 @@ class VirtualConfigurationResource : public VirtualResource
         bool m_fr;
         bool m_rb;
 
-        VirtualConfigurationResource(ajn::BusAttachment *bus,
+        VirtualConfigurationResource(Bridge *bridge, ajn::BusAttachment *bus,
                                      const char *name, ajn::SessionId sessionId, const char *path,
                                      const char *ajSoftwareVersion);
 

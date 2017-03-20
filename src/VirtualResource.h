@@ -28,22 +28,25 @@
 #include <mutex>
 #include <vector>
 
+class Bridge;
+
 class VirtualResource : public ajn::ProxyBusObject
     , protected ajn::ProxyBusObject::Listener
     , private ajn::BusAttachment::AddMatchAsyncCB
     , private ajn::BusAttachment::RemoveMatchAsyncCB
 {
     public:
-        static VirtualResource *Create(ajn::BusAttachment *bus,
+        static VirtualResource *Create(Bridge *bridge, ajn::BusAttachment *bus,
                                        const char *name, ajn::SessionId sessionId, const char *path,
                                        const char *ajSoftwareVersion);
         virtual ~VirtualResource();
 
     protected:
         std::mutex m_mutex;
+        Bridge *m_bridge;
         ajn::BusAttachment *m_bus;
 
-        VirtualResource(ajn::BusAttachment *bus,
+        VirtualResource(Bridge *bridge, ajn::BusAttachment *bus,
                         const char *name, ajn::SessionId sessionId, const char *path,
                         const char *ajSoftwareVersion);
 

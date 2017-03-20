@@ -111,7 +111,7 @@ struct Bridge::DiscoverContext
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_execCb(NULL), m_sessionLostCb(NULL),
       m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
 {
     m_bus = new ajn::BusAttachment(name, true);
 }
@@ -119,7 +119,7 @@ Bridge::Bridge(const char *name, Protocol protocols)
 Bridge::Bridge(const char *name, const char *uuid, const char *sender)
     : m_execCb(NULL), m_sessionLostCb(NULL),
       m_protocols(AJ), m_sender(sender), m_bus(NULL), m_authListener(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false)
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
 {
     std::string nm = std::string(name) + uuid;
     m_bus = new ajn::BusAttachment(nm.c_str(), true);
@@ -575,11 +575,12 @@ VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus,
 {
     if (!strcmp(path, "/Config"))
     {
-        return VirtualConfigurationResource::Create(bus, name, sessionId, path, ajSoftwareVersion);
+        return VirtualConfigurationResource::Create(this, bus, name, sessionId, path,
+                ajSoftwareVersion);
     }
     else
     {
-        return VirtualResource::Create(bus, name, sessionId, path, ajSoftwareVersion);
+        return VirtualResource::Create(this, bus, name, sessionId, path, ajSoftwareVersion);
     }
 }
 
@@ -1411,4 +1412,30 @@ void Bridge::DestroyPiid(const char *piid)
     {
         Destroy(di.c_str());
     }
+}
+
+void Bridge::RDPublish()
+{
+    LOG(LOG_INFO, "[%p]", this);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_rdPublishTask)
+    {
+        /* Delay the pending publication to give time for multiple resources to be created. */
+        m_rdPublishTask->m_tick = time(NULL) + 1;
+    }
+    else
+    {
+        m_rdPublishTask = new RDPublishTask(time(NULL) + 1);
+        m_tasks.push_back(m_rdPublishTask);
+    }
+}
+
+/* Called with m_mutex held. */
+void Bridge::RDPublishTask::Run(Bridge *thiz)
+{
+    LOG(LOG_INFO, "[%p] thiz=%p", this, thiz);
+
+    ::RDPublish();
+    thiz->m_rdPublishTask = NULL;
 }

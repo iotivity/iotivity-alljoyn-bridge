@@ -68,6 +68,9 @@ class Bridge : private ajn::AboutListener
         bool Stop();
         bool Process();
 
+        /* Used internally */
+        void RDPublish();
+
     private:
         struct DiscoverContext;
         struct Task
@@ -98,6 +101,11 @@ class Bridge : private ajn::AboutListener
             virtual ~DiscoverTask() { OCRepPayloadDestroy(m_payload); }
             virtual void Run(Bridge *thiz);
         };
+        struct RDPublishTask : public Task {
+            RDPublishTask(time_t tick) : Task(tick) { }
+            virtual ~RDPublishTask() { }
+            virtual void Run(Bridge *thiz);
+        };
 
         static const time_t DISCOVER_PERIOD_SECS = 5;
 
@@ -120,6 +128,7 @@ class Bridge : private ajn::AboutListener
         std::map<OCDoHandle, DiscoverContext *> m_discovered;
         bool m_secureMode;
         std::list<Task*> m_tasks;
+        RDPublishTask *m_rdPublishTask;
 
         void Destroy(const char *id);
         virtual void BusDisconnected();

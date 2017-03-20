@@ -20,6 +20,7 @@
 
 #include "VirtualConfigurationResource.h"
 
+#include "Bridge.h"
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
@@ -50,12 +51,11 @@ static const struct { const char *aj; const char *oc; } keys[] =
     { "DefaultLanguage", "dl" }
 };
 
-VirtualResource *VirtualConfigurationResource::Create(ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path,
-        const char *ajSoftwareVersion)
+VirtualResource *VirtualConfigurationResource::Create(Bridge *bridge, ajn::BusAttachment *bus,
+        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
 {
-    VirtualConfigurationResource *resource = new VirtualConfigurationResource(bus, name, sessionId,
-            path, ajSoftwareVersion);
+    VirtualConfigurationResource *resource = new VirtualConfigurationResource(bridge, bus, name,
+            sessionId, path, ajSoftwareVersion);
     OCStackResult result = resource->Create();
     if (result != OC_STACK_OK)
     {
@@ -65,10 +65,10 @@ VirtualResource *VirtualConfigurationResource::Create(ajn::BusAttachment *bus,
     return resource;
 }
 
-VirtualConfigurationResource::VirtualConfigurationResource(ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path,
-        const char *ajSoftwareVersion)
-    : VirtualResource(bus, name, sessionId, path, ajSoftwareVersion), m_fr(false), m_rb(false)
+VirtualConfigurationResource::VirtualConfigurationResource(Bridge *bridge, ajn::BusAttachment *bus,
+        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
+    : VirtualResource(bridge, bus, name, sessionId, path, ajSoftwareVersion), m_fr(false),
+      m_rb(false)
 {
     LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s",
         this, bus, name, sessionId, path, ajSoftwareVersion);
@@ -102,43 +102,42 @@ void VirtualConfigurationResource::IntrospectCB(QStatus status, ProxyBusObject *
     (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (status != ER_OK)
+    OCStackResult result;
     {
-        LOG(LOG_ERR, "IntrospectCB - %s", QCC_StatusText(status));
-        return;
-    }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "IntrospectCB - %s", QCC_StatusText(status));
+            return;
+        }
 
-    OCStackResult result = CreateResource(OC_RSRVD_CONFIGURATION_URI,
-                                          OC_RSRVD_RESOURCE_TYPE_CONFIGURATION,
-                                          OC_RSRVD_INTERFACE_READ_WRITE,
-                                          VirtualConfigurationResource::ConfigurationHandlerCB, this,
-                                          OC_DISCOVERABLE | OC_OBSERVABLE);
-    if (result == OC_STACK_OK)
-    {
-        LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s",
-            this, OC_RSRVD_CONFIGURATION_URI);
-    }
-    result = CreateResource(OC_RSRVD_MAINTENANCE_URI, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
-                            OC_RSRVD_INTERFACE_READ_WRITE,
-                            VirtualConfigurationResource::MaintenanceHandlerCB, this,
-                            OC_DISCOVERABLE | OC_OBSERVABLE);
-    if (result == OC_STACK_OK)
-    {
-        LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s",
-            this, OC_RSRVD_MAINTENANCE_URI);
-    }
-    if (result == OC_STACK_OK)
-    {
-        result = RDPublish();
+        result = CreateResource(OC_RSRVD_CONFIGURATION_URI,
+                OC_RSRVD_RESOURCE_TYPE_CONFIGURATION,
+                OC_RSRVD_INTERFACE_READ_WRITE,
+                VirtualConfigurationResource::ConfigurationHandlerCB, this,
+                OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result == OC_STACK_OK)
+        {
+            LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s", this,
+                    OC_RSRVD_CONFIGURATION_URI);
+        }
+        result = CreateResource(OC_RSRVD_MAINTENANCE_URI, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
+                OC_RSRVD_INTERFACE_READ_WRITE,
+                VirtualConfigurationResource::MaintenanceHandlerCB, this,
+                OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result == OC_STACK_OK)
+        {
+            LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s", this,
+                    OC_RSRVD_MAINTENANCE_URI);
+        }
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "RDPublish - %d", result);
+            LOG(LOG_ERR, "[%p] Create VirtualConfigurationResource - %d", this, result);
         }
     }
-    else
+    if (result == OC_STACK_OK)
     {
-        LOG(LOG_ERR, "[%p] Create VirtualConfigurationResource - %d", this, result);
+        m_bridge->RDPublish();
     }
 }
 
