@@ -112,7 +112,7 @@ void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::
 
     std::lock_guard<std::mutex> lock(m_mutex);
     DoResource(OC_REST_GET, "/oic/con", NULL, msg,
-               static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB));
+            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB));
 }
 
 static ajn::MsgArg ToAJDictEntry(const char *key, const char *value)
@@ -328,7 +328,7 @@ void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescriptio
         }
     }
     DoResource(OC_REST_POST, "/oic/con", payload, msg,
-               static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::UpdateConfigurationsCB));
+            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::UpdateConfigurationsCB));
     return;
 
 error:
@@ -386,7 +386,7 @@ void VirtualConfigBusObject::FactoryReset(const ajn::InterfaceDescription::Membe
     }
     OCRepPayloadSetPropBool(payload, "fr", true);
     DoResource(OC_REST_POST, "/oic/mnt", payload, msg,
-               static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::FactoryResetCB));
+            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::FactoryResetCB));
     return;
 
 error:
@@ -426,7 +426,7 @@ void VirtualConfigBusObject::Restart(const ajn::InterfaceDescription::Member *me
     }
     OCRepPayloadSetPropBool(payload, "rb", true);
     DoResource(OC_REST_POST, "/oic/mnt", payload, msg,
-               static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::RestartCB));
+            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::RestartCB));
     return;
 
 error:

@@ -245,7 +245,7 @@ int main(int argc, char **argv)
         cbData.context = NULL;
         cbData.cd = NULL;
         result = OCDoResource(NULL, OC_REST_DISCOVER, "/oic/res?rt=oic.wk.rd", NULL, 0,
-                              CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
+                CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
         if (result != OC_STACK_OK)
         {
             fprintf(stderr, "DoResource(OC_REST_DISCOVER) - %d\n", result);

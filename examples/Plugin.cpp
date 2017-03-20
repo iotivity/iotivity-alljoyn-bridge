@@ -235,14 +235,16 @@ OCStackResult AddInterface(const char *uri, const char *interfaceName)
 }
 
 OCStackResult DoResource(OCDoHandle *handle,
-                         OCMethod method,
-                         const char *uri,
-                         const OCDevAddr *destination,
-                         OCPayload *payload,
-                         OCCallbackData *cbData)
+        OCMethod method,
+        const char *uri,
+        const OCDevAddr *destination,
+        OCPayload *payload,
+        OCCallbackData *cbData,
+        OCHeaderOption *options,
+        uint8_t numOptions)
 {
     return OCDoResource(handle, method, uri, destination, payload,
-                        CT_DEFAULT, OC_HIGH_QOS, cbData, NULL, 0);
+            CT_DEFAULT, OC_HIGH_QOS, cbData, options, numOptions);
 }
 
 OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos)

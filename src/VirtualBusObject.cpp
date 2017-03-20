@@ -136,7 +136,7 @@ void VirtualBusObject::Observe()
         cbData.context = context;
         cbData.cd = ObserveContext::Deleter;
         OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(),
-                                            &m_devAddr, NULL, &cbData);
+                &m_devAddr, NULL, &cbData, NULL, 0);
         if (result == OC_STACK_OK)
         {
             m_observes.insert(context);
@@ -313,8 +313,7 @@ void VirtualBusObject::DoResource(OCMethod method, const char *uri, OCRepPayload
     cbData.context = context;
     cbData.cd = NULL;
     OCStackResult result = ::DoResource(&context->m_handle, method, uri, &m_devAddr,
-                                        (OCPayload *) payload,
-                                        &cbData);
+            (OCPayload *) payload, &cbData, NULL, 0);
     if (result == OC_STACK_OK)
     {
         ++m_pending;

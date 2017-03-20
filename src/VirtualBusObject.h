@@ -45,7 +45,7 @@ class VirtualBusObject : public ajn::BusObject
         std::mutex m_mutex;
 
         void DoResource(OCMethod method, const char *uri, OCRepPayload *payload, ajn::Message &msg,
-                        DoResourceHandler cb);
+                DoResourceHandler cb);
 
     private:
         class DoResourceContext;

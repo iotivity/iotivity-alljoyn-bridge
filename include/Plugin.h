@@ -60,36 +60,38 @@ void LogWriteln(
 extern std::string gRD;
 
 void DeriveUniqueId(OCUUIdentity *id, const char *deviceId,
-                    uint8_t *appId, size_t n);
+        uint8_t *appId, size_t n);
 bool GetPiid(OCUUIdentity *piid, ajn::AboutData *aboutData);
 
 const char *GetServerInstanceIDString();
 OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
-                                       ajn::AboutData &aboutData);
+        ajn::AboutData &aboutData);
 OCStackResult StartPresence();
 OCStackResult StopPresence();
 
 OCStackResult RDPublish();
 
 OCStackResult CreateResource(const char *uri, const char *typeName, const char *interfaceName,
-                             OCEntityHandler entityHandler, void *callbackParam,
-                             uint8_t properties);
+        OCEntityHandler entityHandler, void *callbackParam,
+        uint8_t properties);
 OCStackResult DestroyResource(const char *uri);
 OCStackResult AddResourceType(const char *uri, const char *typeName);
 OCStackResult AddInterface(const char *uri, const char *interfaceName);
 OCStackResult DoResponse(OCEntityHandlerResponse *response);
 
 OCStackResult DoResource(OCDoHandle *handle,
-                         OCMethod method,
-                         const char *uri,
-                         const OCDevAddr *destination,
-                         OCPayload *payload,
-                         OCCallbackData *cbData);
+        OCMethod method,
+        const char *uri,
+        const OCDevAddr *destination,
+        OCPayload *payload,
+        OCCallbackData *cbData,
+        OCHeaderOption *options,
+        uint8_t numOptions);
 OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos);
 
 OCStackResult NotifyListOfObservers(const char *uri,
-                                    OCObservationId  *obsIdList,
-                                    uint8_t numberOfIds,
-                                    OCRepPayload *payload);
+        OCObservationId  *obsIdList,
+        uint8_t numberOfIds,
+        OCRepPayload *payload);
 
 #endif // __PLUGIN_H__

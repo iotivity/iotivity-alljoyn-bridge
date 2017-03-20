@@ -20,6 +20,7 @@
 
 #include "Bridge.h"
 
+#include "cacommon.h"
 #include "ocpayload.h"
 #include "ocrandom.h"
 #include "ocstack.h"
@@ -368,9 +369,12 @@ bool Bridge::Process()
             cbData.cb = Bridge::DiscoverCB;
             cbData.context = this;
             cbData.cd = NULL;
-            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER, OC_RSRVD_WELL_KNOWN_URI,
-                                              NULL, 0,
-                                              &cbData);
+            OCHeaderOption options[1];
+            size_t numOptions = 0;
+            uint16_t format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR; // TODO retry with CBOR
+            OCSetHeaderOption(options, &numOptions, CA_OPTION_ACCEPT, &format, sizeof(format));
+            OCStackResult result = DoResource(&m_discoverHandle, OC_REST_DISCOVER,
+                    OC_RSRVD_WELL_KNOWN_URI, NULL, 0, &cbData, options, numOptions);
             if (result != OC_STACK_OK)
             {
                 LOG(LOG_ERR, "DoResource(OC_REST_DISCOVER) - %d", result);
@@ -813,7 +817,8 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         cbData.cb = Bridge::GetDeviceCB;
         cbData.context = thiz;
         cbData.cd = NULL;
-        result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_DEVICE_URI, &devAddr, NULL, &cbData);
+        result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_DEVICE_URI, &devAddr, NULL, &cbData,
+                NULL, 0);
         if (result == OC_STACK_OK)
         {
             thiz->m_discovered[cbHandle] = context;
@@ -901,7 +906,8 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     cbData.cb = Bridge::GetPlatformCB;
     cbData.context = thiz;
     cbData.cd = NULL;
-    result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL, &cbData);
+    result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &response->devAddr, NULL,
+            &cbData, NULL, 0);
     if (result == OC_STACK_OK)
     {
         thiz->m_discovered[cbHandle] = context;
@@ -1079,7 +1085,8 @@ OCStackApplicationResult Bridge::Get(void *ctx, OCDoHandle handle, OCClientRespo
             cbData.context = this;
             cbData.cd = NULL;
             OCDoHandle cbHandle;
-            result = DoResource(&cbHandle, OC_REST_GET, uri.c_str(), devAddr, NULL, &cbData);
+            result = DoResource(&cbHandle, OC_REST_GET, uri.c_str(), devAddr, NULL, &cbData,
+                    NULL, 0);
             if (result == OC_STACK_OK)
             {
                 m_discovered[cbHandle] = context;
@@ -1354,7 +1361,8 @@ void Bridge::DiscoverTask::Run(Bridge *thiz)
     cbData.cb = Bridge::GetPlatformCB;
     cbData.context = thiz;
     cbData.cd = NULL;
-    result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &m_devAddr, NULL, &cbData);
+    result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_PLATFORM_URI, &m_devAddr, NULL, &cbData,
+            NULL, 0);
     if (result == OC_STACK_OK)
     {
         thiz->m_discovered[cbHandle] = context;
