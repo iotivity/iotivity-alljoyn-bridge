@@ -21,9 +21,9 @@
   --->
 
 ## Install required libraries
-Build IoTivity with the resource directory enabled and security disabled.
+Build IoTivity with the resource directory enabled.
 
-    $ scons RD_MODE=CLIENT,SERVER SECURED=0
+    $ scons RD_MODE=CLIENT,SERVER
 
 Follow the instructions at
 https://allseenalliance.org/framework/documentation/develop/building

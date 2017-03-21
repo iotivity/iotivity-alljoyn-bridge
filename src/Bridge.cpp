@@ -27,7 +27,7 @@
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include <alljoyn/AllJoynStd.h>
-#include "BridgeSecurity.h"
+#include "Security.h"
 #include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
@@ -109,21 +109,20 @@ struct Bridge::DiscoverContext
 };
 
 Bridge::Bridge(const char *name, Protocol protocols)
-    : m_execCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(protocols), m_sender(NULL), m_bus(NULL), m_authListener(NULL),
+    : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(protocols), m_sender(NULL),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
 {
     m_bus = new ajn::BusAttachment(name, true);
+    m_ocSecurity = new OCSecurity();
 }
 
 Bridge::Bridge(const char *name, const char *uuid, const char *sender)
-    : m_execCb(NULL), m_sessionLostCb(NULL),
-      m_protocols(AJ), m_sender(sender), m_bus(NULL), m_authListener(NULL),
+    : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
 {
     std::string nm = std::string(name) + uuid;
     m_bus = new ajn::BusAttachment(nm.c_str(), true);
-    m_authListener = new BusAuthListener();
+    m_ocSecurity = new OCSecurity();
 }
 
 Bridge::~Bridge()
@@ -159,6 +158,7 @@ Bridge::~Bridge()
         }
         m_virtualDevices.clear();
     }
+    delete m_ocSecurity;
     delete m_bus;
 }
 
@@ -241,6 +241,10 @@ bool Bridge::Start()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
+    if (!m_ocSecurity->Init())
+    {
+        return false;
+    }
     if (!m_sender)
     {
         OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
@@ -319,14 +323,6 @@ bool Bridge::Process()
             if (status != ER_OK)
             {
                 LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
-            }
-            status = m_bus->EnablePeerSecurity("ALLJOYN_ECDHE_ECDSA ALLJOYN_ECDHE_NULL ALLJOYN_ECDHE_PSK ALLJOYN_ECDHE_SPEKE "
-                                               "ALLJOYN_SRP_KEYX ALLJOYN_SRP_LOGON "
-                                               "GSSAPI",
-                                               m_authListener); // TODO NULL, true, permissionConfigurationListener);
-            if (status != ER_OK)
-            {
-                LOG(LOG_ERR, "EnablePeerSecurity - %s", QCC_StatusText(status));
             }
         }
         bool wasConnected = m_bus->IsConnected();

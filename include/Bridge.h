@@ -32,7 +32,7 @@
 #include <vector>
 #include <set>
 
-class BusAuthListener;
+class OCSecurity;
 class Presence;
 class VirtualBusAttachment;
 class VirtualBusObject;
@@ -118,7 +118,7 @@ class Bridge : private ajn::AboutListener
         Protocol m_protocols;
         const char *m_sender;
         ajn::BusAttachment *m_bus;
-        BusAuthListener *m_authListener;
+        OCSecurity *m_ocSecurity;
         OCDoHandle m_discoverHandle;
         time_t m_discoverNextTick;
         std::vector<Presence *> m_presence;

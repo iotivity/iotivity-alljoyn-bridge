@@ -28,6 +28,7 @@ vars.Add(EnumVariable('IOTIVITY_LIB_TYPE', 'Specify release or debug build', 're
 vars.Add(EnumVariable('TARGET_ARCH', 'Target architecture', 'x86_64', ['x86_64', 'amd64']))
 vars.Add(BoolVariable('VERBOSE', 'Show compilation', False))
 vars.Add(BoolVariable('COLOR', 'Enable color in build diagnostics, if supported by compiler', False))
+vars.Add(EnumVariable('SECURED', 'Build with DTLS', '1', allowed_values=('0', '1')))
 #vars.Add(EnumVariable('TEST', 'Run unit tests', '0', allowed_values=('0', '1')))
 
 env = Environment(variables = vars);
@@ -106,6 +107,9 @@ elif env['TARGET_OS'] == 'windows':
     env.AppendUnique(LIBS = ['ajrouter', 'alljoyn', 'bcrypt', 'crypt32', 'ws2_32', 'iphlpapi', 'shell32', 'ole32'])
     env.AppendUnique(LIBS = ['octbstack', 'c_common'])
 
+if env['SECURED'] == '1':
+    env.AppendUnique(CPPDEFINES = ['__WITH_DTLS__=1'])
+
 if env.get('COLOR') == True:
     # If the gcc version is 4.9 or newer add the diagnostics-color flag
     # the adding diagnostics colors helps discover error quicker.
@@ -127,6 +131,7 @@ iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
                                '${IOTIVITY_BASE}/resource/csdk/include',
                                '${IOTIVITY_BASE}/resource/csdk/logger/include',
                                '${IOTIVITY_BASE}/resource/csdk/resource-directory/include',
+                               '${IOTIVITY_BASE}/resource/csdk/security/include',
                                '${IOTIVITY_BASE}/resource/csdk/stack/include',
                                '${IOTIVITY_BASE}/resource/include',
                                '${IOTIVITY_BASE}/resource/oc_logger/include']
