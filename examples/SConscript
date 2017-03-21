@@ -29,9 +29,11 @@ env_bridge = env.Clone()
 bridge_cpp = ['Plugin.cpp',
               'AllJoynBridge.cpp']
 manager_cpp = ['PluginManager.cpp']
-env_bridge.AppendUnique(LIBS = [alljoyn_libs, oic_libs, alljoynplugin_lib])
-if env['TARGET_OS'] == 'windows':
-    env_bridge.AppendUnique(LIBS = ['sqlite3'])
+env_bridge.AppendUnique(LIBS = [alljoynplugin_lib])
+if env['TARGET_OS'] == 'linux':
+    env_bridge.AppendUnique(LIBS = ['crypto', alljoyn_libs, oic_libs])
+elif env['TARGET_OS'] == 'windows':
+    env_bridge.AppendUnique(LIBS = [alljoyn_libs, oic_libs, 'sqlite3'])
 
 examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
 if env['TARGET_OS'] == 'linux':
