@@ -29,6 +29,7 @@
 #include <mutex>
 #include <vector>
 
+class AllJoynSecurity;
 class VirtualBusObject;
 
 class VirtualBusAttachment : public ajn::BusAttachment
@@ -72,6 +73,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         uint32_t m_numSessions;
         std::vector<VirtualBusObject *> m_virtualBusObjects;
         ajn::AboutObj *m_aboutObj;
+        AllJoynSecurity *m_ajSecurity;
 
         VirtualBusAttachment(const char *di, const char *piid, bool isVirtual);
         virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,

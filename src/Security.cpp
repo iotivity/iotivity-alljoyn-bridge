@@ -51,18 +51,18 @@ QStatus AllJoynSecurity::SetClaimable()
     LOG(LOG_INFO, "[%p] appState=%d", this, appState);
     if (appState == ajn::PermissionConfigurator::NOT_CLAIMABLE)
     {
+        status = m_bus->GetPermissionConfigurator().SetClaimCapabilities(
+            ajn::PermissionConfigurator::CAPABLE_ECDHE_NULL);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "SetClaimCapabilities() - %s", QCC_StatusText(status));
+            return status;
+        }
         ajn::PermissionPolicy::Rule rule;
         rule.SetObjPath("*");
         rule.SetInterfaceName("*");
         if (m_role == CONSUMER)
         {
-            status = m_bus->GetPermissionConfigurator().SetClaimCapabilities(
-                ajn::PermissionConfigurator::CAPABLE_ECDHE_NULL);
-            if (status != ER_OK)
-            {
-                LOG(LOG_ERR, "SetClaimCapabilities() - %s", QCC_StatusText(status));
-                return status;
-            }
             ajn::PermissionPolicy::Rule::Member member;
             member.SetMemberName("*");
             member.SetMemberType(ajn::PermissionPolicy::Rule::Member::NOT_SPECIFIED);
@@ -72,7 +72,11 @@ QStatus AllJoynSecurity::SetClaimable()
         }
         else if (m_role == PRODUCER)
         {
-            return ER_NOT_IMPLEMENTED;
+            ajn::PermissionPolicy::Rule::Member member;
+            member.SetMemberName("*");
+            member.SetMemberType(ajn::PermissionPolicy::Rule::Member::NOT_SPECIFIED);
+            member.SetActionMask(ajn::PermissionPolicy::Rule::Member::ACTION_PROVIDE);
+            rule.SetMembers(1, &member);
         }
         status = m_bus->GetPermissionConfigurator().SetPermissionManifestTemplate(&rule, 1);
         if (status != ER_OK)

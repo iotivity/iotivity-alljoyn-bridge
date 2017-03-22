@@ -23,6 +23,7 @@
 #include "Bridge.h"
 #include "Payload.h"
 #include "Plugin.h"
+#include "Security.h"
 #include "Signature.h"
 #include "VirtualBusObject.h"
 #include "ocstack.h"
@@ -73,6 +74,12 @@ VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *p
             LOG(LOG_ERR, "Connect - %s", QCC_StatusText(status));
             goto exit;
         }
+        status = busAttachment->m_ajSecurity->SetClaimable();
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "SetClaimable failed");
+            goto exit;
+        }
         status = busAttachment->BindSessionPort(busAttachment->m_port, opts, *busAttachment);
         if (status != ER_OK)
         {
@@ -119,6 +126,8 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, boo
     ToAppId(di, appId);
     m_aboutData.SetAppId(appId, 16);
     m_aboutData.SetAppName("");
+
+    m_ajSecurity = new AllJoynSecurity(this, AllJoynSecurity::PRODUCER);
 }
 
 VirtualBusAttachment::~VirtualBusAttachment()
@@ -132,6 +141,8 @@ VirtualBusAttachment::~VirtualBusAttachment()
     {
         delete busObject;
     }
+
+    delete m_ajSecurity;
 }
 
 void VirtualBusAttachment::Stop()

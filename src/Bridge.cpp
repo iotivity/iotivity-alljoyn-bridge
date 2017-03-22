@@ -27,11 +27,11 @@
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include <alljoyn/AllJoynStd.h>
-#include "Security.h"
 #include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
 #include "Resource.h"
+#include "Security.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
 #include "VirtualConfigBusObject.h"
