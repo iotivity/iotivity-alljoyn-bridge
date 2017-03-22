@@ -21,7 +21,39 @@
 #ifndef _SECURITY_H
 #define _SECURITY_H
 
+#include <alljoyn/AboutObj.h>
+#include <alljoyn/AuthListener.h>
+#include <alljoyn/PermissionConfigurationListener.h>
+#include <inttypes.h>
 #include <stddef.h>
+
+class AllJoynSecurity : public ajn::DefaultECDHEAuthListener,
+    public ajn::PermissionConfigurationListener
+{
+    public:
+        typedef enum
+        {
+            CONSUMER,
+            PRODUCER
+        } Role;
+        AllJoynSecurity(ajn::BusAttachment *bus, Role role);
+        virtual ~AllJoynSecurity() { }
+
+        bool IsClaimed();
+        QStatus SetClaimable();
+
+    private:
+        ajn::BusAttachment *m_bus;
+        Role m_role;
+
+        virtual void SecurityViolation(QStatus status, const ajn::Message &msg);
+        virtual void AuthenticationComplete(const char *authMechanism, const char *peerName,
+                bool success);
+        virtual QStatus FactoryReset();
+        virtual void PolicyChanged();
+        virtual void StartManagement();
+        virtual void EndManagement();
+};
 
 class OCSecurity
 {

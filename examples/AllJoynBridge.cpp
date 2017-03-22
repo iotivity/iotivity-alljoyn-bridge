@@ -273,7 +273,7 @@ int main(int argc, char **argv)
 
     if (sUUID && sSender)
     {
-        bridge = new Bridge(gPSPrefix, sUUID, sSender);
+        bridge = new Bridge(gPSPrefix, sSender);
         bridge->SetSessionLostCB(SessionLostCB);
     }
     else

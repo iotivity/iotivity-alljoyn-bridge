@@ -113,15 +113,18 @@ Bridge::Bridge(const char *name, Protocol protocols)
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
 {
     m_bus = new ajn::BusAttachment(name, true);
+    m_ajState = CREATED;
+    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
     m_ocSecurity = new OCSecurity();
 }
 
-Bridge::Bridge(const char *name, const char *uuid, const char *sender)
+Bridge::Bridge(const char *name, const char *sender)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
 {
-    std::string nm = std::string(name) + uuid;
-    m_bus = new ajn::BusAttachment(nm.c_str(), true);
+    m_bus = new ajn::BusAttachment(name, true);
+    m_ajState = CREATED;
+    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
     m_ocSecurity = new OCSecurity();
 }
 
@@ -159,6 +162,7 @@ Bridge::~Bridge()
         m_virtualDevices.clear();
     }
     delete m_ocSecurity;
+    delete m_ajSecurity;
     delete m_bus;
 }
 
@@ -287,6 +291,13 @@ bool Bridge::Start()
     {
         m_bus->RegisterAboutListener(*this);
         m_bus->RegisterBusListener(*this);
+        QStatus status = m_bus->Start();
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
+            return false;
+        }
+        m_ajState = STARTED;
     }
     return true;
 }
@@ -317,35 +328,37 @@ bool Bridge::Process()
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_protocols & AJ)
     {
-        if (!m_bus->IsStarted())
+        QStatus status;
+        switch (m_ajState)
         {
-            QStatus status = m_bus->Start();
-            if (status != ER_OK)
-            {
-                LOG(LOG_ERR, "Start - %s", QCC_StatusText(status));
-            }
-        }
-        bool wasConnected = m_bus->IsConnected();
-        if (m_bus->IsStarted() && !m_bus->IsConnected())
-        {
-            if (m_bus->Connect() == ER_OK)
-            {
-                LOG(LOG_INFO, "[%p] Connected", this);
-            }
-        }
-        if (!wasConnected && m_bus->IsConnected())
-        {
-            std::string matchRule =
-                "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
-            if (m_sender)
-            {
-                matchRule += ",sender='" + std::string(m_sender) + "'";
-            }
-            QStatus status = m_bus->AddMatch(matchRule.c_str());
-            if (status != ER_OK)
-            {
-                LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
-            }
+            case CREATED:
+                LOG(LOG_ERR, "[%p] Bridge not started", this);
+                break;
+            case STARTED:
+                status = m_bus->Connect();
+                if (status != ER_OK)
+                {
+                    LOG(LOG_INFO, "[%p] Connect() - %s", this, QCC_StatusText(status));
+                    break;
+                }
+                m_ajState = CONNECTED;
+                /* FALLTHROUGH */
+            case CONNECTED:
+                if (!m_ajSecurity->IsClaimed())
+                {
+                    m_ajSecurity->SetClaimable();
+                }
+                m_ajState = CLAIMABLE;
+                /* FALLTHROUGH */
+            case CLAIMABLE:
+                if (m_ajSecurity->IsClaimed())
+                {
+                    WhoImplements();
+                    m_ajState = RUNNING;
+                }
+                break;
+            case RUNNING:
+                break;
         }
     }
     if (m_protocols & OC)
@@ -425,6 +438,22 @@ void Bridge::BusDisconnected()
     {
         LOG(LOG_INFO, "[%p] %s absent", this, id.c_str());
         Destroy(id.c_str());
+    }
+    m_ajState = STARTED;
+}
+
+void Bridge::WhoImplements()
+{
+    std::string matchRule =
+        "type='signal',interface='org.alljoyn.About',member='Announce',sessionless='t'";
+    if (m_sender)
+    {
+        matchRule += ",sender='" + std::string(m_sender) + "'";
+    }
+    QStatus status = m_bus->AddMatch(matchRule.c_str());
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
     }
 }
 

@@ -32,6 +32,7 @@
 #include <vector>
 #include <set>
 
+class AllJoynSecurity;
 class OCSecurity;
 class Presence;
 class VirtualBusAttachment;
@@ -52,7 +53,7 @@ class Bridge : private ajn::AboutListener
             OC = (1 << 1),
         };
         Bridge(const char *name, Protocol protocols);
-        Bridge(const char *name, const char *uuid, const char *sender);
+        Bridge(const char *name, const char *sender);
         ~Bridge();
 
         typedef void (*ExecCB)(const char *piid, const char *sender, bool isVirtual);
@@ -116,8 +117,10 @@ class Bridge : private ajn::AboutListener
 
         std::mutex m_mutex;
         Protocol m_protocols;
+        enum { CREATED, STARTED, CONNECTED, CLAIMABLE, RUNNING } m_ajState;
         const char *m_sender;
         ajn::BusAttachment *m_bus;
+        AllJoynSecurity *m_ajSecurity;
         OCSecurity *m_ocSecurity;
         OCDoHandle m_discoverHandle;
         time_t m_discoverNextTick;
@@ -130,6 +133,7 @@ class Bridge : private ajn::AboutListener
         std::list<Task*> m_tasks;
         RDPublishTask *m_rdPublishTask;
 
+        void WhoImplements();
         void Destroy(const char *id);
         virtual void BusDisconnected();
         virtual void Announced(const char *name, uint16_t version, ajn::SessionPort port,
