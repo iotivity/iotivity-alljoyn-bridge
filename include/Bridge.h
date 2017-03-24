@@ -64,6 +64,7 @@ class Bridge : private ajn::AboutListener
                 { m_execCb = execCb; m_killCb = killCb; m_seenStateCb = seenStateCb; }
         typedef void (*SessionLostCB)();
         void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
+        void SetSecureMode(bool secureMode) { m_secureMode = secureMode; }
 
         bool Start();
         bool Stop();

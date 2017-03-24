@@ -42,31 +42,52 @@
 #include <deque>
 #include <iterator>
 
-static void GetDevAddr(OCDevAddr *addr, const OCDevAddr *srcAddr, const char *di,
+#if __WITH_DTLS__
+#define SECURE_MODE_DEFAULT true
+#else
+#define SECURE_MODE_DEFAULT false
+#endif
+
+static void GetDevAddrs(std::vector<OCDevAddr> &addrs, const OCDevAddr *srcAddr, const char *di,
         const OCEndpointPayload *eps)
 {
-    const OCEndpointPayload *ep = eps;
-    if (ep)
+    if (!eps)
     {
+        addrs.push_back(*srcAddr);
+        return;
+    }
+
+    for (const OCEndpointPayload *ep = eps; ep; ep = ep->next)
+    {
+        OCDevAddr addr;
         if (!strcmp(ep->tps, "coap") || !strcmp(ep->tps, "coaps"))
         {
-            addr->adapter = OC_ADAPTER_IP;
+            addr.adapter = OC_ADAPTER_IP;
         }
         else if (!strcmp(ep->tps, "coap+tcp") || !strcmp(ep->tps, "coaps+tcp"))
         {
-            addr->adapter = OC_ADAPTER_TCP;
+            addr.adapter = OC_ADAPTER_TCP;
         }
-        addr->flags = ep->family;
-        addr->port = ep->port;
-        strncpy(addr->addr, ep->addr, MAX_ADDR_STR_SIZE);
-        addr->ifindex = 0;
-        addr->routeData[0] = '\0';
-        strncpy(addr->remoteId, di, MAX_IDENTITY_SIZE);
+        addr.flags = ep->family;
+        addr.port = ep->port;
+        strncpy(addr.addr, ep->addr, MAX_ADDR_STR_SIZE);
+        addr.ifindex = 0;
+        addr.routeData[0] = '\0';
+        strncpy(addr.remoteId, di, MAX_IDENTITY_SIZE);
+        addrs.push_back(addr);
     }
-    else
+}
+
+static bool HasSecureDevAddr(const std::vector<OCDevAddr> &addrs)
+{
+    for (std::vector<OCDevAddr>::const_iterator addr = addrs.begin(); addr != addrs.end(); ++addr)
     {
-        *addr = *srcAddr;
+        if (addr->flags & OC_FLAG_SECURE)
+        {
+            return true;
+        }
     }
+    return false;
 }
 
 static bool TranslateResourceType(const char *type)
@@ -91,13 +112,9 @@ struct Bridge::DiscoverContext
     VirtualBusAttachment *m_bus;
     struct Resource
     {
-        Resource(const OCDevAddr *srcAddr, const char *di, const OCEndpointPayload *eps,
-                uint8_t bitmap, bool hasMultipleRts)
-            : m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts)
-        {
-            GetDevAddr(&m_devAddr, srcAddr, di, eps);
-        }
-        OCDevAddr m_devAddr;
+        Resource(std::vector<OCDevAddr> &devAddrs, uint8_t bitmap, bool hasMultipleRts)
+            : m_devAddrs(devAddrs), m_bitmap(bitmap), m_hasMultipleRts(hasMultipleRts) { }
+        std::vector<OCDevAddr> m_devAddrs;
         uint8_t m_bitmap;
         bool m_hasMultipleRts;
     };
@@ -110,7 +127,8 @@ struct Bridge::DiscoverContext
 
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(protocols), m_sender(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
+      m_rdPublishTask(NULL)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
@@ -120,7 +138,8 @@ Bridge::Bridge(const char *name, Protocol protocols)
 
 Bridge::Bridge(const char *name, const char *sender)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(false), m_rdPublishTask(NULL)
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
+      m_rdPublishTask(NULL)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
@@ -757,7 +776,8 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
     {
         bool isVirtual = false;
         DiscoverContext *context = NULL;
-        OCDevAddr devAddr;
+        OCDevAddr srcAddr;
+        std::vector<OCDevAddr> devAddrs;
         OCCallbackData cbData;
         OCDoHandle cbHandle = 0;
         std::map<std::string, DiscoverContext::Resource> resources;
@@ -813,13 +833,35 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
              resource = resource->next)
         {
+            srcAddr = response->devAddr;
+            if (resource->secure)
+            {
+                srcAddr.flags = (OCTransportFlags) (srcAddr.flags | OC_FLAG_SECURE);
+                if (response->devAddr.adapter == OC_ADAPTER_IP)
+                {
+                    srcAddr.port = resource->port;
+                }
+#ifdef TCP_ADAPTER
+                else if (response->devAddr.adapter == OC_ADAPTER_TCP)
+                {
+                    srcAddr.port = resource->tcpPort;
+                }
+#endif
+            }
+            if (!strcmp(resource->uri, OC_RSRVD_DEVICE_URI))
+            {
+                GetDevAddrs(devAddrs, &srcAddr, payload->sid, resource->eps);
+            }
+            std::vector<OCDevAddr> tmpAddrs;
+            GetDevAddrs(tmpAddrs, &srcAddr, payload->sid, resource->eps);
+            if (thiz->m_secureMode && !HasSecureDevAddr(tmpAddrs))
+            {
+                continue;
+            }
+
             bool hasMultipleRts = resource->types && resource->types->next;
             for (OCStringLL *type = resource->types; type; type = type->next)
             {
-                if (!strcmp(resource->uri, OC_RSRVD_DEVICE_URI))
-                {
-                    GetDevAddr(&devAddr, &response->devAddr, payload->sid, resource->eps);
-                }
                 if (!TranslateResourceType(type->value))
                 {
                     continue;
@@ -827,7 +869,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
                 std::string uri = resource->uri;
                 uri += std::string("?rt=") + type->value;
                 resources.insert(std::pair<std::string, DiscoverContext::Resource>(uri,
-                                DiscoverContext::Resource(&response->devAddr, payload->sid, resource->eps, resource->bitmap, hasMultipleRts)));
+                                DiscoverContext::Resource(tmpAddrs, resource->bitmap, hasMultipleRts)));
             }
         }
         if (resources.empty())
@@ -835,7 +877,7 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
             continue;
         }
         resources.insert(std::pair<std::string, DiscoverContext::Resource>("/oic/d?rt=oic.d.virtual",
-                        DiscoverContext::Resource(&response->devAddr, payload->sid, NULL, OC_DISCOVERABLE, true)));
+                        DiscoverContext::Resource(devAddrs, OC_DISCOVERABLE, true)));
 
         context = new DiscoverContext(thiz, payload->sid, isVirtual);
         context->m_resources = resources;
@@ -843,10 +885,11 @@ OCStackApplicationResult Bridge::DiscoverCB(void *ctx, OCDoHandle handle,
         cbData.cb = Bridge::GetDeviceCB;
         cbData.context = thiz;
         cbData.cd = NULL;
-        result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_DEVICE_URI, &devAddr, NULL, &cbData,
+        result = DoResource(&cbHandle, OC_REST_GET, OC_RSRVD_DEVICE_URI, devAddrs, NULL, &cbData,
                 NULL, 0);
         if (result == OC_STACK_OK)
         {
+            LOG(LOG_INFO, "Get(%s)", OC_RSRVD_DEVICE_URI);
             thiz->m_discovered[cbHandle] = context;
         }
         else
@@ -936,6 +979,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
             &cbData, NULL, 0);
     if (result == OC_STACK_OK)
     {
+        LOG(LOG_INFO, "Get(%s)", OC_RSRVD_PLATFORM_URI);
         thiz->m_discovered[cbHandle] = context;
     }
     else
@@ -1060,7 +1104,7 @@ OCStackApplicationResult Bridge::Get(void *ctx, OCDoHandle handle, OCClientRespo
     context = it->second;
     if (!context->m_resources.empty())
     {
-        OCDevAddr *devAddr = &context->m_resources.begin()->second.m_devAddr;
+        const std::vector<OCDevAddr> &devAddrs = context->m_resources.begin()->second.m_devAddrs;
         std::string uri = context->m_resources.begin()->first;
         if (context->m_obj && uri.find(context->m_obj->GetPath()) == std::string::npos)
         {
@@ -1078,7 +1122,7 @@ OCStackApplicationResult Bridge::Get(void *ctx, OCDoHandle handle, OCClientRespo
             VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
             if (!obj)
             {
-                obj = new VirtualConfigBusObject(context->m_bus, devAddr);
+                obj = new VirtualConfigBusObject(context->m_bus, devAddrs);
                 QStatus status = context->m_bus->RegisterBusObject(obj);
                 if (status != ER_OK)
                 {
@@ -1090,7 +1134,7 @@ OCStackApplicationResult Bridge::Get(void *ctx, OCDoHandle handle, OCClientRespo
         }
         if (!context->m_obj)
         {
-            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), devAddr);
+            context->m_obj = new VirtualBusObject(context->m_bus, path.c_str(), devAddrs);
         }
         std::string rt = uri.substr(uri.find("rt=") + 3);
         if (rt.find("oic.d.") == 0)
@@ -1111,10 +1155,11 @@ OCStackApplicationResult Bridge::Get(void *ctx, OCDoHandle handle, OCClientRespo
             cbData.context = this;
             cbData.cd = NULL;
             OCDoHandle cbHandle;
-            result = DoResource(&cbHandle, OC_REST_GET, uri.c_str(), devAddr, NULL, &cbData,
+            result = DoResource(&cbHandle, OC_REST_GET, uri.c_str(), devAddrs, NULL, &cbData,
                     NULL, 0);
             if (result == OC_STACK_OK)
             {
+                LOG(LOG_INFO, "Get(%s)", uri.c_str());
                 m_discovered[cbHandle] = context;
             }
             else
@@ -1165,6 +1210,7 @@ exit:
     return OC_STACK_DELETE_TRANSACTION;
 }
 
+/* Called with m_mutex held. */
 OCRepPayload *Bridge::GetSecureMode(OCEntityHandlerRequest *request)
 {
     OCRepPayload *payload = CreatePayload(request->resource, request->query);
@@ -1176,6 +1222,7 @@ OCRepPayload *Bridge::GetSecureMode(OCEntityHandlerRequest *request)
     return payload;
 }
 
+/* Called with m_mutex held. */
 bool Bridge::PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged)
 {
     OCRepPayload *payload = (OCRepPayload *) request->payload;
@@ -1391,6 +1438,7 @@ void Bridge::DiscoverTask::Run(Bridge *thiz)
             NULL, 0);
     if (result == OC_STACK_OK)
     {
+        LOG(LOG_INFO, "Get(%s)", OC_RSRVD_PLATFORM_URI);
         thiz->m_discovered[cbHandle] = context;
     }
     else

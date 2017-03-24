@@ -56,8 +56,9 @@ static const char *ifaceXml =
 // TODO    "  <annotation name='org.alljoyn.Bus.Secure' value='true'/>"
     "</interface>";
 
-VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const OCDevAddr *devAddr)
-    : VirtualBusObject(bus, "/Config", devAddr)
+VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus,
+        const std::vector<OCDevAddr> &devAddrs)
+    : VirtualBusObject(bus, "/Config", devAddrs)
 {
     LOG(LOG_INFO, "[%p] bus=%p", this, bus);
     QStatus status;
@@ -81,8 +82,7 @@ VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const OC
 
 VirtualConfigBusObject::~VirtualConfigBusObject()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 }
 
 QStatus VirtualConfigBusObject::Get(const char *ifaceName, const char *propName, ajn::MsgArg &val)
@@ -107,8 +107,7 @@ QStatus VirtualConfigBusObject::Get(const char *ifaceName, const char *propName,
 void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::Member *member,
         ajn::Message &msg)
 {
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     DoResource(OC_REST_GET, "/oic/con", NULL, msg,
@@ -152,8 +151,7 @@ static ajn::MsgArg ToAJDictEntry(const char *key, const ajn::MsgArg *valueArg)
 /* Called with m_mutex held. */
 void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload *payload)
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     std::vector<ajn::MsgArg> entries;
     char *dl = NULL;
@@ -262,8 +260,7 @@ void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload
 void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescription::Member *member,
         ajn::Message &msg)
 {
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     OCRepPayload *payload = OCRepPayloadCreate();
@@ -343,8 +340,7 @@ error:
 void VirtualConfigBusObject::UpdateConfigurationsCB(ajn::Message &msg, OCRepPayload *payload)
 {
     (void) payload;
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);
     if (status != ER_OK)
@@ -357,8 +353,7 @@ void VirtualConfigBusObject::ResetConfigurations(const ajn::InterfaceDescription
         ajn::Message &msg)
 {
     (void) msg;
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
     MethodReply(msg, ER_NOT_IMPLEMENTED);
 }
 
@@ -366,8 +361,7 @@ void VirtualConfigBusObject::SetPasscode(const ajn::InterfaceDescription::Member
         ajn::Message &msg)
 {
     (void) msg;
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
     MethodReply(msg, ER_NOT_IMPLEMENTED);
 }
 
@@ -375,8 +369,7 @@ void VirtualConfigBusObject::FactoryReset(const ajn::InterfaceDescription::Membe
         ajn::Message &msg)
 {
     (void) msg;
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     OCRepPayload *payload = OCRepPayloadCreate();
@@ -401,8 +394,7 @@ error:
 void VirtualConfigBusObject::FactoryResetCB(ajn::Message &msg, OCRepPayload *payload)
 {
     (void) payload;
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);
     if (status != ER_OK)
@@ -415,8 +407,7 @@ void VirtualConfigBusObject::Restart(const ajn::InterfaceDescription::Member *me
                                      ajn::Message &msg)
 {
     (void) msg;
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     OCRepPayload *payload = OCRepPayloadCreate();
@@ -441,8 +432,7 @@ error:
 void VirtualConfigBusObject::RestartCB(ajn::Message &msg, OCRepPayload *payload)
 {
     (void) payload;
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);
     if (status != ER_OK)

@@ -33,6 +33,9 @@
 #include "ocpayloadcbor.h"
 #include "ocstack.h"
 #include "payload_logging.h"
+#if __WITH_DTLS__
+#include "pinoxmcommon.h"
+#endif
 
 static CborError ConvertJSONToCBOR(CborEncoder *encoder, cJSON *json)
 {
@@ -220,6 +223,20 @@ static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle,
                 else
                 {
                     r.devAddr = response->devAddr;
+                    if (resource->secure)
+                    {
+                        r.devAddr.flags = (OCTransportFlags) (r.devAddr.flags | OC_FLAG_SECURE);
+                        if (response->devAddr.adapter == OC_ADAPTER_IP)
+                        {
+                            r.devAddr.port = resource->port;
+                        }
+#ifdef TCP_ADAPTER
+                        else if (response->devAddr.adapter == OC_ADAPTER_TCP)
+                        {
+                            r.devAddr.port = resource->tcpPort;
+                        }
+#endif
+                    }
                 }
                 if (!strncmp(resource->uri, "ocf://", 6))
                 {
@@ -299,15 +316,55 @@ static void usage()
               << "  observe INDEX [QUERY PARAM]" << std::endl;
 }
 
+static FILE *PSOpenCB(const char *suffix, const char *mode)
+{
+    std::string path = std::string("occlient_") + suffix;
+    return fopen(path.c_str(), mode);
+}
+
+#if __WITH_DTLS__
+static void DisplayPinCB(char *pin, size_t pinSize, void *context)
+{
+    OC_UNUSED(pinSize);
+    OC_UNUSED(context);
+    std::cout << "DisplayPinCB(pin=" << pin << ",...)" << std::endl;
+}
+
+static void ClosePinDisplayCB()
+{
+    std::cout << "ClosePinDisplayCB()" << std::endl;
+}
+#endif
+
 int main(int, char **)
 {
     std::cout.setf(std::ios::boolalpha);
 
-    if (OCInit1(OC_CLIENT, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS) != OC_STACK_OK)
+    OCPersistentStorage ps = { PSOpenCB, fread, fwrite, fclose, unlink };
+    if (OCRegisterPersistentStorageHandler(&ps) != OC_STACK_OK)
+    {
+        std::cerr << "OCRegisterPersistentStorageHandler error" << std::endl;
+        return EXIT_FAILURE;
+    }
+#if __WITH_DTLS__
+    if (SetDisplayPinWithContextCB(DisplayPinCB, NULL) != OC_STACK_OK)
+    {
+        std::cerr << "SetDisplayPinWithContextCB error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    SetClosePinDisplayCB(ClosePinDisplayCB);
+    if (SetRandomPinPolicy(OXM_RANDOM_PIN_DEFAULT_SIZE, (OicSecPinType_t) OXM_RANDOM_PIN_DEFAULT_PIN_TYPE) != OC_STACK_OK)
+    {
+        std::cerr << "SetRandomPinPolicy error" << std::endl;
+        return EXIT_FAILURE;
+    }
+#endif
+    if (OCInit1(OC_CLIENT_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS) != OC_STACK_OK)
     {
         std::cerr << "OCStack init error" << std::endl;
         return EXIT_FAILURE;
     }
+    std::cout << "di=" << OCGetServerInstanceIDString() << std::endl;
 
     for (;;)
     {
@@ -387,7 +444,19 @@ int main(int, char **)
         {
             uint16_t optionID = CA_OPTION_ACCEPT;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_CBOR;
-            size_t i = std::stoi(*token++);
+            std::string uri;
+            OCDevAddr *devAddr;
+            try
+            {
+                size_t i = std::stoi(*token);
+                uri = g_resources[i].uri;
+                devAddr = &g_resources[i].devAddr;
+            }
+            catch (std::exception ex)
+            {
+                uri = *token;
+            }
+            ++token;
             std::string query;
             while (token != tokens.end())
             {
@@ -409,12 +478,10 @@ int main(int, char **)
                     query += str;
                 }
             }
-            std::string uri = g_resources[i].uri;
             if (!query.empty())
             {
                 uri += "?" + query;
             }
-            OCDevAddr *devAddr = &g_resources[i].devAddr;
             OCCallbackData cbData;
             cbData.cb = GetCB;
             cbData.context = NULL;
@@ -424,7 +491,7 @@ int main(int, char **)
             OCSetHeaderOption(options, &numOptions, optionID, &format, sizeof(format));
             OCStackResult result = OCDoResource(NULL, OC_REST_GET, uri.c_str(), devAddr,
                     NULL, CT_DEFAULT, OC_HIGH_QOS, &cbData, options, numOptions);
-            std::cout << "get " << g_resources[i].uri << " - " << result << std::endl;
+            std::cout << "get " << uri << " - " << result << std::endl;
         }
         else if (cmd == "put")
         {

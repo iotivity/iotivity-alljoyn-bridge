@@ -59,17 +59,16 @@ struct VirtualBusObject::DoResourceContext
         OCDoHandle m_handle;
 };
 
-VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, const char *uri, const OCDevAddr *devAddr)
-    : ajn::BusObject(uri), m_bus(bus), m_devAddr(*devAddr), m_pending(0)
+VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, const char *uri,
+        const std::vector<OCDevAddr> &devAddrs)
+    : ajn::BusObject(uri), m_bus(bus), m_devAddrs(devAddrs), m_pending(0)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,uri=%s",
-        this, bus, uri);
+    LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, uri);
 }
 
 VirtualBusObject::~VirtualBusObject()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     std::unique_lock<std::mutex> lock(m_mutex);
     while (m_pending > 0 && !m_observes.empty())
@@ -101,8 +100,7 @@ void VirtualBusObject::Stop()
 
 QStatus VirtualBusObject::AddInterface(const ajn::InterfaceDescription *iface)
 {
-    LOG(LOG_INFO, "[%p] iface=%p",
-        this, iface);
+    LOG(LOG_INFO, "[%p] iface=%p", this, iface);
 
     QStatus status = ajn::BusObject::AddInterface(*iface, ajn::BusObject::ANNOUNCED);
     if (status == ER_OK)
@@ -118,8 +116,7 @@ QStatus VirtualBusObject::AddInterface(const ajn::InterfaceDescription *iface)
 
 void VirtualBusObject::Observe()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     bool multipleRts = m_ifaces.size() > 1;
@@ -136,7 +133,7 @@ void VirtualBusObject::Observe()
         cbData.context = context;
         cbData.cd = ObserveContext::Deleter;
         OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(),
-                &m_devAddr, NULL, &cbData, NULL, 0);
+                m_devAddrs, NULL, &cbData, NULL, 0);
         if (result == OC_STACK_OK)
         {
             m_observes.insert(context);
@@ -150,8 +147,7 @@ void VirtualBusObject::Observe()
 
 void VirtualBusObject::CancelObserve()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     for (ObserveContext *context : m_observes)
@@ -169,9 +165,8 @@ OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handl
         OCClientResponse *response)
 {
     ObserveContext *context = reinterpret_cast<ObserveContext *>(ctx);
-    LOG(LOG_INFO, "[%p] ctx=%p,handle=%p,response=%p,{payload=%p,result=%d}",
-        context->m_obj, ctx, handle, response, response ? response->payload : 0,
-        response ? response->result : 0);
+    LOG(LOG_INFO, "[%p] ctx=%p,handle=%p,response=%p,{payload=%p,result=%d}", context->m_obj, ctx,
+            handle, response, response ? response->payload : 0, response ? response->result : 0);
 
     std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
     if (response && response->result == OC_STACK_OK && response->payload)
@@ -202,8 +197,7 @@ OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handl
 
 void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
 {
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     bool multipleRts = m_ifaces.size() > 1;
@@ -218,8 +212,7 @@ void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, 
 /* Called with m_mutex held. */
 void VirtualBusObject::GetPropCB(ajn::Message &msg, OCRepPayload *payload)
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     ajn::MsgArg arg;
     for (OCRepPayloadValue *value = payload->values; value; value = value->next)
@@ -239,8 +232,7 @@ void VirtualBusObject::GetPropCB(ajn::Message &msg, OCRepPayload *payload)
 
 void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
 {
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     qcc::String uri = GetPath();
@@ -255,8 +247,7 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
 void VirtualBusObject::SetPropCB(ajn::Message &msg, OCRepPayload *payload)
 {
     (void) payload;
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);
     if (status != ER_OK)
@@ -268,8 +259,7 @@ void VirtualBusObject::SetPropCB(ajn::Message &msg, OCRepPayload *payload)
 void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *member,
                                    ajn::Message &msg)
 {
-    LOG(LOG_INFO, "[%p] member=%p",
-        this, member);
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     bool multipleRts = m_ifaces.size() > 1;
@@ -284,8 +274,7 @@ void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *memb
 /* Called with m_mutex held. */
 void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload)
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     OCRepPayloadValue value;
     memset(&value, 0, sizeof(value));
@@ -304,15 +293,14 @@ void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload)
 void VirtualBusObject::DoResource(OCMethod method, const char *uri, OCRepPayload *payload,
                                   ajn::Message &msg, DoResourceHandler cb)
 {
-    LOG(LOG_INFO, "[%p] method=%d,uri=%s,payload=%p",
-        this, method, uri, payload);
+    LOG(LOG_INFO, "[%p] method=%d,uri=%s,payload=%p", this, method, uri, payload);
 
     DoResourceContext *context = new DoResourceContext(this, cb, msg);
     OCCallbackData cbData;
     cbData.cb = VirtualBusObject::DoResourceCB;
     cbData.context = context;
     cbData.cd = NULL;
-    OCStackResult result = ::DoResource(&context->m_handle, method, uri, &m_devAddr,
+    OCStackResult result = ::DoResource(&context->m_handle, method, uri, m_devAddrs,
             (OCPayload *) payload, &cbData, NULL, 0);
     if (result == OC_STACK_OK)
     {
@@ -334,9 +322,8 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
         OCClientResponse *response)
 {
     DoResourceContext *context = reinterpret_cast<DoResourceContext *>(ctx);
-    LOG(LOG_INFO, "[%p] ctx=%p,handle=%p,response=%p,{payload=%p,result=%d}",
-        context->m_obj, ctx, handle, response, response ? response->payload : 0,
-        response ? response->result : 0);
+    LOG(LOG_INFO, "[%p] ctx=%p,handle=%p,response=%p,{payload=%p,result=%d}", context->m_obj, ctx,
+            handle, response, response ? response->payload : 0, response ? response->result : 0);
 
     std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
     if (!response || response->result > OC_STACK_RESOURCE_CHANGED || !response->payload)

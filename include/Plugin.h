@@ -23,6 +23,7 @@
 
 #include <inttypes.h>
 #include <stdint.h>
+#include <vector>
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
 #include "octypes.h"
@@ -83,6 +84,14 @@ OCStackResult DoResource(OCDoHandle *handle,
         OCMethod method,
         const char *uri,
         const OCDevAddr *destination,
+        OCPayload *payload,
+        OCCallbackData *cbData,
+        OCHeaderOption *options,
+        uint8_t numOptions);
+OCStackResult DoResource(OCDoHandle *handle,
+        OCMethod method,
+        const char *uri,
+        const std::vector<OCDevAddr> &destinations,
         OCPayload *payload,
         OCCallbackData *cbData,
         OCHeaderOption *options,

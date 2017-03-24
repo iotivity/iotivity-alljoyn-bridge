@@ -32,6 +32,9 @@
 #include "ocstack.h"
 #include "oic_malloc.h"
 #include "oic_string.h"
+#if __WITH_DTLS__
+#include "pinoxmcommon.h"
+#endif
 
 #define OC_RSRVD_SOFTWARE_VERSION        "sv"
 #define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
@@ -974,15 +977,55 @@ error:
     return ehResult;
 }
 
+static FILE *PSOpenCB(const char *suffix, const char *mode)
+{
+    std::string path = std::string("ocserver_") + suffix;
+    return fopen(path.c_str(), mode);
+}
+
+#if __WITH_DTLS__
+static void DisplayPinCB(char *pin, size_t pinSize, void *context)
+{
+    OC_UNUSED(pinSize);
+    OC_UNUSED(context);
+    std::cout << "DisplayPinCB(pin=" << pin << ",...)" << std::endl;
+}
+
+static void ClosePinDisplayCB()
+{
+    std::cout << "ClosePinDisplayCB()" << std::endl;
+}
+#endif
+
 int main(int, char **)
 {
     std::cout.setf(std::ios::boolalpha);
 
+    OCPersistentStorage ps = { PSOpenCB, fread, fwrite, fclose, unlink };
+    if (OCRegisterPersistentStorageHandler(&ps) != OC_STACK_OK)
+    {
+        std::cerr << "OCRegisterPersistentStorageHandler error" << std::endl;
+        return EXIT_FAILURE;
+    }
+#if __WITH_DTLS__
+    if (SetDisplayPinWithContextCB(DisplayPinCB, NULL) != OC_STACK_OK)
+    {
+        std::cerr << "SetDisplayPinWithContextCB error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    SetClosePinDisplayCB(ClosePinDisplayCB);
+    if (SetRandomPinPolicy(OXM_RANDOM_PIN_DEFAULT_SIZE, (OicSecPinType_t) OXM_RANDOM_PIN_DEFAULT_PIN_TYPE) != OC_STACK_OK)
+    {
+        std::cerr << "SetRandomPinPolicy error" << std::endl;
+        return EXIT_FAILURE;
+    }
+#endif
     if (OCInit1(OC_CLIENT_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS) != OC_STACK_OK)
     {
         std::cerr << "OCStack init error" << std::endl;
         return EXIT_FAILURE;
     }
+    std::cout << "di=" << OCGetServerInstanceIDString() << std::endl;
 
     OCResourceHandle handle;
     OCStackResult result;
@@ -1031,8 +1074,8 @@ int main(int, char **)
     configuration.dl = "en";
     configuration.ln["en"] = "My Friendly Device Name";
     configuration.ln["es"] = "My Friendly Device Name";
-    if (OCCreateResource(&handle, "oic.wk.con", "oic.if.rw", "/oic/con",
-                         configurationHandler, &configuration, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
+    if (OCCreateResource(&handle, "oic.wk.con", "oic.if.rw", "/oic/con", configurationHandler,
+                    &configuration, OC_DISCOVERABLE | OC_OBSERVABLE | OC_SECURE) != OC_STACK_OK)
     {
         std::cerr << "OCCreateResource error" << std::endl;
         return EXIT_FAILURE;
@@ -1040,28 +1083,28 @@ int main(int, char **)
     /* Create maintenance resource */
     Maintenance maintenance;
     maintenance.n = "My Maintenance Actions";
-    if (OCCreateResource(&handle, "oic.wk.mnt", "oic.if.rw", "/oic/mnt",
-                         maintenanceHandler, &maintenance, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
+    if (OCCreateResource(&handle, "oic.wk.mnt", "oic.if.rw", "/oic/mnt", maintenanceHandler,
+                    &maintenance, OC_DISCOVERABLE | OC_OBSERVABLE | OC_SECURE) != OC_STACK_OK)
     {
         std::cerr << "OCCreateResource error" << std::endl;
         return EXIT_FAILURE;
     }
     /* Create resources */
     Resource resource = { "Friendly Name", "Instance ID", false };
-    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/switch/0",
-                         entityHandler, &resource, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
+    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/switch/0", entityHandler,
+                    &resource, OC_DISCOVERABLE | OC_OBSERVABLE) != OC_STACK_OK)
     {
         std::cerr << "OCCreateResource error" << std::endl;
         return EXIT_FAILURE;
     }
-    if (OCCreateResource(&handle, "x.example.-binary-switch", "oic.if.a", "/switch/1",
-                         entityHandler, &resource, OC_DISCOVERABLE) != OC_STACK_OK)
+    if (OCCreateResource(&handle, "x.example.-binary-switch", "oic.if.a", "/switch/1", entityHandler,
+                    &resource, OC_DISCOVERABLE) != OC_STACK_OK)
     {
         std::cerr << "OCCreateResource error" << std::endl;
         return EXIT_FAILURE;
     }
-    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/switch/2",
-                         entityHandler, &resource, OC_DISCOVERABLE) != OC_STACK_OK)
+    if (OCCreateResource(&handle, "oic.r.switch.binary", "oic.if.a", "/switch/2", entityHandler,
+                    &resource, OC_DISCOVERABLE) != OC_STACK_OK)
     {
         std::cerr << "OCCreateResource error" << std::endl;
         return EXIT_FAILURE;

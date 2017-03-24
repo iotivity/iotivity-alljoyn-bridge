@@ -26,7 +26,7 @@
 class VirtualConfigBusObject : public VirtualBusObject
 {
     public:
-        VirtualConfigBusObject(ajn::BusAttachment *bus, const OCDevAddr *devAddr);
+        VirtualConfigBusObject(ajn::BusAttachment *bus, const std::vector<OCDevAddr> &devAddrs);
         virtual ~VirtualConfigBusObject();
 
     private:

@@ -247,6 +247,30 @@ OCStackResult DoResource(OCDoHandle *handle,
             CT_DEFAULT, OC_HIGH_QOS, cbData, options, numOptions);
 }
 
+OCStackResult DoResource(OCDoHandle *handle,
+        OCMethod method,
+        const char *uri,
+        const std::vector<OCDevAddr> &destinations,
+        OCPayload *payload,
+        OCCallbackData *cbData,
+        OCHeaderOption *options,
+        uint8_t numOptions)
+{
+    /* Prefer secure destination when present otherwise just use the first destination */
+    const OCDevAddr *destination = destinations.empty() ? NULL : &destinations[0];
+    for (std::vector<OCDevAddr>::const_iterator it = destinations.begin(); it != destinations.end();
+         ++it)
+    {
+        if (it->flags & OC_FLAG_SECURE)
+        {
+            destination = &(*it);
+            break;
+        }
+    }
+    return OCDoResource(handle, method, uri, destination, payload,
+            CT_DEFAULT, OC_HIGH_QOS, cbData, options, numOptions);
+}
+
 OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos)
 {
     return OCCancel(handle, qos, NULL, 0);

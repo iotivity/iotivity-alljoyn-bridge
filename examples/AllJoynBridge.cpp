@@ -151,6 +151,11 @@ int main(int argc, char **argv)
 
     int protocols = 0;
     bool isVirtual = false;
+#if __WITH_DTLS__
+    bool secureMode = true;
+#else
+    bool secureMode = false;
+#endif
     if (argc > 1)
     {
         for (int i = 1; i < argc; ++i)
@@ -182,6 +187,18 @@ int main(int argc, char **argv)
             else if (!strcmp(argv[i], "--virtual"))
             {
                 isVirtual = true;
+            }
+            else if (!strcmp(argv[i], "--secureMode") && (i < (argc - 1)))
+            {
+                char *mode = argv[++i];
+                if (!strcmp(mode, "false"))
+                {
+                    secureMode = false;
+                }
+                else if (!strcmp(mode, "true"))
+                {
+                    secureMode = true;
+                }
             }
         }
     }
@@ -281,6 +298,7 @@ int main(int argc, char **argv)
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetProcessCB(ExecCB, KillCB, GetSeenStateCB);
     }
+    bridge->SetSecureMode(secureMode);
     if (!bridge->Start())
     {
         goto exit;
