@@ -28,6 +28,7 @@
 #include "ocpayload.h"
 #include "octypes.h"
 #include <list>
+#include <condition_variable>
 #include <mutex>
 #include <vector>
 #include <set>
@@ -43,6 +44,7 @@ class VirtualResource;
 class Bridge : private ajn::AboutListener
     , private ajn::BusListener
     , private ajn::BusAttachment::JoinSessionAsyncCB
+    , private ajn::BusAttachment::LeaveSessionAsyncCB
     , private ajn::MessageReceiver
     , private ajn::SessionListener
 {
@@ -117,6 +119,7 @@ class Bridge : private ajn::AboutListener
         SessionLostCB m_sessionLostCb;
 
         std::mutex m_mutex;
+        std::condition_variable m_cond;
         Protocol m_protocols;
         enum { CREATED, STARTED, CONNECTED, CLAIMABLE, RUNNING } m_ajState;
         const char *m_sender;
@@ -133,25 +136,26 @@ class Bridge : private ajn::AboutListener
         bool m_secureMode;
         std::list<Task*> m_tasks;
         RDPublishTask *m_rdPublishTask;
+        size_t m_pending;
 
         void WhoImplements();
         void Destroy(const char *id);
         virtual void BusDisconnected();
         virtual void Announced(const char *name, uint16_t version, ajn::SessionPort port,
-                               const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg);
-        virtual void JoinSessionCB(QStatus status, ajn::SessionId sessionId, const ajn::SessionOpts &opts,
-                                   void *context);
+                const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg);
+        virtual void JoinSessionCB(QStatus status, ajn::SessionId sessionId,
+                const ajn::SessionOpts &opts, void *context);
+        virtual void LeaveSessionCB(QStatus status, void *ctx);
         void GetAboutDataCB(ajn::Message &msg, void *ctx);
-        virtual void SessionLost(ajn::SessionId sessionId, ajn::SessionListener::SessionLostReason reason);
-        VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus,
-                                               const char *name, ajn::SessionId sessionId, const char *path,
-                                               const char *ajSoftwareVersion);
+        virtual void SessionLost(ajn::SessionId sessionId,
+                ajn::SessionListener::SessionLostReason reason);
+        VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus, const char *name,
+                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
 
         OCRepPayload *GetSecureMode(OCEntityHandlerRequest *request);
         bool PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged);
         static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
-                OCEntityHandlerRequest *request,
-                void *context);
+                OCEntityHandlerRequest *request, void *context);
         static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult GetPlatformCB(void *context, OCDoHandle handle,
@@ -159,12 +163,14 @@ class Bridge : private ajn::AboutListener
         static OCStackApplicationResult GetDeviceCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
-                                              OCClientResponse *response);
+                OCClientResponse *response);
         OCStackResult CreateInterface(DiscoverContext *context, OCClientResponse *response);
         OCStackApplicationResult Get(void *ctx, OCDoHandle handle, OCClientResponse *response);
 
         SeenState GetSeenState(const char *piid);
         void DestroyPiid(const char *piid);
+        static void SecureConnection(Bridge *thiz, const char *name, void *ctx);
+        void SecureConnectionCB(QStatus status, void *ctx);
 };
 
 #endif

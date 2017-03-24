@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <deque>
 #include <iterator>
+#include <thread>
 
 #if __WITH_DTLS__
 #define SECURE_MODE_DEFAULT true
@@ -128,7 +129,7 @@ struct Bridge::DiscoverContext
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(protocols), m_sender(NULL),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
-      m_rdPublishTask(NULL)
+      m_rdPublishTask(NULL), m_pending(0)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
@@ -139,7 +140,7 @@ Bridge::Bridge(const char *name, Protocol protocols)
 Bridge::Bridge(const char *name, const char *sender)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender),
       m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
-      m_rdPublishTask(NULL)
+      m_rdPublishTask(NULL), m_pending(0)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
@@ -152,7 +153,11 @@ Bridge::~Bridge()
     LOG(LOG_INFO, "[%p]", this);
 
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(m_mutex);
+        while (m_pending > 0)
+        {
+            m_cond.wait(lock);
+        }
         for (Presence *presence : m_presence)
         {
             delete presence;
@@ -478,14 +483,18 @@ void Bridge::WhoImplements()
 
 struct AnnouncedContext
 {
-    public:
-        AnnouncedContext(VirtualDevice *device, const char *name, const ajn::MsgArg &objectDescriptionArg)
-            : m_device(device), m_name(name), m_objectDescriptionArg(objectDescriptionArg), m_aboutObj(NULL) { }
-        ~AnnouncedContext() { delete m_aboutObj; }
-        VirtualDevice *m_device;
-        std::string m_name;
-        ajn::MsgArg m_objectDescriptionArg;
-        ajn::ProxyBusObject *m_aboutObj;
+public:
+    AnnouncedContext(VirtualDevice *device, const char *name,
+            const ajn::MsgArg &objectDescriptionArg)
+        : m_device(device), m_name(name), m_objectDescriptionArg(objectDescriptionArg),
+          m_sessionId(0), m_aboutObj(NULL) { }
+    ~AnnouncedContext() { delete m_aboutObj; }
+    ajn::BusAttachment *m_bus;
+    VirtualDevice *m_device;
+    std::string m_name;
+    ajn::MsgArg m_objectDescriptionArg;
+    ajn::SessionId m_sessionId;
+    ajn::ProxyBusObject *m_aboutObj;
 };
 
 void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port,
@@ -579,17 +588,51 @@ void Bridge::JoinSessionCB(QStatus status, ajn::SessionId sessionId, const ajn::
                            void *ctx)
 {
     (void) opts;
-    LOG(LOG_INFO, "[%p]", this);
+    LOG(LOG_INFO, "[%p] status=%s,sessionId=%d,ctx=%p", this, QCC_StatusText(status), sessionId,
+            ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
     if (status != ER_OK)
     {
         LOG(LOG_ERR, "JoinSessionCB - %s", QCC_StatusText(status));
+        delete context;
     }
     else
     {
-        context->m_aboutObj = new ajn::ProxyBusObject(*m_bus, context->m_name.c_str(), "/About", sessionId);
+        context->m_sessionId = sessionId;
+
+        /* BusAttachment::SecureConnectionAsync is not really usable (no means to pass context). */
+        ++m_pending;
+        std::thread(Bridge::SecureConnection, this, context->m_name.c_str(), ctx).detach();
+    }
+}
+
+void Bridge::SecureConnection(Bridge *thiz, const char *name, void *ctx)
+{
+    QStatus status = thiz->m_bus->SecureConnection(name);
+    thiz->SecureConnectionCB(status, ctx);
+    {
+        std::lock_guard<std::mutex> lock(thiz->m_mutex);
+        --thiz->m_pending;
+        thiz->m_cond.notify_one();
+    }
+}
+
+void Bridge::SecureConnectionCB(QStatus status, void *ctx)
+{
+    LOG(LOG_INFO, "[%p] status=%s,ctx=%p", this, QCC_StatusText(status), ctx);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
+    if (m_secureMode && (status != ER_OK))
+    {
+        LOG(LOG_ERR, "SecureConnectionCB - %s", QCC_StatusText(status));
+    }
+    else
+    {
+        context->m_aboutObj = new ajn::ProxyBusObject(*m_bus, context->m_name.c_str(), "/About",
+                context->m_sessionId);
         context->m_aboutObj->AddInterface(::ajn::org::alljoyn::About::InterfaceName);
         ajn::MsgArg arg("s", "");
         status = context->m_aboutObj->MethodCallAsync(::ajn::org::alljoyn::About::InterfaceName,
@@ -604,7 +647,11 @@ void Bridge::JoinSessionCB(QStatus status, ajn::SessionId sessionId, const ajn::
     }
     if (status != ER_OK)
     {
-        delete context;
+        status = m_bus->LeaveSessionAsync(context->m_sessionId, this, context);
+        if (status != ER_OK)
+        {
+            delete context;
+        }
     }
 }
 
@@ -735,8 +782,25 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             delete[] paths;
             device->StartPresence();
         }
+        delete context;
     }
+    else if (msg->GetType() == ajn::MESSAGE_ERROR)
+    {
+        QStatus status = m_bus->LeaveSessionAsync(context->m_sessionId, this, context);
+        if (status != ER_OK)
+        {
+            delete context;
+        }
+    }
+}
+
+void Bridge::LeaveSessionCB(QStatus status, void *ctx)
+{
+    LOG(LOG_INFO, "[%p] status=%s,ctx=%p", this, QCC_StatusText(status), ctx);
+    AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
+    ajn::SessionId sessionId = context->m_sessionId;
     delete context;
+    SessionLost(sessionId, ALLJOYN_SESSIONLOST_REASON_OTHER);
 }
 
 void Bridge::SessionLost(ajn::SessionId sessionId, ajn::SessionListener::SessionLostReason reason)

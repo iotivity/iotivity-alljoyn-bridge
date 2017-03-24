@@ -34,6 +34,11 @@ static const char *gPSPrefix = "AllJoynBridge";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
 static const char *sRD = NULL;
+#if __WITH_DTLS__
+static bool sSecureMode = true;
+#else
+static bool sSecureMode = false;
+#endif
 
 static void SigIntCB(int sig)
 {
@@ -102,8 +107,8 @@ static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
 
 static void ExecCB(const char *uuid, const char *sender, bool isVirtual)
 {
-    printf("exec --ps %s --uuid %s --sender %s --rd %s %s\n",
-            gPSPrefix, uuid, sender, OCGetServerInstanceIDString(),
+    printf("exec --ps %s --uuid %s --sender %s --rd %s --secureMode %s %s\n", gPSPrefix, uuid,
+            sender, OCGetServerInstanceIDString(), sSecureMode ? "true" : "false",
             isVirtual ? "--virtual" : "");
     fflush(stdout);
 }
@@ -151,11 +156,6 @@ int main(int argc, char **argv)
 
     int protocols = 0;
     bool isVirtual = false;
-#if __WITH_DTLS__
-    bool secureMode = true;
-#else
-    bool secureMode = false;
-#endif
     if (argc > 1)
     {
         for (int i = 1; i < argc; ++i)
@@ -193,11 +193,11 @@ int main(int argc, char **argv)
                 char *mode = argv[++i];
                 if (!strcmp(mode, "false"))
                 {
-                    secureMode = false;
+                    sSecureMode = false;
                 }
                 else if (!strcmp(mode, "true"))
                 {
-                    secureMode = true;
+                    sSecureMode = true;
                 }
             }
         }
@@ -298,7 +298,7 @@ int main(int argc, char **argv)
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetProcessCB(ExecCB, KillCB, GetSeenStateCB);
     }
-    bridge->SetSecureMode(secureMode);
+    bridge->SetSecureMode(sSecureMode);
     if (!bridge->Start())
     {
         goto exit;

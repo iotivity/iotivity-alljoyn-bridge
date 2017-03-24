@@ -34,7 +34,7 @@ vars.Add(EnumVariable('SECURED', 'Build with DTLS', '1', allowed_values=('0', '1
 env = Environment(variables = vars);
 Help('''
 Build options can be specified using the command line, BuildOptions.txt or using
-the SCONS_FLAGS environment variable 
+the SCONS_FLAGS environment variable
 
 Example of command line release build:
 
@@ -80,6 +80,8 @@ if env['TARGET_OS'] == 'linux':
     elif target_arch in ['x86_64']:
 	env.AppendUnique(CCFLAGS = ['-m64'])
 	env.AppendUnique(LINKFLAGS = ['-m64'])
+
+    env.AppendUnique(LIBS = ['pthread'])
 
 elif env['TARGET_OS'] == 'windows':
 
