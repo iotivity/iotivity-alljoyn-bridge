@@ -60,9 +60,7 @@ void LogWriteln(
 
 extern std::string gRD;
 
-void DeriveUniqueId(OCUUIdentity *id, const char *deviceId,
-        uint8_t *appId, size_t n);
-bool GetPiid(OCUUIdentity *piid, ajn::AboutData *aboutData);
+void DeriveUniqueId(OCUUIdentity *id, const char *deviceId, uint8_t *appId, size_t n);
 
 const char *GetServerInstanceIDString();
 OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,

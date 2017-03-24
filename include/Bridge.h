@@ -173,4 +173,6 @@ class Bridge : private ajn::AboutListener
         void SecureConnectionCB(QStatus status, void *ctx);
 };
 
+bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData);
+
 #endif

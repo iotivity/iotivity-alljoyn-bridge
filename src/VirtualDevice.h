@@ -24,6 +24,7 @@
 #include <inttypes.h>
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
+#include <alljoyn/BusAttachment.h>
 #include <alljoyn/Session.h>
 #include <mutex>
 #include <string>
@@ -31,7 +32,7 @@
 class VirtualDevice
 {
     public:
-        VirtualDevice(const char *name, ajn::SessionId sessionId);
+        VirtualDevice(ajn::BusAttachment *bus, const char *name, ajn::SessionId sessionId);
         ~VirtualDevice();
 
         std::string GetName() const { return m_name; }
@@ -41,6 +42,7 @@ class VirtualDevice
 
     private:
         std::mutex m_mutex;
+        ajn::BusAttachment *m_bus;
         std::string m_name;
         ajn::SessionId m_sessionId;
         ajn::AboutData m_aboutData;

@@ -164,27 +164,6 @@ void DeriveUniqueId(OCUUIdentity *id, const char *deviceId,
     memcpy(id->id, digest, UUID_IDENTITY_SIZE);
 }
 
-bool GetPiid(OCUUIdentity *piid, ajn::AboutData *aboutData)
-{
-    ajn::MsgArg *piidArg = NULL;
-    aboutData->GetField("org.openconnectivity.piid", piidArg);
-    char *piidStr = NULL;
-    if (piidArg && (ER_OK == piidArg->Get("s", &piidStr)))
-    {
-        return (piidStr && OCConvertStringToUuid(piidStr, piid->id));
-    }
-    else
-    {
-        char *deviceId;
-        aboutData->GetDeviceId(&deviceId);
-        uint8_t *appId;
-        size_t n;
-        aboutData->GetAppId(&appId, &n);
-        DeriveUniqueId(piid, deviceId, appId, n);
-        return true;
-    }
-}
-
 OCStackResult StartPresence()
 {
     return OC_STACK_OK;

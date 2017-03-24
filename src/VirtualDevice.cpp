@@ -20,14 +20,14 @@
 
 #include "VirtualDevice.h"
 
+#include "Bridge.h"
 #include "Plugin.h"
 #include "ocpayload.h"
 #include "ocrandom.h"
 #include "ocstack.h"
 
-VirtualDevice::VirtualDevice(const char *name, ajn::SessionId sessionId)
-    : m_name(name)
-    , m_sessionId(sessionId)
+VirtualDevice::VirtualDevice(ajn::BusAttachment *bus, const char *name, ajn::SessionId sessionId)
+    : m_bus(bus), m_name(name), m_sessionId(sessionId)
 {
     LOG(LOG_INFO, "[%p] name=%s,sessionId=%d",
         this, name, sessionId);
@@ -70,8 +70,10 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, "0.3");
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_ID, OCGetServerInstanceIDString());
+    qcc::String peerGuid;
+    m_bus->GetPeerGUID(m_name.c_str(), peerGuid);
     OCUUIdentity piid;
-    GetPiid(&piid, &aboutData);
+    GetPiid(&piid, peerGuid.c_str(), &aboutData);
     char piidStr[UUID_STRING_SIZE];
     OCConvertUuidToString(piid.id, piidStr);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, piidStr);

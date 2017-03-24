@@ -485,14 +485,15 @@ struct AnnouncedContext
 {
 public:
     AnnouncedContext(VirtualDevice *device, const char *name,
-            const ajn::MsgArg &objectDescriptionArg)
+            const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
         : m_device(device), m_name(name), m_objectDescriptionArg(objectDescriptionArg),
-          m_sessionId(0), m_aboutObj(NULL) { }
+          m_aboutDataArg(aboutDataArg), m_sessionId(0), m_aboutObj(NULL) { }
     ~AnnouncedContext() { delete m_aboutObj; }
     ajn::BusAttachment *m_bus;
     VirtualDevice *m_device;
     std::string m_name;
     ajn::MsgArg m_objectDescriptionArg;
+    ajn::MsgArg m_aboutDataArg;
     ajn::SessionId m_sessionId;
     ajn::ProxyBusObject *m_aboutObj;
 };
@@ -504,13 +505,7 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
     AnnouncedContext *context;
     ajn::SessionOpts opts;
 
-    ajn::AboutData aboutData(aboutDataArg);
-    OCUUIdentity piid;
-    GetPiid(&piid, &aboutData);
-    char piidStr[UUID_STRING_SIZE];
-    OCConvertUuidToString(piid.id, piidStr);
-
-    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,piid=%s", this, name, version, port, piidStr);
+    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u", this, name, version, port);
 
     m_mutex.lock();
     /* Ignore Announce from self */
@@ -521,35 +516,6 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
             m_mutex.unlock();
             return;
         }
-    }
-
-    if (!m_sender)
-    {
-        bool isVirtual = ajn::AboutObjectDescription(objectDescriptionArg).HasInterface("oic.d.virtual");
-        switch (GetSeenState(piidStr))
-        {
-        case NOT_SEEN:
-            m_execCb(piidStr, name, isVirtual);
-            break;
-        case SEEN_NATIVE:
-            /* Do nothing */
-            break;
-        case SEEN_VIRTUAL:
-            if (isVirtual)
-            {
-                /* Do nothing */
-            }
-            else
-            {
-                /* Delay creating virtual resources from a virtual Announce */
-                LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
-                        this);
-                m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, name, piidStr, isVirtual));
-            }
-            break;
-        }
-        m_mutex.unlock();
-        return;
     }
 
     /* Check if we've seen this Announce before */
@@ -564,7 +530,7 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
         }
     }
 
-    context = new AnnouncedContext(device, name, objectDescriptionArg);
+    context = new AnnouncedContext(device, name, objectDescriptionArg, aboutDataArg);
     if (device)
     {
         LOG(LOG_INFO, "[%p] Received updated Announce", this);
@@ -628,6 +594,45 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
     if (m_secureMode && (status != ER_OK))
     {
         LOG(LOG_ERR, "SecureConnectionCB - %s", QCC_StatusText(status));
+    }
+    else if (!m_sender)
+    {
+        qcc::String peerGuid;
+        m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
+        ajn::AboutData aboutData(context->m_aboutDataArg);
+        OCUUIdentity piid;
+        GetPiid(&piid, peerGuid.c_str(), &aboutData);
+        char piidStr[UUID_STRING_SIZE];
+        OCConvertUuidToString(piid.id, piidStr);
+
+        bool isVirtual = ajn::AboutObjectDescription(context->m_objectDescriptionArg)
+                .HasInterface("oic.d.virtual");
+
+        switch (GetSeenState(piidStr))
+        {
+            case NOT_SEEN:
+                m_execCb(piidStr, context->m_name.c_str(), isVirtual);
+                break;
+            case SEEN_NATIVE:
+                /* Do nothing */
+                break;
+            case SEEN_VIRTUAL:
+                if (isVirtual)
+                {
+                    /* Do nothing */
+                }
+                else
+                {
+                    /* Delay creating virtual resources from a virtual Announce */
+                    LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
+                            this);
+                    m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
+                            piidStr, isVirtual));
+                }
+                break;
+        }
+        /* Force a leave of the session */
+        status = ER_FAIL;
     }
     else
     {
@@ -753,7 +758,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
         {
             Presence *presence = new AllJoynPresence(m_bus, context->m_name);
             m_presence.push_back(presence);
-            VirtualDevice *device = new VirtualDevice(msg->GetSender(), msg->GetSessionId());
+            VirtualDevice *device = new VirtualDevice(m_bus, msg->GetSender(), msg->GetSessionId());
             device->SetInfo(objectDescription, aboutData);
             OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
             if (!handle)
@@ -1575,4 +1580,36 @@ void Bridge::RDPublishTask::Run(Bridge *thiz)
 
     ::RDPublish();
     thiz->m_rdPublishTask = NULL;
+}
+
+bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData)
+{
+    if (peerGuid && peerGuid[0])
+    {
+        return sscanf(peerGuid, "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx"
+                "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
+                &piid->id[0], &piid->id[1], &piid->id[2], &piid->id[3], &piid->id[4], &piid->id[5],
+                &piid->id[6], &piid->id[7], &piid->id[8], &piid->id[9], &piid->id[10], &piid->id[11],
+                &piid->id[12], &piid->id[13], &piid->id[14], &piid->id[15]) == 16;
+    }
+    else
+    {
+        ajn::MsgArg *piidArg = NULL;
+        aboutData->GetField("org.openconnectivity.piid", piidArg);
+        char *piidStr = NULL;
+        if (piidArg && (ER_OK == piidArg->Get("s", &piidStr)))
+        {
+            return (piidStr && OCConvertStringToUuid(piidStr, piid->id));
+        }
+        else
+        {
+            char *deviceId;
+            aboutData->GetDeviceId(&deviceId);
+            uint8_t *appId;
+            size_t n;
+            aboutData->GetAppId(&appId, &n);
+            DeriveUniqueId(piid, deviceId, appId, n);
+            return true;
+        }
+    }
 }
