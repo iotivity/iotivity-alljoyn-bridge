@@ -36,9 +36,8 @@ class VirtualResource : public ajn::ProxyBusObject
     , private ajn::BusAttachment::RemoveMatchAsyncCB
 {
     public:
-        static VirtualResource *Create(Bridge *bridge, ajn::BusAttachment *bus,
-                                       const char *name, ajn::SessionId sessionId, const char *path,
-                                       const char *ajSoftwareVersion);
+        static VirtualResource *Create(Bridge *bridge, ajn::BusAttachment *bus, const char *name,
+                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
         virtual ~VirtualResource();
 
     protected:
@@ -46,9 +45,8 @@ class VirtualResource : public ajn::ProxyBusObject
         Bridge *m_bridge;
         ajn::BusAttachment *m_bus;
 
-        VirtualResource(Bridge *bridge, ajn::BusAttachment *bus,
-                        const char *name, ajn::SessionId sessionId, const char *path,
-                        const char *ajSoftwareVersion);
+        VirtualResource(Bridge *bridge, ajn::BusAttachment *bus, const char *name,
+                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
 
     private:
         std::string m_ajSoftwareVersion;
@@ -57,8 +55,10 @@ class VirtualResource : public ajn::ProxyBusObject
         std::map<OCObservationId, std::string> m_matchRules;
 
         OCStackResult Create();
+        uint8_t GetMethodCallFlags(const char *ifaceName);
         void IntrospectCB(ajn::Message &msg, void *ctx);
-        void SignalCB(const ajn::InterfaceDescription::Member *member, const char *path, ajn::Message &msg);
+        void SignalCB(const ajn::InterfaceDescription::Member *member, const char *path,
+                ajn::Message &msg);
         void MethodReturnCB(ajn::Message &msg, void *context);
         struct SetContext;
         QStatus Set(SetContext *context);
@@ -71,11 +71,10 @@ class VirtualResource : public ajn::ProxyBusObject
         virtual void AddMatchCB(QStatus status, void *ctx);
         virtual void RemoveMatchCB(QStatus status, void *ctx);
         OCRepPayload *CreatePayload();
-        OCStackResult SetMemberPayload(OCRepPayload *payload,
-                                       const char *ifaceName, const char *memberName);
+        OCStackResult SetMemberPayload(OCRepPayload *payload, const char *ifaceName,
+                const char *memberName);
         static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
-                OCEntityHandlerRequest *request,
-                void *context);
+                OCEntityHandlerRequest *request, void *context);
 };
 
 #endif

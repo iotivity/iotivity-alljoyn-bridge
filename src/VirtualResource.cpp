@@ -669,9 +669,9 @@ handleRequest:
                     assert(member);
                     MethodCallContext *context = new MethodCallContext(resource->m_ajSoftwareVersion, rt, access,
                             member, request);
-                    QStatus status = resource->MethodCallAsync(*member,
-                                     resource, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::MethodReturnCB),
-                                     &arg, 1, context);
+                    QStatus status = resource->MethodCallAsync(*member, resource,
+                            static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::MethodReturnCB),
+                            &arg, 1, context, DefaultCallTimeout, resource->GetMethodCallFlags(ifaceName.c_str()));
                     if (status == ER_OK)
                     {
                         result = OC_EH_OK;
@@ -951,9 +951,9 @@ QStatus VirtualResource::Set(SetContext *context)
         return ER_FAIL;
     }
     args[2].Set("v", &value);
-    return MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName, "Set",
-                           this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::SetCB),
-                           args, numArgs, context);
+    return MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName, "Set", this,
+            static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::SetCB), args, numArgs,
+            context, DefaultCallTimeout, GetMethodCallFlags(context->m_iface->GetName()));
 }
 
 void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
@@ -1027,9 +1027,9 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
         if (msg->GetArg(2)->v_array.GetNumElements())
         {
             /* Get the values of the invalidated properties */
-            QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName, "GetAll",
-                                             this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllInvalidatedCB),
-                                             msg->GetArg(0), 1, NULL);
+            QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName,
+                    "GetAll", this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllInvalidatedCB),
+                    msg->GetArg(0), 1, NULL, DefaultCallTimeout, GetMethodCallFlags(msg->GetArg(0)->v_string.str));
             if (status != ER_OK)
             {
                 LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
@@ -1188,9 +1188,9 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
         if (numProps)
         {
             ajn::MsgArg arg("s", ifaceName);
-            QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName, "GetAll",
-                                             this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllBaselineCB),
-                                             &arg, 1, context);
+            QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName,
+                    "GetAll", this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllBaselineCB),
+                    &arg, 1, context, DefaultCallTimeout, GetMethodCallFlags(ifaceName));
             if (status != ER_OK)
             {
                 LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
@@ -1374,4 +1374,20 @@ void VirtualResource::RemoveMatchCB(QStatus status, void *ctx)
     {
         LOG(LOG_ERR, "RemoveMatchCB - %s", QCC_StatusText(status));
     }
+}
+
+uint8_t VirtualResource::GetMethodCallFlags(const char *ifaceName)
+{
+    uint8_t flags = 0;
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (iface)
+    {
+        ajn::InterfaceSecurityPolicy security = iface->GetSecurityPolicy();
+        if ((security == ajn::AJ_IFC_SECURITY_REQUIRED) ||
+                (IsSecure() && (security != ajn::AJ_IFC_SECURITY_OFF)))
+        {
+            flags |= ajn::ALLJOYN_FLAG_ENCRYPTED;
+        }
+    }
+    return flags;
 }
