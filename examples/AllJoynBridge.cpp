@@ -40,6 +40,22 @@ static bool sSecureMode = true;
 static bool sSecureMode = false;
 #endif
 
+static const char routerConfig[] =
+    "<busconfig>"
+    "  <type>alljoyn_bundled</type>"
+    "  <listen>tcp:iface=*,port=0</listen>"
+    "  <listen>udp:iface=*,port=0</listen>"
+    "  <limit name=\"auth_timeout\">20000</limit>"
+    "  <limit name=\"max_incomplete_connections\">48</limit>"
+    "  <limit name=\"max_completed_connections\">64</limit>"
+    "  <limit name=\"max_remote_clients_tcp\">48</limit>"
+    "  <limit name=\"max_remote_clients_udp\">48</limit>"
+    "  <property name=\"router_power_source\">Battery powered and chargeable</property>"
+    "  <property name=\"router_mobility\">Intermediate mobility</property>"
+    "  <property name=\"router_availability\">3-6 hr</property>"
+    "  <property name=\"router_node_connection\">Wireless</property>"
+    "</busconfig>";
+
 static void SigIntCB(int sig)
 {
     (void) sig;
@@ -243,7 +259,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "AllJoynInit - %s\n", QCC_StatusText(status));
         goto exit;
     }
-    status = AllJoynRouterInit();
+    status = AllJoynRouterInitWithConfig(routerConfig);
     if (status != ER_OK)
     {
         fprintf(stderr, "AllJoynRouterInit - %s\n", QCC_StatusText(status));
