@@ -18,16 +18,16 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#include <inttypes.h>
-#include <alljoyn/Init.h>
-#include <signal.h>
-#include <sstream>
-#include <stdlib.h>
+#include "Bridge.h"
+#include "Plugin.h"
 #include "ocstack.h"
 #include "rd_client.h"
 #include "rd_server.h"
-#include "Bridge.h"
-#include "Plugin.h"
+#include <alljoyn/Init.h>
+#include <inttypes.h>
+#include <signal.h>
+#include <sstream>
+#include <stdlib.h>
 
 static volatile sig_atomic_t sQuitFlag = false;
 static const char *gPSPrefix = "AllJoynBridge_";

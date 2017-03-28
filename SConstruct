@@ -111,6 +111,7 @@ elif env['TARGET_OS'] == 'windows':
 
 if env['SECURED'] == '1':
     env.AppendUnique(CPPDEFINES = ['__WITH_DTLS__=1'])
+    env.AppendUnique(LIBS = ['mbedtls', 'mbedx509', 'mbedcrypto'])
 
 if env.get('COLOR') == True:
     # If the gcc version is 4.9 or newer add the diagnostics-color flag

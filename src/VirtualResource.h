@@ -21,10 +21,11 @@
 #ifndef _VIRTUALRESOURCE_H
 #define _VIRTUALRESOURCE_H
 
+#include "cacommon.h"
+#include "octypes.h"
 #include <inttypes.h>
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/ProxyBusObject.h>
-#include "octypes.h"
 #include <mutex>
 #include <vector>
 

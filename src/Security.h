@@ -21,10 +21,11 @@
 #ifndef _SECURITY_H
 #define _SECURITY_H
 
+#include "cacommon.h"
+#include <inttypes.h>
 #include <alljoyn/AboutObj.h>
 #include <alljoyn/AuthListener.h>
 #include <alljoyn/PermissionConfigurationListener.h>
-#include <inttypes.h>
 #include <stddef.h>
 
 class AllJoynSecurity : public ajn::DefaultECDHEAuthListener,

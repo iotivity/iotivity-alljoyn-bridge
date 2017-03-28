@@ -21,11 +21,12 @@
 #ifndef _VIRTUALBUSATTACHMENT_H
 #define _VIRTUALBUSATTACHMENT_H
 
+#include "cacommon.h"
+#include "octypes.h"
 #include <inttypes.h>
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObj.h>
 #include <alljoyn/BusAttachment.h>
-#include "octypes.h"
 #include <mutex>
 #include <vector>
 

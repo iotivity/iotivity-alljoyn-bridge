@@ -21,12 +21,12 @@
 #ifndef __PLUGIN_H__
 #define __PLUGIN_H__
 
+#include "octypes.h"
 #include <inttypes.h>
-#include <stdint.h>
-#include <vector>
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
-#include "octypes.h"
+#include <stdint.h>
+#include <vector>
 
 /** Protocol independent indentifier.*/
 #define OC_RSRVD_PROTOCOL_INDEPENDENT_ID "piid"

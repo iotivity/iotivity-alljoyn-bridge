@@ -20,13 +20,6 @@
 
 #include "Bridge.h"
 
-#include "cacommon.h"
-#include "ocpayload.h"
-#include "ocrandom.h"
-#include "ocstack.h"
-#include "oic_malloc.h"
-#include "oic_string.h"
-#include <alljoyn/AllJoynStd.h>
 #include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
@@ -38,6 +31,12 @@
 #include "VirtualConfigurationResource.h"
 #include "VirtualDevice.h"
 #include "VirtualResource.h"
+#include "ocpayload.h"
+#include "ocrandom.h"
+#include "ocstack.h"
+#include "oic_malloc.h"
+#include "oic_string.h"
+#include <alljoyn/AllJoynStd.h>
 #include <algorithm>
 #include <deque>
 #include <iterator>

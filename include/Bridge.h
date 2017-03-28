@@ -17,16 +17,16 @@
 // limitations under the License.
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
 #ifndef _BRIDGE_H
 #define _BRIDGE_H
 
-#include <inttypes.h>
+#include "cacommon.h"
+#include "ocpayload.h"
+#include "octypes.h"
 #include <alljoyn/AboutListener.h>
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/SessionListener.h>
-#include "ocpayload.h"
-#include "octypes.h"
+#include <inttypes.h>
 #include <list>
 #include <condition_variable>
 #include <mutex>
