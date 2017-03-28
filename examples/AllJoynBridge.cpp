@@ -30,7 +30,7 @@
 #include "Plugin.h"
 
 static volatile sig_atomic_t sQuitFlag = false;
-static const char *gPSPrefix = "AllJoynBridge";
+static const char *gPSPrefix = "AllJoynBridge_";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
 static const char *sRD = NULL;

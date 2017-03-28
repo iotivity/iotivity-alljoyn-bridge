@@ -148,6 +148,11 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
                 break;
         }
 
+        uint8_t resourceProps = OC_DISCOVERABLE | OC_OBSERVABLE;
+        if (IsSecure())
+        {
+            resourceProps |= OC_SECURE;
+        }
         uint8_t access = 0;
         size_t numIfaces = GetInterfaces(NULL, 0);
         const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
@@ -236,6 +241,12 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
                 std::string rt = GetResourceTypeName(ifaceName);
                 m_rts[rt] |= READ;
             }
+            ajn::InterfaceSecurityPolicy secPolicy = ifaces[i]->GetSecurityPolicy();
+            if ((secPolicy == ajn::AJ_IFC_SECURITY_REQUIRED) ||
+                    (IsSecure() && (secPolicy != ajn::AJ_IFC_SECURITY_OFF)))
+            {
+                resourceProps |= OC_SECURE;
+            }
         }
         delete[] ifaces;
         if (m_rts.empty())
@@ -255,9 +266,8 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
 
         std::map<std::string, uint8_t>::iterator rt = m_rts.begin();
         result = CreateResource(GetPath().c_str(), rt->first.c_str(),
-                (access & READ) ?  OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
-                VirtualResource::EntityHandlerCB, this,
-                OC_DISCOVERABLE | OC_OBSERVABLE);
+                (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
+                VirtualResource::EntityHandlerCB, this, resourceProps);
         for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
         {
             result = AddResourceType(GetPath().c_str(), rt->first.c_str());
