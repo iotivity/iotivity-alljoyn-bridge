@@ -106,8 +106,7 @@ elif env['TARGET_OS'] == 'windows':
 
     env.AppendUnique(CPPDEFINES = ['QCC_OS_GROUP_WINDOWS'])
     env.AppendUnique(CCFLAGS=['/WX', '/EHsc'])
-    env.AppendUnique(LIBS = ['ajrouter', 'alljoyn', 'bcrypt', 'crypt32', 'ws2_32', 'iphlpapi', 'shell32', 'ole32'])
-    env.AppendUnique(LIBS = ['octbstack', 'c_common'])
+    env.AppendUnique(LIBS = ['bcrypt', 'crypt32', 'ws2_32', 'iphlpapi', 'shell32', 'ole32'])
 
 if env['SECURED'] == '1':
     env.AppendUnique(CPPDEFINES = ['__WITH_DTLS__=1'])
