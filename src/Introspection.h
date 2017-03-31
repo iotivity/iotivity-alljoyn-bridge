@@ -18,26 +18,14 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _NAME_H
-#define _NAME_H
+#ifndef _INTROSPECTION_H
+#define _INTROSPECTION_H
 
-#include <alljoyn/InterfaceDescription.h>
-#include <string>
+#include "octypes.h"
+#include <alljoyn/BusAttachment.h>
+#include <iostream>
 
-std::string ToOCName(std::string ajName);
-std::string ToAJName(std::string ocName);
-
-std::string GetResourceTypeName(std::string ifaceName);
-std::string GetResourceTypeName(std::string ifaceName, std::string suffix);
-std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix);
-std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName);
-std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName);
-
-std::string GetInterface(std::string rt);
-std::string GetMember(std::string rt);
-
-std::string NextArgName(const char *&argNames, size_t i);
-
-bool TranslateInterface(const char *ifaceName);
+OCStackResult OCIntrospect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+        const char *title, const char *version);
 
 #endif

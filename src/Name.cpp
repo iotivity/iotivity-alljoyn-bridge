@@ -103,6 +103,16 @@ std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::str
     return GetResourceTypeName(iface->GetName(), suffix);
 }
 
+std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
+{
+    return GetResourceTypeName(member->iface, member->name) + argName;
+}
+
+std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName)
+{
+    return GetResourceTypeName(iface, memberName);
+}
+
 std::string GetInterface(std::string rt)
 {
     std::string aj = ToAJName(rt);
@@ -113,4 +123,45 @@ std::string GetMember(std::string rt)
 {
     std::string aj = ToAJName(rt);
     return aj.substr(aj.rfind('.') + 1);
+}
+
+std::string NextArgName(const char *&argNames, size_t i)
+{
+    std::stringstream name;
+    const char *argName = argNames;
+    if (*argNames)
+    {
+        while (*argNames && *argNames != ',')
+        {
+            ++argNames;
+        }
+        if (argNames > argName)
+        {
+            name << std::string(argName, argNames - argName);
+        }
+        else
+        {
+            name << "arg" << i;
+        }
+        if (*argNames == ',')
+        {
+            ++argNames;
+        }
+    }
+    else
+    {
+        name << "arg" << i;
+    }
+    return name.str();
+}
+
+bool TranslateInterface(const char *ifaceName)
+{
+    return !(strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.About") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.Daemon") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.Debug") == ifaceName ||
+             strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
+             strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
 }

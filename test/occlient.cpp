@@ -164,10 +164,17 @@ static void LogResponse(OCMethod method, OCClientResponse *response, OCPayloadFo
     }
     fclose(fp);
     cJSON *json = cJSON_Parse(value);
-    char *valueStr = cJSON_Print(json);
-    std::cout << valueStr << std::endl;
-    free(valueStr);
-    cJSON_Delete(json);
+    if (json)
+    {
+        char *valueStr = cJSON_Print(json);
+        std::cout << valueStr << std::endl;
+        free(valueStr);
+        cJSON_Delete(json);
+    }
+    else
+    {
+        std::cout << value << std::endl;
+    }
     OICFree(buffer);
 }
 

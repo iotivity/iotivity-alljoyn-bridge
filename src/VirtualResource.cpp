@@ -26,7 +26,6 @@
 #include "Plugin.h"
 #include <alljoyn/AllJoynStd.h>
 #include <alljoyn/BusAttachment.h>
-#include <qcc/StringUtil.h>
 #include "Signature.h"
 #include "ocpayload.h"
 #include "ocstack.h"
@@ -40,25 +39,6 @@ enum
     READ = (1 << 0),
     READWRITE = (1 << 1),
 };
-
-static bool TranslateInterface(const char *ifaceName)
-{
-    return !(strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.About") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
-             strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
-}
-
-static std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
-{
-    return GetResourceTypeName(member->iface, member->name) + argName;
-}
-
-static std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName)
-{
-    return GetResourceTypeName(iface, memberName);
-}
 
 VirtualResource *VirtualResource::Create(Bridge *bridge, ajn::BusAttachment *bus,
         const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
@@ -147,149 +127,155 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
                 assert(0);
                 break;
         }
-
-        uint8_t resourceProps = OC_DISCOVERABLE | OC_OBSERVABLE;
-        if (IsSecure())
-        {
-            resourceProps |= OC_SECURE;
-        }
-        uint8_t access = 0;
-        size_t numIfaces = GetInterfaces(NULL, 0);
-        const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
-        GetInterfaces(ifaces, numIfaces);
-        for (size_t i = 0; i < numIfaces; ++i)
-        {
-            const char *ifaceName = ifaces[i]->GetName();
-            LOG(LOG_INFO, "%s ifaceName=%s", GetPath().c_str(), ifaceName);
-            if (!TranslateInterface(ifaceName))
-            {
-                continue;
-            }
-            size_t numProps = ifaces[i]->GetProperties(NULL, 0);
-            const ajn::InterfaceDescription::Property **props = new const
-                    ajn::InterfaceDescription::Property*[numProps];
-            ifaces[i]->GetProperties(props, numProps);
-            for (size_t j = 0; j < numProps; ++j)
-            {
-                qcc::String value = (props[j]->name == "Version") ? "const" : "false";
-                props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, value);
-                std::string rt = GetResourceTypeName(ifaces[i], value);
-                switch (props[j]->access)
-                {
-                    case ajn::PROP_ACCESS_RW:
-                    case ajn::PROP_ACCESS_WRITE:
-                        m_rts[rt] |= READWRITE;
-                        break;
-                    case ajn::PROP_ACCESS_READ:
-                        m_rts[rt] |= READ;
-                        break;
-                }
-                access |= m_rts[rt];
-            }
-            delete[] props;
-            size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
-            const ajn::InterfaceDescription::Member **members = new const
-                    ajn::InterfaceDescription::Member*[numMembers];
-            ifaces[i]->GetMembers(members, numMembers);
-            for (size_t j = 0; j < numMembers; ++j)
-            {
-                std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
-                if (members[j]->memberType == ajn::MESSAGE_METHOD_CALL)
-                {
-                    m_rts[rt] |= READWRITE;
-                    access |= m_rts[rt];
-                }
-                else if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
-                {
-                    m_rts[rt] |= READ;
-                    access |= m_rts[rt];
-                    m_bus->RegisterSignalHandler(this,
-                            static_cast<ajn::MessageReceiver::SignalHandler>(&VirtualResource::SignalCB),
-                            members[j], GetPath().c_str());
-                }
-            }
-            delete[] members;
-            size_t numAnnotations = ifaces[i]->GetAnnotations();
-            qcc::String *names = new qcc::String[numAnnotations];
-            qcc::String *values = new qcc::String[numAnnotations];
-            ifaces[i]->GetAnnotations(names, values, numAnnotations);
-            for (size_t j = 0; j < numAnnotations; ++j)
-            {
-                if (names[j].find("org.alljoyn.Bus.Struct.") == 0)
-                {
-                    size_t pos = sizeof("org.alljoyn.Bus.Struct.") - 1;
-                    size_t dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
-                    {
-                        continue;
-                    }
-                    qcc::String structName = "[" + names[j].substr(pos, dot - pos) + "]";
-                    pos = dot + sizeof(".Field.") - 1;
-                    dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
-                    {
-                        continue;
-                    }
-                    qcc::String fieldName = names[j].substr(pos, dot - pos);
-                    Types::m_structs[structName].push_back(Types::Field(fieldName, values[j]));
-                }
-            }
-            delete[] names;
-            delete[] values;
-            if (!numProps && !numMembers)
-            {
-                std::string rt = GetResourceTypeName(ifaceName);
-                m_rts[rt] |= READ;
-            }
-            ajn::InterfaceSecurityPolicy secPolicy = ifaces[i]->GetSecurityPolicy();
-            if ((secPolicy == ajn::AJ_IFC_SECURITY_REQUIRED) ||
-                    (IsSecure() && (secPolicy != ajn::AJ_IFC_SECURITY_OFF)))
-            {
-                resourceProps |= OC_SECURE;
-            }
-        }
-        delete[] ifaces;
-        if (m_rts.empty())
-        {
-            LOG(LOG_INFO, "No translatable interfaces");
-            return;
-        }
-
-        const ajn::InterfaceDescription *iface = m_bus->GetInterface(
-            ::ajn::org::freedesktop::DBus::Properties::InterfaceName);
-        assert(iface);
-        const ajn::InterfaceDescription::Member *signal = iface->GetSignal("PropertiesChanged");
-        assert(signal);
-        m_bus->RegisterSignalHandler(this,
-                static_cast<ajn::MessageReceiver::SignalHandler>(&VirtualResource::SignalCB),
-                signal, GetPath().c_str());
-
-        std::map<std::string, uint8_t>::iterator rt = m_rts.begin();
-        result = CreateResource(GetPath().c_str(), rt->first.c_str(),
-                (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
-                VirtualResource::EntityHandlerCB, this, resourceProps);
-        for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
-        {
-            result = AddResourceType(GetPath().c_str(), rt->first.c_str());
-        }
-        if ((access & (READ | READWRITE)) == (READ | READWRITE))
-        {
-            result = ::AddInterface(GetPath().c_str(), OC_RSRVD_INTERFACE_READ_WRITE);
-        }
-        if (result == OC_STACK_OK)
-        {
-            LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s",
-                    this, GetPath().c_str());
-        }
-        else
-        {
-            LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
-        }
+        result = CreateResources();
     }
     if (result == OC_STACK_OK)
     {
         m_bridge->RDPublish();
     }
+}
+
+OCStackResult VirtualResource::CreateResources()
+{
+    OCStackResult result;
+    uint8_t resourceProps = OC_DISCOVERABLE | OC_OBSERVABLE;
+    if (IsSecure())
+    {
+        resourceProps |= OC_SECURE;
+    }
+    uint8_t access = 0;
+    size_t numIfaces = GetInterfaces(NULL, 0);
+    const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
+    GetInterfaces(ifaces, numIfaces);
+    for (size_t i = 0; i < numIfaces; ++i)
+    {
+        const char *ifaceName = ifaces[i]->GetName();
+        LOG(LOG_INFO, "%s ifaceName=%s", GetPath().c_str(), ifaceName);
+        if (!TranslateInterface(ifaceName))
+        {
+            continue;
+        }
+        size_t numProps = ifaces[i]->GetProperties(NULL, 0);
+        const ajn::InterfaceDescription::Property **props = new const
+                ajn::InterfaceDescription::Property*[numProps];
+        ifaces[i]->GetProperties(props, numProps);
+        for (size_t j = 0; j < numProps; ++j)
+        {
+            qcc::String value = (props[j]->name == "Version") ? "const" : "false";
+            props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, value);
+            std::string rt = GetResourceTypeName(ifaces[i], value);
+            switch (props[j]->access)
+            {
+                case ajn::PROP_ACCESS_RW:
+                case ajn::PROP_ACCESS_WRITE:
+                    m_rts[rt] |= READWRITE;
+                    break;
+                case ajn::PROP_ACCESS_READ:
+                    m_rts[rt] |= READ;
+                    break;
+            }
+            access |= m_rts[rt];
+        }
+        delete[] props;
+        size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
+        const ajn::InterfaceDescription::Member **members = new const
+                ajn::InterfaceDescription::Member*[numMembers];
+        ifaces[i]->GetMembers(members, numMembers);
+        for (size_t j = 0; j < numMembers; ++j)
+        {
+            std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
+            if (members[j]->memberType == ajn::MESSAGE_METHOD_CALL)
+            {
+                m_rts[rt] |= READWRITE;
+                access |= m_rts[rt];
+            }
+            else if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
+            {
+                m_rts[rt] |= READ;
+                access |= m_rts[rt];
+                m_bus->RegisterSignalHandler(this,
+                        static_cast<ajn::MessageReceiver::SignalHandler>(&VirtualResource::SignalCB),
+                        members[j], GetPath().c_str());
+            }
+        }
+        delete[] members;
+        size_t numAnnotations = ifaces[i]->GetAnnotations();
+        qcc::String *names = new qcc::String[numAnnotations];
+        qcc::String *values = new qcc::String[numAnnotations];
+        ifaces[i]->GetAnnotations(names, values, numAnnotations);
+        for (size_t j = 0; j < numAnnotations; ++j)
+        {
+            if (names[j].find("org.alljoyn.Bus.Struct.") == 0)
+            {
+                size_t pos = sizeof("org.alljoyn.Bus.Struct.") - 1;
+                size_t dot = names[j].find(".", pos);
+                if (dot == qcc::String::npos)
+                {
+                    continue;
+                }
+                qcc::String structName = "[" + names[j].substr(pos, dot - pos) + "]";
+                pos = dot + sizeof(".Field.") - 1;
+                dot = names[j].find(".", pos);
+                if (dot == qcc::String::npos)
+                {
+                    continue;
+                }
+                qcc::String fieldName = names[j].substr(pos, dot - pos);
+                Types::m_structs[structName].push_back(Types::Field(fieldName, values[j]));
+            }
+        }
+        delete[] names;
+        delete[] values;
+        if (!numProps && !numMembers)
+        {
+            std::string rt = GetResourceTypeName(ifaceName);
+            m_rts[rt] |= READ;
+        }
+        ajn::InterfaceSecurityPolicy secPolicy = ifaces[i]->GetSecurityPolicy();
+        if ((secPolicy == ajn::AJ_IFC_SECURITY_REQUIRED) ||
+                (IsSecure() && (secPolicy != ajn::AJ_IFC_SECURITY_OFF)))
+        {
+            resourceProps |= OC_SECURE;
+        }
+    }
+    delete[] ifaces;
+    if (m_rts.empty())
+    {
+        LOG(LOG_INFO, "No translatable interfaces");
+        return OC_STACK_NO_RESOURCE;
+    }
+
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(
+        ::ajn::org::freedesktop::DBus::Properties::InterfaceName);
+    assert(iface);
+    const ajn::InterfaceDescription::Member *signal = iface->GetSignal("PropertiesChanged");
+    assert(signal);
+    m_bus->RegisterSignalHandler(this,
+            static_cast<ajn::MessageReceiver::SignalHandler>(&VirtualResource::SignalCB),
+            signal, GetPath().c_str());
+
+    std::map<std::string, uint8_t>::iterator rt = m_rts.begin();
+    result = CreateResource(GetPath().c_str(), rt->first.c_str(),
+            (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
+            VirtualResource::EntityHandlerCB, this, resourceProps);
+    for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
+    {
+        result = AddResourceType(GetPath().c_str(), rt->first.c_str());
+    }
+    if ((access & (READ | READWRITE)) == (READ | READWRITE))
+    {
+        result = ::AddInterface(GetPath().c_str(), OC_RSRVD_INTERFACE_READ_WRITE);
+    }
+    if (result == OC_STACK_OK)
+    {
+        LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s",
+                this, GetPath().c_str());
+    }
+    else
+    {
+        LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
+    }
+    return result;
 }
 
 static std::map<std::string, std::string> ParseQuery(const char *query)
@@ -416,36 +402,6 @@ static bool ToFilteredOCPayload(OCRepPayload *payload,
         }
     }
     return success;
-}
-
-static std::string NextArgName(const char *&argNames, size_t i)
-{
-    std::string name;
-    const char *argName = argNames;
-    if (*argNames)
-    {
-        while (*argNames && *argNames != ',')
-        {
-            ++argNames;
-        }
-        if (argNames > argName)
-        {
-            name = std::string(argName, argNames - argName);
-        }
-        else
-        {
-            name = "arg" + qcc::U32ToString(i);
-        }
-        if (*argNames == ',')
-        {
-            ++argNames;
-        }
-    }
-    else
-    {
-        name = "arg" + qcc::U32ToString(i);
-    }
-    return name;
 }
 
 struct MethodCallContext
