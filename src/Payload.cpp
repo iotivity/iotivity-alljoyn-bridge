@@ -30,9 +30,6 @@
 
 std::map<std::string, std::vector<Types::Field>> Types::m_structs;
 
-static const int64_t MAX_SAFE_INTEGER = 9007199254740991;
-static const int64_t MIN_SAFE_INTEGER = -9007199254740991;
-
 static bool calcDim(OCRepPayloadValueArray *arr,
                     uint8_t di, const ajn::MsgArg *arg, const char *signature)
 {

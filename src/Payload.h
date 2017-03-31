@@ -27,6 +27,9 @@
 #include <map>
 #include <vector>
 
+const int64_t MAX_SAFE_INTEGER = 9007199254740991;
+const int64_t MIN_SAFE_INTEGER = -9007199254740991;
+
 struct Types
 {
     struct Field

@@ -58,6 +58,7 @@ class VirtualResource : public ajn::ProxyBusObject
         OCStackResult Create();
         uint8_t GetMethodCallFlags(const char *ifaceName);
         void IntrospectCB(ajn::Message &msg, void *ctx);
+        OCStackResult CreateResources();
         void SignalCB(const ajn::InterfaceDescription::Member *member, const char *path,
                 ajn::Message &msg);
         void MethodReturnCB(ajn::Message &msg, void *context);

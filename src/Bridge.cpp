@@ -20,6 +20,7 @@
 
 #include "Bridge.h"
 
+#include "Introspection.h"
 #include "Name.h"
 #include "Plugin.h"
 #include "Presence.h"
@@ -40,6 +41,7 @@
 #include <algorithm>
 #include <deque>
 #include <iterator>
+#include <sstream>
 #include <thread>
 
 #if __WITH_DTLS__
@@ -693,6 +695,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
         QStatus status = aboutData.GetAJSoftwareVersion(&ajSoftwareVersion);
         LOG(LOG_INFO, "[%p] %s AJSoftwareVersion=%s", this, QCC_StatusText(status),
             ajSoftwareVersion ? ajSoftwareVersion : "unknown");
+        m_ajSoftwareVersion = ajSoftwareVersion;
         if (context->m_device)
         {
             context->m_device->SetInfo(objectDescription, aboutData);
@@ -1576,6 +1579,39 @@ void Bridge::RDPublish()
 void Bridge::RDPublishTask::Run(Bridge *thiz)
 {
     LOG(LOG_INFO, "[%p] thiz=%p", this, thiz);
+
+    /* Also write out current introspection data. */
+    OCPersistentStorage *ps = OCGetPersistentStorageHandler();
+    assert(ps);
+    FILE *fp = NULL;
+    size_t ret;
+    std::string s;
+    std::ostringstream os;
+    OCStackResult result = OCIntrospect(os, thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE",
+            "VERSION"); // TODO
+    if (result != OC_STACK_OK)
+    {
+        LOG(LOG_ERR, "OCIntrospect() failed - %d", result);
+        goto exit;
+    }
+    s = os.str();
+    fp = ps->open(OC_INTROSPECTION_FILE_NAME, "wb");
+    if (!fp)
+    {
+        LOG(LOG_ERR, "open failed");
+        goto exit;
+    }
+    ret = ps->write(s.c_str(), 1, s.size(), fp);
+    if (ret != s.size())
+    {
+        LOG(LOG_ERR, "write failed");
+        goto exit;
+    }
+exit:
+    if (fp)
+    {
+        ps->close(fp);
+    }
 
     ::RDPublish();
     thiz->m_rdPublishTask = NULL;

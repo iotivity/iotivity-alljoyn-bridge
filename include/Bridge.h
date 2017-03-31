@@ -137,6 +137,7 @@ class Bridge : private ajn::AboutListener
         std::list<Task*> m_tasks;
         RDPublishTask *m_rdPublishTask;
         size_t m_pending;
+        std::string m_ajSoftwareVersion;
 
         void WhoImplements();
         void Destroy(const char *id);
