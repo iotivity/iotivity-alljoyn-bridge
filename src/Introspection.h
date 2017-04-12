@@ -21,11 +21,23 @@
 #ifndef _INTROSPECTION_H
 #define _INTROSPECTION_H
 
+#include "cacommon.h"
+#include "ocpayload.h"
 #include "octypes.h"
 #include <alljoyn/BusAttachment.h>
 #include <iostream>
 
-OCStackResult OCIntrospect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+typedef enum
+{
+    NONE = 0,
+    READ = (1 << 0),
+    READWRITE = (1 << 1),
+} AccessFlags;
+
+OCStackResult Introspect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
         const char *title, const char *version);
+
+OCStackResult ParsePayload(OCPayload** outPayload, OCPayloadFormat format, OCPayloadType type,
+        const uint8_t* payload, size_t payloadSize);
 
 #endif

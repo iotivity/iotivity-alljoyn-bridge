@@ -98,18 +98,34 @@ void VirtualBusObject::Stop()
     }
 }
 
-QStatus VirtualBusObject::AddInterface(const ajn::InterfaceDescription *iface)
+QStatus VirtualBusObject::AddInterface(const char *ifaceName, bool createEmptyInterface)
 {
-    LOG(LOG_INFO, "[%p] iface=%p", this, iface);
+    LOG(LOG_INFO, "[%p] ifaceName=%s,createEmptyInterface=%d", this, ifaceName,
+            createEmptyInterface);
 
-    QStatus status = ajn::BusObject::AddInterface(*iface, ajn::BusObject::ANNOUNCED);
-    if (status == ER_OK)
+    QStatus status = ER_BUS_NO_SUCH_INTERFACE;
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (!iface && createEmptyInterface)
     {
-        m_ifaces.push_back(iface);
+        ajn::InterfaceDescription *newIface;
+        m_bus->CreateInterface(ifaceName, newIface, ajn::AJ_IFC_SECURITY_INHERIT);
+        newIface->Activate();
+        iface = m_bus->GetInterface(ifaceName);
     }
-    else
+    if (iface)
     {
-        LOG(LOG_ERR, "AddInterface - %s", QCC_StatusText(status));
+        if (std::find(m_ifaces.begin(), m_ifaces.end(), iface) == m_ifaces.end())
+        {
+            status = ajn::BusObject::AddInterface(*iface, ajn::BusObject::ANNOUNCED);
+            if (status == ER_OK)
+            {
+                m_ifaces.push_back(iface);
+            }
+            else
+            {
+                LOG(LOG_ERR, "AddInterface - %s", QCC_StatusText(status));
+            }
+        }
     }
     return status;
 }
