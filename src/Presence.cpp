@@ -87,8 +87,8 @@ void AllJoynPresence::PingCB(QStatus status, void *context)
     }
 }
 
-OCPresence::OCPresence(const OCDevAddr *devAddr, const char *di, time_t periodSecs)
-    : Presence(di), m_devAddr(*devAddr), m_periodSecs(periodSecs), m_lastTick(time(NULL))
+OCPresence::OCPresence(const char *di, time_t periodSecs)
+    : Presence(di), m_periodSecs(periodSecs), m_lastTick(time(NULL))
 {
     LOG(LOG_INFO, "[%p]", this);
 }

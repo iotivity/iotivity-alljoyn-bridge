@@ -23,7 +23,11 @@
 #include "Name.h"
 #include "Payload.h"
 #include "Signature.h"
+#include "oic_malloc.h"
+#include "oic_string.h"
+#include "ocpayload.h"
 #include "ocstack.h"
+#include "cJSON.h"
 
 static OCStackResult Info(std::ostream &os, const char *title, const char *version)
 {
@@ -87,7 +91,7 @@ static OCStackResult Schema(std::ostream &os, OCResourceHandle h)
     }
     for (uint8_t j = 0; j < nrt; ++j)
     {
-        os << (j ? ",{" : "{") << "\"$ref\":\"#definitions/" << OCGetResourceTypeName(h, j) << "\"}";
+        os << (j ? ",{" : "{") << "\"$ref\":\"#/definitions/" << OCGetResourceTypeName(h, j) << "\"}";
     }
     os << "]" /* oneOf */
        << "}";
@@ -113,6 +117,7 @@ static OCStackResult Paths(std::ostream &os)
                 !strcmp(uri, OC_RSRVD_PLATFORM_URI) ||
                 !strncmp(uri, "/oic/sec", 8))
         {
+            // TODO skip unless there are vendor specific properties
             continue;
         }
         os << (comma++ ? ",\"" : "\"") << uri << "\":{";
@@ -314,7 +319,7 @@ static void GetJsonType(std::ostream &os, const char *ajType,
             {
                 std::string def = ajType;
                 def = def.substr(1, def.size() - 2);
-                os << "\"$ref\":\"#definitions/" << def << "\"";
+                os << "\"$ref\":\"#/definitions/" << def << "\"";
             }
             break;
         default:
@@ -326,7 +331,7 @@ static void GetJsonType(std::ostream &os, const char *ajType,
 static OCStackResult Property(std::ostream &os, std::string propName, qcc::String description,
         bool readOnly, qcc::String sig, qcc::String min, qcc::String max, qcc::String def)
 {
-    os << ",\"" << propName << "\":{";
+    os << "\"" << propName << "\":{";
     if (!description.empty())
     {
         os << "\"description\":\"" << description << "\",";
@@ -367,6 +372,7 @@ static OCStackResult Properties(std::ostream &os, const char *ajSoftwareVersion,
         member->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
         member->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
         member->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
+        os << (k ? "," : "");
         OCStackResult result = Property(os, propName, member->description, readOnly, sig, min, max,
                 def);
         if (result != OC_STACK_OK)
@@ -406,7 +412,9 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
         static const char *emitsChangedValues[] = { "const", "false", "true", "invalidates", NULL };
         for (const char **emitsChanged = emitsChangedValues; *emitsChanged; ++emitsChanged)
         {
+            int fieldComma = 0;
             bool hasProps = false;
+            uint8_t access = NONE;
             std::string rt = GetResourceTypeName(ifaces[i], *emitsChanged);
             for (size_t j = 0; j < numProps; ++j)
             {
@@ -420,12 +428,7 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
                 {
                     os << (comma++ ? ",\"" : "\"") << rt << "\":{"
                        << "\"type\":\"object\","
-                       << "\"properties\":{"
-                       << "\"rt\":{"
-                       << "\"readOnly\":true,"
-                       << "\"type\":\"array\","
-                       << "\"default\":[\"" << rt << "\"]"
-                       << "}";
+                       << "\"properties\":{";
                     hasProps = true;
                 }
                 std::string propName = GetPropName(ifaces[i], props[j]->name);
@@ -443,15 +446,49 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
                 props[j]->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
                 props[j]->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
                 props[j]->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
+                os << (fieldComma++ ? "," : "");
                 result = Property(os, propName, props[j]->description,
                         (props[j]->access == ajn::PROP_ACCESS_READ), signature, min, max, def);
                 if (result != OC_STACK_OK)
                 {
                     goto exit;
                 }
+                switch (props[j]->access)
+                {
+                    case ajn::PROP_ACCESS_RW:
+                    case ajn::PROP_ACCESS_WRITE:
+                        access |= READWRITE;
+                        break;
+                    case ajn::PROP_ACCESS_READ:
+                        access |= READ;
+                        break;
+                }
             }
             if (hasProps)
             {
+                os << ",\"rt\":{"
+                   << "\"readOnly\":true,"
+                   << "\"type\":\"array\","
+                   << "\"default\":[\"" << rt << "\"]"
+                   << "}";
+                os << ",\"if\":{"
+                   << "\"readOnly\":true,"
+                   << "\"type\":\"array\","
+                   << "\"items\":{"
+                   << "\"type\":\"string\","
+                   << "\"enum\":["
+                   << "\"oic.if.baseline\"";
+                if (access & READ)
+                {
+                    os << ",\"oic.if.r\"";
+                }
+                if (access & READWRITE)
+                {
+                    os << ",\"oic.if.rw\"";
+                }
+                os << "]" /* enum */
+                   << "}" /* items */
+                   << "}"; /* if */
                 os << "}" /* properties */
                    << "}";
             }
@@ -467,11 +504,6 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
             os << (comma++ ? ",\"" : "\"") << rt << "\":{"
                << "\"type\":\"object\","
                << "\"properties\":{";
-            os << "\"rt\":{"
-               << "\"readOnly\":true,"
-               << "\"type\":\"array\","
-               << "\"default\":[\"" << rt << "\"]"
-               << "},";
             std::string propName = GetPropName(members[j], "validity");
             os << "\"" << propName << "\":{";
             if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
@@ -479,7 +511,7 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
                 os << "\"readOnly\":true,";
             }
             os << "\"type\":\"boolean\""
-               << "}";
+               << "},";
             size_t argN = 0;
             result = Properties(os, ajSoftwareVersion, members[j], members[j]->signature.c_str(),
                     argN, (members[j]->memberType == ajn::MESSAGE_SIGNAL));
@@ -487,12 +519,38 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
             {
                 goto exit;
             }
+            os << (members[j]->signature.empty() ? "" : ",");
             result = Properties(os, ajSoftwareVersion, members[j],
                     members[j]->returnSignature.c_str(), argN, true);
             if (result != OC_STACK_OK)
             {
                 goto exit;
             }
+            os << (members[j]->returnSignature.empty() ? "" : ",");
+            os << "\"rt\":{"
+               << "\"readOnly\":true,"
+               << "\"type\":\"array\","
+               << "\"default\":[\"" << rt << "\"]"
+               << "},";
+            os << "\"if\":{"
+               << "\"readOnly\":true,"
+               << "\"type\":\"array\","
+               << "\"items\":{"
+               << "\"type\":\"string\","
+               << "\"enum\":["
+               << "\"oic.if.baseline\"";
+            if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
+            {
+                os << ",\"oic.if.r\"";
+            }
+            else
+            {
+                os << ",\"oic.if.rw\"";
+            }
+            os << "]" /* enum */
+               << "}" /* items */
+               << "}"; /* if */
+
             os << "}" /* properties */
                << "}";
         }
@@ -575,12 +633,14 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
                 if (names[j].find("org.alljoyn.Bus.Enum.") == 0)
                 {
                     size_t pos = sizeof("org.alljoyn.Bus.Enum.") - 1;
-                    size_t dot = names[j].find(".", pos);
+                    size_t dot = names[j].find_first_of('.', pos);
                     if (dot == qcc::String::npos)
                     {
                         continue;
                     }
                     qcc::String enumName = names[j].substr(pos, dot - pos);
+                    dot = names[j].find_last_of_std('.');
+                    qcc::String enumValue = names[j].substr(dot + 1);
                     if (enumName != lastName)
                     {
                         if (!lastName.empty())
@@ -589,12 +649,14 @@ static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
                                << "}";
                         }
                         os << (comma++ ? ",\"" : "\"") << enumName << "\":{"
-                           << "\"type\":\"integer\","
-                           << "\"enum\":[";
+                           << "\"oneOf\":[";
                         lastName = enumName;
                         fieldComma = 0;
                     }
-                    os << (fieldComma++ ? "," : "") << values[j];
+                    os << (fieldComma++ ? "," : "") << "{"
+                       << "\"enum\":[" << values[j] << "],"
+                       << "\"title\":\"" << enumValue << "\""
+                       << "}";
                 }
             }
             if (!lastName.empty())
@@ -618,7 +680,7 @@ exit:
     return result;
 }
 
-OCStackResult OCIntrospect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+OCStackResult Introspect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
         const char *title, const char *version)
 {
     os << "{\"swagger\":\"2.0\",";
@@ -641,4 +703,238 @@ OCStackResult OCIntrospect(std::ostream &os, ajn::BusAttachment *bus, const char
     }
     os << "}";
     return OC_STACK_OK;
+}
+
+/* Only single-dimension homogenous arrays are supported for now */
+static int JsonArrayType(cJSON *json, size_t dim[MAX_REP_ARRAY_DEPTH])
+{
+    dim[0] = 0;
+    cJSON *element = json->child;
+    if (!element)
+    {
+        return cJSON_NULL;
+    }
+    int type = element->type;
+    while (element)
+    {
+        if (element->type != type)
+        {
+            return 0;
+        }
+        ++dim[0];
+        element = element->next;
+    }
+    return type;
+}
+
+static OCStackResult ParseJsonItem(OCRepPayload *outPayload, cJSON *json)
+{
+    bool success = true;
+    while (success && json)
+    {
+        switch (json->type)
+        {
+            case cJSON_False:
+                success = OCRepPayloadSetPropBool(outPayload, json->string, false);
+                break;
+            case cJSON_True:
+                success = OCRepPayloadSetPropBool(outPayload, json->string, true);
+                break;
+            case cJSON_NULL:
+                success = false;
+                break;
+            case cJSON_Number:
+                success = OCRepPayloadSetPropDouble(outPayload, json->string, json->valuedouble);
+                break;
+            case cJSON_String:
+                success = OCRepPayloadSetPropString(outPayload, json->string, json->valuestring);
+                break;
+            case cJSON_Array:
+                {
+                    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
+                    int type = JsonArrayType(json, dim);
+                    size_t dimTotal = calcDimTotal(dim);
+                    switch (type)
+                    {
+                        case cJSON_Number:
+                            {
+                                double *array = (double *) OICCalloc(dimTotal, sizeof(double));
+                                if (!array)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                cJSON *element = json->child;
+                                for (size_t i = 0; i < dimTotal; ++i)
+                                {
+                                    array[i] = element->valuedouble;
+                                    element = element->next;
+                                }
+                                success = OCRepPayloadSetDoubleArrayAsOwner(outPayload,
+                                        json->string, array, dim);
+                                if (!success)
+                                {
+                                    OICFree(array);
+                                }
+                            }
+                            break;
+                        case cJSON_String:
+                            {
+                                char **array = (char **) OICCalloc(dimTotal, sizeof(char*));
+                                if (!array)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                cJSON *element = json->child;
+                                for (size_t i = 0; i < dimTotal; ++i)
+                                {
+                                    array[i] = OICStrdup(element->valuestring);
+                                    if (!array[i])
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    element = element->next;
+                                }
+                                if (success)
+                                {
+                                    success = OCRepPayloadSetStringArrayAsOwner(outPayload,
+                                            json->string, array, dim);
+                                }
+                                if (!success)
+                                {
+                                    for (size_t i = 0; i < dimTotal; ++i)
+                                    {
+                                        OICFree(array[i]);
+                                    }
+                                    OICFree(array);
+                                }
+                            }
+                            break;
+                        case cJSON_Object:
+                            {
+                                OCRepPayload **array = (OCRepPayload **) OICCalloc(dimTotal,
+                                        sizeof(OCRepPayload*));
+                                if (!array)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                cJSON *element = json->child;
+                                for (size_t i = 0; i < dimTotal; ++i)
+                                {
+                                    array[i] = OCRepPayloadCreate();
+                                    if (!array[i])
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    OCStackResult result = ParseJsonItem(array[i], element->child);
+                                    if (result != OC_STACK_OK)
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    element = element->next;
+                                }
+                                if (success)
+                                {
+                                    success = OCRepPayloadSetPropObjectArrayAsOwner(outPayload,
+                                            json->string, array, dim);
+                                }
+                                if (!success)
+                                {
+                                    for (size_t i = 0; i < dimTotal; ++i)
+                                    {
+                                        OCRepPayloadDestroy(array[i]);
+                                    }
+                                    OICFree(array);
+                                }
+                            }
+                            break;
+                        default:
+                            /* Only number, string, and object arrays are supported for now */
+                            assert(0);
+                            success = false;
+                            break;
+                    }
+                }
+                break;
+            case cJSON_Object:
+                {
+                    OCRepPayload *objPayload = OCRepPayloadCreate();
+                    if (!objPayload)
+                    {
+                        success = false;
+                        break;
+                    }
+                    cJSON *obj = json->child;
+                    OCStackResult result = ParseJsonItem(objPayload, obj);
+                    if (result != OC_STACK_OK)
+                    {
+                        success = false;
+                        break;
+                    }
+                    success = OCRepPayloadSetPropObjectAsOwner(outPayload, json->string, objPayload);
+                }
+                break;
+        }
+        json = json->next;
+    }
+    return success ? OC_STACK_OK : OC_STACK_ERROR;
+}
+
+static OCStackResult ParseJsonPayload(OCPayload** outPayload, const char* payload)
+{
+    OCStackResult result = OC_STACK_INVALID_PARAM;
+    cJSON *json;
+
+    *outPayload = NULL;
+    json = cJSON_Parse(payload);
+    if (!json)
+    {
+        goto exit;
+    }
+    if (json->type != cJSON_Object)
+    {
+        goto exit;
+    }
+    *outPayload = (OCPayload *) OCRepPayloadCreate();
+    if (!*outPayload)
+    {
+        goto exit;
+    }
+    result = ParseJsonItem((OCRepPayload *) *outPayload, json->child);
+exit:
+    if (json)
+    {
+        cJSON_Delete(json);
+    }
+    if (result != OC_STACK_OK)
+    {
+        OCRepPayloadDestroy((OCRepPayload *) *outPayload);
+        *outPayload = NULL;
+    }
+    return result;
+}
+
+OCStackResult ParsePayload(OCPayload** outPayload, OCPayloadFormat format, OCPayloadType type,
+        const uint8_t* payload, size_t payloadSize)
+{
+    (void) type;
+    (void) payloadSize;
+    OCStackResult result;
+
+    switch (format)
+    {
+        case OC_FORMAT_JSON:
+            result = ParseJsonPayload(outPayload, (const char *) payload);
+            break;
+        default:
+            result = OC_STACK_INVALID_PARAM;
+            break;
+    }
+
+    return result;
 }
