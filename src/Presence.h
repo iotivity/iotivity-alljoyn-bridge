@@ -66,7 +66,7 @@ class AllJoynPresence : public Presence
 class OCPresence : public Presence
 {
     public:
-        OCPresence(const OCDevAddr *devAddr, const char *di, time_t periodSecs);
+        OCPresence(const char *di, time_t periodSecs);
         virtual ~OCPresence();
 
         virtual bool IsPresent();
@@ -75,7 +75,6 @@ class OCPresence : public Presence
     private:
         static const uint8_t RETRIES = 3;
 
-        OCDevAddr m_devAddr;
         const time_t m_periodSecs;
         std::mutex m_mutex;
         time_t m_lastTick;

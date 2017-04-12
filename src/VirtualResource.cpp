@@ -21,6 +21,7 @@
 #include "VirtualResource.h"
 
 #include "Bridge.h"
+#include "Introspection.h"
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
@@ -32,13 +33,6 @@
 #include "oic_malloc.h"
 #include <algorithm>
 #include <assert.h>
-
-enum
-{
-    NONE = 0,
-    READ = (1 << 0),
-    READWRITE = (1 << 1),
-};
 
 VirtualResource *VirtualResource::Create(Bridge *bridge, ajn::BusAttachment *bus,
         const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
@@ -143,7 +137,7 @@ OCStackResult VirtualResource::CreateResources()
     {
         resourceProps |= OC_SECURE;
     }
-    uint8_t access = 0;
+    uint8_t access = NONE;
     size_t numIfaces = GetInterfaces(NULL, 0);
     const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
     GetInterfaces(ifaces, numIfaces);

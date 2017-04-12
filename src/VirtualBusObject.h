@@ -35,7 +35,7 @@ class VirtualBusObject : public ajn::BusObject
         VirtualBusObject(ajn::BusAttachment *bus, const char *uri,
                 const std::vector<OCDevAddr> &devAddrs);
         virtual ~VirtualBusObject();
-        QStatus AddInterface(const ajn::InterfaceDescription *iface);
+        QStatus AddInterface(const char *ifaceName, bool createEmptyInterface = false);
         virtual void Observe();
         virtual void CancelObserve();
         virtual void Stop();

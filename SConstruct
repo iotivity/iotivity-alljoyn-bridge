@@ -108,6 +108,9 @@ elif env['TARGET_OS'] == 'windows':
     env.AppendUnique(CCFLAGS=['/WX', '/EHsc'])
     env.AppendUnique(LIBS = ['bcrypt', 'crypt32', 'ws2_32', 'iphlpapi', 'shell32', 'ole32'])
 
+    # Macro needed for Windows builds to avoid __declspec(dllexport) and __declspec(dllimport) for cJSON APIs.
+    env.AppendUnique(CPPDEFINES = ['CJSON_HIDE_SYMBOLS'])
+
 if env['SECURED'] == '1':
     env.AppendUnique(CPPDEFINES = ['__WITH_DTLS__=1'])
     env.AppendUnique(LIBS = ['mbedtls', 'mbedx509', 'mbedcrypto'])
