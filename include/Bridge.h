@@ -96,12 +96,10 @@ class Bridge : private ajn::AboutListener
         struct DiscoverTask : public Task {
             std::string m_piid;
             OCRepPayload *m_payload;
-            OCDevAddr m_devAddr;
             DiscoverContext *m_context;
             DiscoverTask(time_t tick, const char *piid, OCRepPayload *payload,
-                    OCDevAddr *devAddr, DiscoverContext *context) : Task(tick), m_piid(piid),
-                    m_payload(OCRepPayloadClone(payload)), m_devAddr(*devAddr),
-                    m_context(context) { }
+                    DiscoverContext *context) : Task(tick), m_piid(piid),
+                    m_payload(OCRepPayloadClone(payload)), m_context(context) { }
             virtual ~DiscoverTask() { OCRepPayloadDestroy(m_payload); }
             virtual void Run(Bridge *thiz);
         };
@@ -165,13 +163,35 @@ class Bridge : private ajn::AboutListener
                 OCClientResponse *response);
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
-        OCStackResult CreateInterface(DiscoverContext *context, OCClientResponse *response);
+        static OCStackApplicationResult GetIntrospectionCB(void *ctx, OCDoHandle handle,
+                OCClientResponse *response);
+        static OCStackApplicationResult GetIntrospectionDataCB(void *ctx, OCDoHandle handle,
+                OCClientResponse *response);
+        OCStackResult CreateInterface(DiscoverContext *context, OCRepPayload *payload);
         OCStackApplicationResult Get(void *ctx, OCDoHandle handle, OCClientResponse *response);
 
         SeenState GetSeenState(const char *piid);
         void DestroyPiid(const char *piid);
         static void SecureConnection(Bridge *thiz, const char *name, void *ctx);
         void SecureConnectionCB(QStatus status, void *ctx);
+
+        bool IsSelf(const OCDiscoveryPayload *payload);
+        bool HasSeenBefore(const OCDiscoveryPayload *payload);
+        bool IsSecure(const OCResourcePayload *resource);
+        bool HasTranslatableResource(OCDiscoveryPayload *payload);
+        void UpdatePresenceStatus(const OCDiscoveryPayload *payload);
+        void GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *response,
+                DiscoverContext **context, OCRepPayload **payload);
+        void ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload);
+        OCStackResult ContinueDiscovery(DiscoverContext *context, const char *uri,
+                const std::vector<OCDevAddr> &addrs, OCClientResponseHandler cb);
+        OCStackResult ContinueDiscovery(DiscoverContext *context, const char *uri, OCDevAddr *addr,
+                OCClientResponseHandler cb);
+
+        OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+                OCDevAddr *addr, OCClientResponseHandler cb);
+        OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+                const std::vector<OCDevAddr> &addrs, OCClientResponseHandler cb);
 };
 
 bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData);

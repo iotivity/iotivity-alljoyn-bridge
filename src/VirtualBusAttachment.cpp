@@ -213,7 +213,7 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
             {
                 const char *fieldName = value->name + 2; /* Skip the leading x. */
                 char fieldSig[] = "aaaa{sv}";
-                CreateSignature(fieldSig, value);
+                CreateSignature(fieldSig, value); // TODO get this from introspection data when available
                 ajn::MsgArg fieldValue;
                 ToAJMsgArg(&fieldValue, fieldSig, value);
                 m_aboutData.SetNewFieldDetails(fieldName, 0, fieldSig);
@@ -278,56 +278,12 @@ void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
     }
 }
 
-const ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char *ifaceName,
-        bool emitsChanged, OCPayload *payload)
+ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char* ifaceName)
 {
-    LOG(LOG_INFO, "[%p] ifaceName=%s,payload=%p",
-        this, ifaceName, payload);
+    LOG(LOG_INFO, "[%p] ifaceName=%s", this, ifaceName);
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    ajn::InterfaceDescription *iface;
-    QStatus status = ajn::BusAttachment::CreateInterface(ifaceName, iface,
-                     ajn::AJ_IFC_SECURITY_INHERIT);
-    if (status == ER_BUS_IFACE_ALREADY_EXISTS)
-    {
-        return ajn::BusAttachment::GetInterface(ifaceName);
-    }
-    else if (status != ER_OK)
-    {
-        LOG(LOG_ERR, "CreateInterface - %s", QCC_StatusText(status));
-        return NULL;
-    }
-    if (strstr(ifaceName, "oic.d.") == ifaceName)
-    {
-        /* Device types are translated as empty interfaces */
-        goto exit;
-    }
-    if (payload->type != PAYLOAD_TYPE_REPRESENTATION)
-    {
-        LOG(LOG_INFO, "Ignoring non-representation payload");
-        return NULL;
-    }
-    for (OCRepPayloadValue *value = ((OCRepPayload *) payload)->values; value; value = value->next)
-    {
-        char sig[] = "aaaa{sv}";
-        CreateSignature(sig, value);
-        status = iface->AddProperty(value->name, sig, ajn::PROP_ACCESS_RW);
-        if (status != ER_OK)
-        {
-            LOG(LOG_ERR, "AddProperty - %s", QCC_StatusText(status));
-            return NULL;
-        }
-        status = iface->AddPropertyAnnotation(value->name,
-                                              ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
-                                              emitsChanged ? "true" : "false");
-        if (status != ER_OK)
-        {
-            LOG(LOG_ERR, "AddPropertyAnnotation - %s", QCC_StatusText(status));
-            return NULL;
-        }
-    }
-exit:
-    iface->Activate();
+    ajn::InterfaceDescription *iface = NULL;
+    ajn::BusAttachment::CreateInterface(ifaceName, iface, ajn::AJ_IFC_SECURITY_INHERIT);
     return iface;
 }
 
