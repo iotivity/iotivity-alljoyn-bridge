@@ -84,7 +84,27 @@ static OCStackApplicationResult DiscoverResourceDirectoryCB(void *ctx, OCDoHandl
     if (sRD && !strcmp(payload->sid, sRD))
     {
         std::ostringstream oss;
-        oss << response->devAddr.addr << ":" << response->devAddr.port;
+        if (response->devAddr.flags & OC_IP_USE_V6)
+        {
+            oss << "[";
+            for (size_t i = 0; response->devAddr.addr[i]; ++i)
+            {
+                if (response->devAddr.addr[i] != '%')
+                {
+                    oss << response->devAddr.addr[i];
+                }
+                else
+                {
+                    oss << "%25";
+                }
+            }
+            oss << "]";
+        }
+        else
+        {
+            oss << response->devAddr.addr;
+        }
+        oss << ":" << response->devAddr.port;
         gRD = oss.str();
         return OC_STACK_DELETE_TRANSACTION;
     }
