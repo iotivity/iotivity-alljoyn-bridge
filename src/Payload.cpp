@@ -1424,7 +1424,14 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
             success = false;
             break;
         case ajn::ALLJOYN_VARIANT:
-            success = ToAJMsgArg(arg, "av", arr, ai, di);
+            {
+                arg->typeId = ajn::ALLJOYN_VARIANT;
+                arg->v_variant.val = new ajn::MsgArg();
+                arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
+                char variantSig[] = "aaaa{sv}";
+                CreateSignature(variantSig, arr);
+                success = ToAJMsgArg(arg->v_variant.val, variantSig, arr, ai, di);
+            }
             break;
         case ajn::ALLJOYN_DICT_ENTRY_OPEN:
             success = false; /* Loss of information */
