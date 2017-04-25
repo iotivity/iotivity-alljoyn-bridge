@@ -445,7 +445,6 @@ struct VirtualResource::SetContext
     }
 };
 
-
 struct VirtualResource::GetAllBaselineContext
 {
     std::string m_ajSoftwareVersion;

@@ -151,7 +151,8 @@ env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
 
 # libraries
 env['LIBPATH'] = ['${ALLJOYN_DIST}/cpp/lib',
-                  '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
+                  '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}',
+                  '${IOTIVITY_BASE}/extlibs/cjson']
 if env['TARGET_OS'] == 'windows':
     env.AppendUnique(LIBPATH = '${IOTIVITY_BASE}/extlibs/sqlite3')
 

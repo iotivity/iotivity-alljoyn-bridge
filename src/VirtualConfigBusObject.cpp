@@ -62,7 +62,7 @@ VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus,
 {
     LOG(LOG_INFO, "[%p] bus=%p", this, bus);
     QStatus status;
-    OC_UNUSED(status);
+    (void)(status); /* Unused in release build */
     status = bus->CreateInterfacesFromXml(ifaceXml);
     assert(status == ER_OK);
     m_iface = bus->GetInterface("org.alljoyn.Config");
