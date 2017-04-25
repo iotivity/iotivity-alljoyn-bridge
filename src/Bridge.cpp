@@ -1504,6 +1504,7 @@ static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj)
 {
     OCRepPayload *property = NULL;
     OCRepPayload *child = NULL;
+    OCRepPayload *array = NULL;
     bool success;
 
     if (!obj)
@@ -1561,23 +1562,23 @@ static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj)
                 break;
             case OCREP_PROP_ARRAY:
                 success = true;
-                parent = property;
+                array = property;
                 for (size_t i = 0; success && (i < MAX_REP_ARRAY_DEPTH) && value->arr.dimensions[i];
                      ++i)
                 {
                     child = OCRepPayloadCreate();
                     success = child &&
-                            OCRepPayloadSetPropObjectAsOwner(parent, "items", child) &&
-                            OCRepPayloadSetPropString(parent, "type", "array");
+                            OCRepPayloadSetPropObjectAsOwner(array, "items", child) &&
+                            OCRepPayloadSetPropString(array, "type", "array");
                     if (success)
                     {
-                        parent = child;
+                        array = child;
                         child = NULL;
                     }
                 }
                 if (success)
                 {
-                    success = SetPropertiesSchema(parent, value->arr.type, value->arr.objArray[0]);
+                    success = SetPropertiesSchema(array, value->arr.type, value->arr.objArray[0]);
                 }
                 break;
         }
