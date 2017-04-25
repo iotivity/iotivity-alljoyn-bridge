@@ -269,19 +269,10 @@ static OCStackApplicationResult GetCB(void *, OCDoHandle,
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-static OCStackApplicationResult PostCB(void *context, OCDoHandle,
+static OCStackApplicationResult PostCB(void *, OCDoHandle,
         OCClientResponse *response)
 {
-    uint16_t format = (uint16_t)(uintptr_t)context;
-    switch (format)
-    {
-        case COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR:
-            LogResponse(OC_REST_POST, response, OC_FORMAT_VND_OCF_CBOR);
-            break;
-        case COAP_MEDIATYPE_APPLICATION_CBOR:
-            LogResponse(OC_REST_POST, response, OC_FORMAT_CBOR);
-            break;
-    }
+    LogResponse(OC_REST_POST, response, OC_FORMAT_CBOR);
     return OC_STACK_DELETE_TRANSACTION;
 }
 

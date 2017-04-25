@@ -165,3 +165,33 @@ bool TranslateInterface(const char *ifaceName)
              strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
              strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
 }
+
+bool IsValidErrorName(const char *np, const char **endp)
+{
+    size_t numElements = 0;
+    bool isStartOfElement = true;
+    for (*endp = np; *endp; ++*endp)
+    {
+        if (isStartOfElement)
+        {
+            if (!isalpha(**endp) && (**endp != '_'))
+            {
+                return false;
+            }
+            isStartOfElement = false;
+        }
+        else
+        {
+            if (**endp == '.')
+            {
+                ++numElements;
+                isStartOfElement = true;
+            }
+            else if (!isalnum(**endp) && (**endp != '_'))
+            {
+                break;
+            }
+        }
+    }
+    return (numElements > 0);
+}

@@ -72,6 +72,7 @@ class VirtualResource : public ajn::ProxyBusObject
         void GetAllBaselineCB(ajn::Message &msg, void *ctx);
         virtual void AddMatchCB(QStatus status, void *ctx);
         virtual void RemoveMatchCB(QStatus status, void *ctx);
+        OCDiagnosticPayload *CreatePayload(ajn::Message &msg, OCEntityHandlerResult *ehResult);
         OCRepPayload *CreatePayload();
         OCStackResult SetMemberPayload(OCRepPayload *payload, const char *ifaceName,
                 const char *memberName);

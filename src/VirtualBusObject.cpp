@@ -20,6 +20,7 @@
 
 #include "VirtualBusObject.h"
 
+#include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
 #include <alljoyn/BusAttachment.h>
@@ -342,7 +343,74 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
             handle, response, response ? response->payload : 0, response ? response->result : 0);
 
     std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
-    if (!response || response->result > OC_STACK_RESOURCE_CHANGED || !response->payload)
+    if (response && (response->result > OC_STACK_RESOURCE_CHANGED))
+    {
+        QStatus status;
+        const char *description;
+        OCDiagnosticPayload *payload = (OCDiagnosticPayload *) response->payload;
+        if (payload && (response->payload->type == PAYLOAD_TYPE_DIAGNOSTIC) &&
+                IsValidErrorName(payload->message, &description) && (*description == ':'))
+        {
+            std::string name(payload->message, description - payload->message);
+            ++description;
+            while (isblank(*description))
+            {
+                ++description;
+            }
+            status = context->m_obj->MethodReply(context->m_msg, name.c_str(), description);
+        }
+        else
+        {
+            int code = 0;
+            switch (response->result)
+            {
+                case OC_STACK_INVALID_QUERY:
+                    code = 400;
+                    break;
+                case OC_STACK_UNAUTHORIZED_REQ:
+                    code = 401;
+                    break;
+                case OC_STACK_INVALID_OPTION:
+                    code = 402;
+                    break;
+                case OC_STACK_FORBIDDEN_REQ:
+                    code = 403;
+                    break;
+                case OC_STACK_NO_RESOURCE:
+                    code = 404;
+                    break;
+                case OC_STACK_TOO_LARGE_REQ:
+                    code = 413;
+                    break;
+                case OC_STACK_INTERNAL_SERVER_ERROR:
+                    code = 500;
+                    break;
+                case OC_STACK_COMM_ERROR:
+                    code = 504;
+                    break;
+                case OC_STACK_GATEWAY_TIMEOUT:
+                    code = 504;
+                    break;
+                default:
+                    break;
+            }
+            if (code)
+            {
+                std::string name("org.openconnectivity.Error.");
+                name = name + std::to_string(code);
+                status = context->m_obj->MethodReply(context->m_msg, name.c_str());
+            }
+            else
+            {
+                status = context->m_obj->MethodReply(context->m_msg, ER_FAIL);
+            }
+        }
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+        }
+    }
+    else if (!response || !response->payload)
     {
         QStatus status = context->m_obj->MethodReply(context->m_msg, ER_FAIL);
         if (status != ER_OK)

@@ -472,6 +472,33 @@ struct VirtualResource::GetAllBaselineContext
     }
 };
 
+OCDiagnosticPayload *VirtualResource::CreatePayload(ajn::Message &msg,
+        OCEntityHandlerResult *ehResult)
+{
+    *ehResult = OC_EH_ERROR;
+    OCDiagnosticPayload *payload = NULL;
+    qcc::String description;
+    const char *name = msg->GetErrorName(&description);
+    if (name)
+    {
+        static const std::string ErrorPrefix = "org.openconnectivity.Error.";
+        std::string message = name;
+        if (message.compare(0, ErrorPrefix.size(), ErrorPrefix) == 0)
+        {
+            message = message.substr(ErrorPrefix.size());
+            char *endptr = NULL;
+            unsigned long code = strtoul(message.c_str(), &endptr, 10);
+            if (*endptr == '\0')
+            {
+                *ehResult = (OCEntityHandlerResult) code;
+            }
+        }
+        message = message + ": " + description;
+        payload = OCDiagnosticPayloadCreate(message.c_str());
+    }
+    return payload;
+}
+
 OCRepPayload *VirtualResource::CreatePayload()
 {
     OCRepPayload *payload = OCRepPayloadCreate();
@@ -734,12 +761,15 @@ handleRequest:
                     }
                     qcc::String propName = GetPropName(member, "validity");
                     OCRepPayload *payload = (OCRepPayload *) request->payload;
-                    for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+                    if (payload)
                     {
-                        if (propName == value->name && (value->type != OCREP_PROP_BOOL || !value->b))
+                        for (OCRepPayloadValue *value = payload->values; value; value = value->next)
                         {
-                            success = false;
-                            break;
+                            if (propName == value->name && (value->type != OCREP_PROP_BOOL || !value->b))
+                            {
+                                success = false;
+                                break;
+                            }
                         }
                     }
                     const char *signature = member->signature.c_str();
@@ -756,7 +786,7 @@ handleRequest:
                             member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                         }
                         qcc::String propName = GetPropName(member, argName);
-                        OCRepPayload *payload = (OCRepPayload *) request->payload;
+                        assert(payload);
                         for (OCRepPayloadValue *value = payload->values; value; value = value->next)
                         {
                             if (propName == value->name)
@@ -807,19 +837,20 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
     std::lock_guard<std::mutex> lock(m_mutex);
     MethodCallContext *context = reinterpret_cast<MethodCallContext *>(ctx);
     OCStackResult result = OC_STACK_ERROR;
-    OCRepPayload *payload = NULL;
+    OCPayload *payload = NULL;
     switch (msg->GetType())
     {
         case ajn::MESSAGE_METHOD_RET:
-            payload = CreatePayload();
+            payload = (OCPayload*) CreatePayload();
             bool success;
             if (!strcmp(context->m_member->iface->GetName(),
                         ajn::org::freedesktop::DBus::Properties::InterfaceName) &&
                 !strcmp(context->m_member->name.c_str(), "GetAll"))
             {
-                const ajn::InterfaceDescription *iface = m_bus->GetInterface(::GetInterface(context->m_rt).c_str());
+                const ajn::InterfaceDescription *iface =
+                        m_bus->GetInterface(::GetInterface(context->m_rt).c_str());
                 assert(iface);
-                success = ToFilteredOCPayload(payload,
+                success = ToFilteredOCPayload((OCRepPayload *) payload,
                                               m_ajSoftwareVersion, iface,
                                               GetMember(context->m_rt).c_str(), context->m_access,
                                               msg->GetArg(0));
@@ -831,7 +862,7 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                 const ajn::MsgArg *outArgs;
                 msg->GetArgs(numOutArgs, outArgs);
                 std::string propName = GetPropName(context->m_member, "validity");
-                OCRepPayloadSetPropBool(payload, propName.c_str(), true);
+                OCRepPayloadSetPropBool((OCRepPayload *) payload, propName.c_str(), true);
                 const char *argNames = context->m_member->argNames.c_str();
                 for (size_t i = 0; i < numInArgs; ++i)
                 {
@@ -848,10 +879,12 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                     std::string argName = NextArgName(argNames, numInArgs + i);
                     if (context->m_ajSoftwareVersion >= "v16.10.00")
                     {
-                        context->m_member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
+                        context->m_member->GetArgAnnotation(argName.c_str(),
+                                "org.alljoyn.Bus.Type.Name", sig);
                     }
                     propName = GetPropName(context->m_member, argName);
-                    success = ToOCPayload(payload, propName.c_str(), &outArgs[i], sig.c_str());
+                    success = ToOCPayload((OCRepPayload *) payload, propName.c_str(), &outArgs[i],
+                            sig.c_str());
                 }
             }
             if (success)
@@ -861,23 +894,23 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
             else
             {
                 context->m_response->ehResult = OC_EH_ERROR;
-                OCRepPayloadDestroy(payload);
+                OCPayloadDestroy(payload);
                 payload = NULL;
             }
             break;
         case ajn::MESSAGE_ERROR:
-            context->m_response->ehResult = OC_EH_ERROR;
+            payload = (OCPayload*) CreatePayload(msg, &context->m_response->ehResult);
             break;
         default:
             assert(0);
             break;
     }
-    context->m_response->payload = reinterpret_cast<OCPayload *>(payload);
+    context->m_response->payload = payload;
     result = DoResponse(context->m_response);
     if (result != OC_STACK_OK)
     {
         LOG(LOG_ERR, "DoResponse - %d", result);
-        OCRepPayloadDestroy(payload);
+        OCPayloadDestroy(payload);
     }
     delete context;
 }
@@ -948,16 +981,11 @@ void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
                 /* FALLTHROUGH */
             }
         case ajn::MESSAGE_ERROR:
-            {
-                qcc::String errorMsg;
-                const char *errorName = msg->GetErrorName(&errorMsg);
-                LOG(LOG_INFO, "[%p] SetCB %s %s", this, errorName, errorMsg.c_str());
-                context->m_response->ehResult = OC_EH_ERROR;
-                context->m_response->payload = reinterpret_cast<OCPayload *>(payload);
-                result = DoResponse(context->m_response);
-                delete context;
-                break;
-            }
+            context->m_response->payload = (OCPayload *) CreatePayload(msg,
+                    &context->m_response->ehResult);
+            result = DoResponse(context->m_response);
+            delete context;
+            break;
         default:
             assert(0);
             break;
@@ -1303,7 +1331,8 @@ void VirtualResource::GetAllBaselineCB(ajn::Message &msg, void *ctx)
                 break;
             }
         case ajn::MESSAGE_ERROR:
-            context->m_response->ehResult = OC_EH_ERROR;
+            context->m_response->payload = (OCPayload *) CreatePayload(msg,
+                    &context->m_response->ehResult);
             break;
         default:
             assert(0);

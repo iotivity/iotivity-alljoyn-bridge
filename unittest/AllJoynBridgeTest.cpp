@@ -56,3 +56,26 @@ TEST(NameTranslationTest, BoundsCheck)
     EXPECT_STREQ("example.foo__", ToAJName("x.example.foo--").c_str());
     EXPECT_STREQ("example.foo__", ToAJName("x.example.foo---").c_str());
 }
+
+TEST(IsValidErrorNameTest, Check)
+{
+    const char *endp;
+
+    EXPECT_TRUE(IsValidErrorName("a.b", &endp) && (*endp == '\0'));
+    EXPECT_TRUE(IsValidErrorName("A.b", &endp) && (*endp == '\0'));
+    EXPECT_TRUE(IsValidErrorName("_.b", &endp) && (*endp == '\0'));
+    EXPECT_FALSE(IsValidErrorName("0.b", &endp));
+
+    EXPECT_TRUE(IsValidErrorName("aa.bb", &endp) && (*endp == '\0'));
+    EXPECT_TRUE(IsValidErrorName("aA.bB", &endp) && (*endp == '\0'));
+    EXPECT_TRUE(IsValidErrorName("a_.b_", &endp) && (*endp == '\0'));
+    EXPECT_TRUE(IsValidErrorName("a0.b0", &endp) && (*endp == '\0'));
+
+    EXPECT_FALSE(IsValidErrorName("", &endp));
+    EXPECT_FALSE(IsValidErrorName(".", &endp));
+    EXPECT_FALSE(IsValidErrorName("a.", &endp));
+    EXPECT_FALSE(IsValidErrorName("a..b", &endp));
+
+    EXPECT_TRUE(IsValidErrorName("a.b ", &endp) && (*endp == ' '));
+    EXPECT_TRUE(IsValidErrorName("a.b:", &endp) && (*endp == ':'));
+}
