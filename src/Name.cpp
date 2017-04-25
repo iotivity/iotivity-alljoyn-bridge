@@ -25,8 +25,11 @@
 std::string ToOCName(std::string ajName)
 {
     std::ostringstream rt;
-    rt << 'x';
-    rt << '.';
+    if (ajName.find("oic.d") != 0)
+    {
+        rt << 'x';
+        rt << '.';
+    }
     const char *in = ajName.c_str();
     while (*in)
     {
