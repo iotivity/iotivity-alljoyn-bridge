@@ -62,6 +62,10 @@ static bool TranslateResourceType(const char *type)
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH) == 0 ||
              strcmp(type, OC_RSRVD_RESOURCE_TYPE_RES) == 0 ||
              strcmp(type, "oic.d.bridge") == 0 ||
+             strcmp(type, "oic.r.acl") == 0 ||
+             strcmp(type, "oic.r.acl2") == 0 ||
+             strcmp(type, "oic.r.amacl") == 0 ||
+             strcmp(type, "oic.r.cred") == 0 ||
              strcmp(type, "oic.r.doxm") == 0 ||
              strcmp(type, "oic.r.pstat") == 0 ||
              strcmp(type, "oic.r.securemode") == 0);
@@ -117,6 +121,7 @@ struct Resource
     std::vector<std::string> m_rts;
     bool m_isObservable;
     std::vector<OCDevAddr> m_addrs;
+    std::vector<Resource> m_resources;
     Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource)
         : m_uri(resource->uri), m_isObservable(resource->bitmap & OC_OBSERVABLE)
     {
@@ -198,6 +203,7 @@ struct Bridge::DiscoverContext
     VirtualBusAttachment *m_bus;
     OCRepPayload *m_paths;
     OCRepPayload *m_definitions;
+    std::vector<Resource>::iterator m_rit;
     DiscoverContext(Bridge *bridge, OCDevAddr origin, OCDiscoveryPayload *payload)
         : m_bridge(bridge), m_device(origin, payload), m_bus(NULL), m_paths(NULL),
           m_definitions(NULL) { }
@@ -213,6 +219,7 @@ struct Bridge::DiscoverContext
         return std::vector<OCDevAddr>();
     }
 
+    /* Each iteration returns a translatable resource and resource type pair. */
     struct Iterator
     {
         DiscoverContext *m_context;
@@ -1311,7 +1318,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
-    Resource *resource;
+    OCStackResult result = OC_STACK_OK;
     DiscoverContext *context;
     OCRepPayload *payload;
     thiz->GetContextAndRepPayload(handle, response, &context, &payload);
@@ -1320,27 +1327,23 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
         goto exit;
     }
     context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    resource = context->m_device.GetResourceType(OC_RSRVD_RESOURCE_TYPE_INTROSPECTION);
-    OCStackResult result;
-    if (resource)
+
+    for (context->m_rit = context->m_device.m_resources.begin();
+         context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
     {
-        result = thiz->ContinueDiscovery(context, resource->m_uri.c_str(),
-                resource->m_addrs, Bridge::GetIntrospectionCB);
-    }
-    else
-    {
-        LOG(LOG_INFO, "[%p] Missing introspection resource", thiz);
-        context->m_paths = OCRepPayloadCreate();
-        context->m_definitions = OCRepPayloadCreate();
-        if (!context->m_paths || !context->m_definitions)
+        Resource &r = *context->m_rit;
+        if (std::find(r.m_rts.begin(), r.m_rts.end(), "oic.r.alljoynobject") != r.m_rts.end())
         {
-            LOG(LOG_ERR, "Failed to create payload");
+            result = thiz->ContinueDiscovery(context, r.m_uri.c_str(), r.m_addrs,
+                    Bridge::GetCollectionCB);
+            if (result == OC_STACK_OK)
+            {
+                context = NULL;
+            }
             goto exit;
         }
-        context->m_it = context->Begin();
-        result = thiz->ContinueDiscovery(context, context->m_it.GetUri().c_str(),
-                context->m_it.GetDevAddrs(), Bridge::GetCB);
     }
+    result = thiz->GetIntrospection(context);
     if (result == OC_STACK_OK)
     {
         context = NULL;
@@ -1350,6 +1353,118 @@ exit:
     delete context;
     thiz->m_discovered.erase(handle);
     return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackApplicationResult Bridge::GetCollectionCB(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    LOG(LOG_INFO, "[%p]", thiz);
+
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    OCStackResult result = OC_STACK_OK;
+    DiscoverContext *context;
+    OCRepPayload *payload;
+    OCRepPayload **links = NULL;
+    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    size_t dimTotal;
+    std::string colUri;
+    thiz->GetContextAndRepPayload(handle, response, &context, &payload);
+    if (!context || !payload)
+    {
+        goto exit;
+    }
+    if (!OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_LINKS, &links, dim))
+    {
+        goto exit;
+    }
+    colUri = context->m_rit->m_uri;
+    dimTotal = calcDimTotal(dim);
+    for (size_t i = 0; i < dimTotal; ++i)
+    {
+        char *href = NULL;
+        if (!OCRepPayloadGetPropString(links[i], OC_RSRVD_HREF, &href))
+        {
+            goto exit;
+        }
+        std::vector<Resource>::iterator rit = std::find_if(context->m_device.m_resources.begin(),
+                context->m_device.m_resources.end(),
+                [href](Resource &r) -> bool {return r.m_uri == href;}); // TODO code dup
+        if (rit != context->m_device.m_resources.end())
+        {
+            context->m_rit->m_resources.push_back(*rit);
+            context->m_device.m_resources.erase(rit);
+            /* Find collection again since resources has been modified */
+            context->m_rit = std::find_if(context->m_device.m_resources.begin(),
+                    context->m_device.m_resources.end(),
+                    [colUri](Resource &r) -> bool {return r.m_uri == colUri;});
+        }
+        else
+        {
+            LOG(LOG_ERR, "Failed to discover contained resource %s", href);
+        }
+        OICFree(href);
+    }
+    for (++context->m_rit; context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
+    {
+        Resource &r = *context->m_rit;
+        if (std::find(r.m_rts.begin(), r.m_rts.end(), "oic.r.alljoynobject") != r.m_rts.end())
+        {
+            result = thiz->ContinueDiscovery(context, r.m_uri.c_str(), r.m_addrs,
+                    Bridge::GetCollectionCB);
+            if (result == OC_STACK_OK)
+            {
+                context = NULL;
+            }
+            goto exit;
+        }
+    }
+    result = thiz->GetIntrospection(context);
+    if (result == OC_STACK_OK)
+    {
+        context = NULL;
+    }
+
+exit:
+    if (links)
+    {
+        dimTotal = calcDimTotal(dim);
+        for(size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(links[i]);
+        }
+    }
+    OICFree(links);
+    delete context;
+    thiz->m_discovered.erase(handle);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackResult Bridge::GetIntrospection(DiscoverContext *context)
+{
+    OCStackResult result = OC_STACK_OK;
+    Resource *resource;
+    resource = context->m_device.GetResourceType(OC_RSRVD_RESOURCE_TYPE_INTROSPECTION);
+    if (resource)
+    {
+        result = ContinueDiscovery(context, resource->m_uri.c_str(),
+                resource->m_addrs, Bridge::GetIntrospectionCB);
+    }
+    else
+    {
+        LOG(LOG_INFO, "[%p] Missing introspection resource", this);
+        context->m_paths = OCRepPayloadCreate();
+        context->m_definitions = OCRepPayloadCreate();
+        if (!context->m_paths || !context->m_definitions)
+        {
+            LOG(LOG_ERR, "Failed to create payload");
+            return result;
+        }
+        context->m_it = context->Begin();
+        result = ContinueDiscovery(context, context->m_it.GetUri().c_str(),
+                context->m_it.GetDevAddrs(), Bridge::GetCB);
+    }
+    return result;
 }
 
 OCStackApplicationResult Bridge::GetIntrospectionCB(void *ctx, OCDoHandle handle,
@@ -2390,6 +2505,70 @@ static void AddInterface(VirtualBusObject *obj, OCRepPayload *schema,
     }
 }
 
+void Bridge::ParseIntrospectionPayload(VirtualBusObject *obj, OCRepPayload *path,
+        std::map<std::string, std::string> &ajNames)
+{
+    for (OCRepPayloadValue *method = path->values; method; method = method->next)
+    {
+        if (method->type != OCREP_PROP_OBJECT)
+        {
+            LOG(LOG_INFO, "%s method unknown type %d, skipping", method->name,
+                    method->type);
+            continue;
+        }
+        for (OCRepPayloadValue *value = method->obj->values; value; value = value->next)
+        {
+            if (!strcmp(value->name, "parameters"))
+            {
+                if (value->type != OCREP_PROP_ARRAY || value->arr.type != OCREP_PROP_OBJECT)
+                {
+                    LOG(LOG_INFO, "%s unknown type %d, skipping", value->name,
+                            value->type);
+                    continue;
+                }
+                for (size_t i = 0; i < value->arr.dimensions[0]; ++i)
+                {
+                    OCRepPayload *schema = NULL;
+                    if (OCRepPayloadGetPropObject(value->arr.objArray[i], "schema",
+                            &schema))
+                    {
+                        AddInterface(obj, schema, ajNames);
+                    }
+                    OCRepPayloadDestroy(schema);
+                    schema = NULL;
+                }
+            }
+            else if (!strcmp(value->name, "responses"))
+            {
+                if (value->type != OCREP_PROP_OBJECT)
+                {
+                    LOG(LOG_INFO, "%s unknown type %d, skipping", value->name,
+                            value->type);
+                    continue;
+                }
+                for (OCRepPayloadValue *code = value->obj->values; code; code = code->next)
+                {
+                    if (code->type != OCREP_PROP_OBJECT)
+                    {
+                        LOG(LOG_INFO, "%s code unknown type %d, skipping", code->name,
+                                code->type);
+                        continue;
+                    }
+                    for (OCRepPayloadValue *codeValue = code->obj->values; codeValue;
+                         codeValue = codeValue->next)
+                    {
+                        if (!strcmp(codeValue->name, "schema") &&
+                                codeValue->type == OCREP_PROP_OBJECT)
+                        {
+                            AddInterface(obj, codeValue->obj, ajNames);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload)
 {
     OCRepPayload *definitions = NULL;
@@ -2594,23 +2773,25 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
     {
         goto exit;
     }
-    for (OCRepPayloadValue *path = paths->values; path; path = path->next)
+    for (std::vector<Resource>::iterator it = context->m_device.m_resources.begin();
+         it != context->m_device.m_resources.end(); ++it)
     {
-        if (path->type != OCREP_PROP_OBJECT)
+        const char *uri = it->m_uri.c_str();
+        OCRepPayload *path = NULL;
+        if (!OCRepPayloadGetPropObject(paths, uri, &path))
         {
-            LOG(LOG_INFO, "%s path unknown type %d, skipping", path->name, path->type);
             continue;
         }
-        if (!strcmp(path->name, "/oic/d") || !strcmp(path->name, "/oic/p"))
+        if (!strcmp(uri, "/oic/d") || !strcmp(uri, "/oic/p"))
         {
             /* These resources are not translated on-the-fly */
         }
-        else if (!strcmp(path->name, "/oic/con") || !strcmp(path->name, "/oic/mnt"))
+        else if (!strcmp(uri, "/oic/con") || !strcmp(uri, "/oic/mnt"))
         {
             VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
             if (!obj)
             {
-                obj = new VirtualConfigBusObject(context->m_bus, context->GetDevAddrs(path->name));
+                obj = new VirtualConfigBusObject(context->m_bus, context->GetDevAddrs(uri));
                 status = context->m_bus->RegisterBusObject(obj);
                 if (status != ER_OK)
                 {
@@ -2620,66 +2801,19 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
         }
         else
         {
-            VirtualBusObject *obj = new VirtualBusObject(context->m_bus, path->name,
-                    context->GetDevAddrs(path->name));
-            for (OCRepPayloadValue *method = path->obj->values; method; method = method->next)
+            VirtualBusObject *obj = new VirtualBusObject(context->m_bus, uri,
+                    context->GetDevAddrs(uri));
+            ParseIntrospectionPayload(obj, path, ajNames);
+            for (std::vector<Resource>::iterator jt = it->m_resources.begin();
+                 jt != it->m_resources.end(); ++jt)
             {
-                if (method->type != OCREP_PROP_OBJECT)
+                OCRepPayload *childPath = NULL;
+                if (!OCRepPayloadGetPropObject(paths, jt->m_uri.c_str(), &childPath))
                 {
-                    LOG(LOG_INFO, "%s method unknown type %d, skipping", method->name,
-                            method->type);
                     continue;
                 }
-                for (OCRepPayloadValue *value = method->obj->values; value; value = value->next)
-                {
-                    if (!strcmp(value->name, "parameters"))
-                    {
-                        if (value->type != OCREP_PROP_ARRAY || value->arr.type != OCREP_PROP_OBJECT)
-                        {
-                            LOG(LOG_INFO, "%s unknown type %d, skipping", value->name,
-                                    value->type);
-                            continue;
-                        }
-                        for (size_t i = 0; i < value->arr.dimensions[0]; ++i)
-                        {
-                            OCRepPayload *schema = NULL;
-                            if (OCRepPayloadGetPropObject(value->arr.objArray[i], "schema",
-                                    &schema))
-                            {
-                                AddInterface(obj, schema, ajNames);
-                            }
-                            OCRepPayloadDestroy(schema);
-                            schema = NULL;
-                        }
-                    }
-                    else if (!strcmp(value->name, "responses"))
-                    {
-                        if (value->type != OCREP_PROP_OBJECT)
-                        {
-                            LOG(LOG_INFO, "%s unknown type %d, skipping", value->name,
-                                    value->type);
-                            continue;
-                        }
-                        for (OCRepPayloadValue *code = value->obj->values; code; code = code->next)
-                        {
-                            if (code->type != OCREP_PROP_OBJECT)
-                            {
-                                LOG(LOG_INFO, "%s code unknown type %d, skipping", code->name,
-                                        code->type);
-                                continue;
-                            }
-                            for (OCRepPayloadValue *codeValue = code->obj->values; codeValue;
-                                 codeValue = codeValue->next)
-                            {
-                                if (!strcmp(codeValue->name, "schema") &&
-                                        codeValue->type == OCREP_PROP_OBJECT)
-                                {
-                                    AddInterface(obj, codeValue->obj, ajNames);
-                                }
-                            }
-                        }
-                    }
-                }
+                ParseIntrospectionPayload(obj, childPath, ajNames);
+                OCRepPayloadDestroy(childPath);
             }
             status = context->m_bus->RegisterBusObject(obj);
             if (status != ER_OK)
@@ -2687,6 +2821,7 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
                 delete obj;
             }
         }
+        OCRepPayloadDestroy(path);
     }
     OCRepPayloadDestroy(paths);
     paths = NULL;

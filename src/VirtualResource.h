@@ -51,14 +51,33 @@ class VirtualResource : public ajn::ProxyBusObject
 
     private:
         std::string m_ajSoftwareVersion;
-        std::map<std::string, uint8_t> m_rts;
-        std::map<std::string, std::vector<OCObservationId>> m_observers;
+        struct ResourceType {
+            uint8_t m_access;
+            uint8_t m_props;
+            ResourceType() : m_access(0), m_props(OC_DISCOVERABLE) { }
+        };
+        std::map<std::string, ResourceType> m_rts;
+        struct Observation {
+            OCResourceHandle m_resource;
+            std::string m_query;
+            Observation() : m_resource(0) { }
+            Observation(OCResourceHandle resource, const char *query)
+                : m_resource(resource), m_query(query) { }
+            bool operator<(const Observation& rhs) const
+            {
+                return (m_resource != rhs.m_resource) ? (m_resource < rhs.m_resource) :
+                        (m_query < rhs.m_query);
+            };
+        };
+        std::map<Observation, std::vector<OCObservationId>> m_observers;
         std::map<OCObservationId, std::string> m_matchRules;
+        std::vector<std::string> m_paths;
 
         OCStackResult Create();
         uint8_t GetMethodCallFlags(const char *ifaceName);
         void IntrospectCB(ajn::Message &msg, void *ctx);
         OCStackResult CreateResources();
+        OCStackResult CreateResource(std::string path, uint8_t props);
         void SignalCB(const ajn::InterfaceDescription::Member *member, const char *path,
                 ajn::Message &msg);
         void MethodReturnCB(ajn::Message &msg, void *context);
@@ -73,10 +92,12 @@ class VirtualResource : public ajn::ProxyBusObject
         virtual void AddMatchCB(QStatus status, void *ctx);
         virtual void RemoveMatchCB(QStatus status, void *ctx);
         OCDiagnosticPayload *CreatePayload(ajn::Message &msg, OCEntityHandlerResult *ehResult);
-        OCRepPayload *CreatePayload();
+        OCRepPayload *CreatePayload(const char *uri);
         OCStackResult SetMemberPayload(OCRepPayload *payload, const char *ifaceName,
                 const char *memberName);
         static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
+                OCEntityHandlerRequest *request, void *context);
+        static OCEntityHandlerResult CollectionHandlerCB(OCEntityHandlerFlag flag,
                 OCEntityHandlerRequest *request, void *context);
 };
 

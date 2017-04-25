@@ -111,7 +111,7 @@ void VirtualConfigurationResource::IntrospectCB(QStatus status, ProxyBusObject *
             return;
         }
 
-        result = CreateResource(OC_RSRVD_CONFIGURATION_URI,
+        result = ::CreateResource(OC_RSRVD_CONFIGURATION_URI,
                 OC_RSRVD_RESOURCE_TYPE_CONFIGURATION,
                 OC_RSRVD_INTERFACE_READ_WRITE,
                 VirtualConfigurationResource::ConfigurationHandlerCB, this,
@@ -121,7 +121,7 @@ void VirtualConfigurationResource::IntrospectCB(QStatus status, ProxyBusObject *
             LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s", this,
                     OC_RSRVD_CONFIGURATION_URI);
         }
-        result = CreateResource(OC_RSRVD_MAINTENANCE_URI, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
+        result = ::CreateResource(OC_RSRVD_MAINTENANCE_URI, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
                 OC_RSRVD_INTERFACE_READ_WRITE,
                 VirtualConfigurationResource::MaintenanceHandlerCB, this,
                 OC_DISCOVERABLE | OC_OBSERVABLE);
