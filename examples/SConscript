@@ -23,7 +23,6 @@ Import('iotivity_resource_inc_paths')
 Import('alljoynplugin_lib')
 
 alljoyn_libs = ['alljoyn', 'ajrouter']
-oic_libs = ['cjson', 'octbstack', 'connectivity_abstraction', 'c_common', 'coap', 'resource_directory']
 
 env_bridge = env.Clone()
 bridge_cpp = ['Plugin.cpp',
@@ -31,9 +30,27 @@ bridge_cpp = ['Plugin.cpp',
 manager_cpp = ['PluginManager.cpp']
 env_bridge.AppendUnique(LIBS = [alljoynplugin_lib])
 if env['TARGET_OS'] == 'linux':
-    env_bridge.AppendUnique(LIBS = ['crypto', alljoyn_libs, oic_libs])
+    env_bridge.AppendUnique(LIBS = [
+        'crypto',
+        alljoyn_libs,
+        'cjson',
+        'octbstack',
+        'connectivity_abstraction',
+        'c_common', 
+        'coap', 
+        'resource_directory',
+        ])
 elif env['TARGET_OS'] == 'windows':
-    env_bridge.AppendUnique(LIBS = ['win_helper', alljoyn_libs, oic_libs, 'sqlite3', 'logger'])
+    env_bridge.AppendUnique(LIBS = [
+        'win_helper',
+        alljoyn_libs,
+        'cjson',
+        'octbstack',
+        'c_common',
+        'coap',
+        'sqlite3',
+        'logger',
+        ])
 
 examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
 if env['TARGET_OS'] == 'linux':
