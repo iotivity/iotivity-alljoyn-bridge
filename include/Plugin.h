@@ -28,18 +28,6 @@
 #include <stdint.h>
 #include <vector>
 
-/** Protocol independent indentifier.*/
-#define OC_RSRVD_PROTOCOL_INDEPENDENT_ID "piid"
-
-/** Device software version.*/
-#define OC_RSRVD_SOFTWARE_VERSION        "sv"
-
-/** Device manufacture name. */
-#define OC_RSRVD_DEVICE_MFG_NAME         "dmn"
-
-/** Device model number.*/
-#define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
-
 /** To represent secure mode resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
 

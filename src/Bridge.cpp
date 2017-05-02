@@ -654,13 +654,15 @@ public:
     AnnouncedContext(VirtualDevice *device, const char *name,
             const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
         : m_device(device), m_name(name), m_objectDescriptionArg(objectDescriptionArg),
-          m_aboutDataArg(aboutDataArg), m_sessionId(0), m_aboutObj(NULL) { }
+          m_aboutData(aboutDataArg), m_sessionId(0), m_aboutObj(NULL) { }
     ~AnnouncedContext() { delete m_aboutObj; }
     ajn::BusAttachment *m_bus;
     VirtualDevice *m_device;
     std::string m_name;
     ajn::MsgArg m_objectDescriptionArg;
-    ajn::MsgArg m_aboutDataArg;
+    ajn::AboutData m_aboutData;
+    std::vector<std::string> m_langs;
+    std::vector<std::string>::iterator m_lang;
     ajn::SessionId m_sessionId;
     ajn::ProxyBusObject *m_aboutObj;
 };
@@ -766,9 +768,8 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
     {
         qcc::String peerGuid;
         m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
-        ajn::AboutData aboutData(context->m_aboutDataArg);
         OCUUIdentity piid;
-        GetPiid(&piid, peerGuid.c_str(), &aboutData);
+        GetPiid(&piid, peerGuid.c_str(), &context->m_aboutData);
         char piidStr[UUID_STRING_SIZE];
         OCConvertUuidToString(piid.id, piidStr);
 
@@ -808,10 +809,9 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
         context->m_aboutObj->AddInterface(::ajn::org::alljoyn::About::InterfaceName);
         ajn::MsgArg arg("s", "");
         status = context->m_aboutObj->MethodCallAsync(::ajn::org::alljoyn::About::InterfaceName,
-                 "GetAboutData",
-                 this, static_cast<ajn::MessageReceiver::ReplyHandler>(&Bridge::GetAboutDataCB),
-                 &arg, 1,
-                 context);
+                "GetAboutData",
+                this, static_cast<ajn::MessageReceiver::ReplyHandler>(&Bridge::GetAboutDataCB),
+                &arg, 1, context);
         if (status != ER_OK)
         {
             LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
@@ -855,30 +855,104 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
     if (msg->GetType() == ajn::MESSAGE_METHOD_RET)
     {
-        ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
         ajn::AboutData aboutData(*msg->GetArg(0));
-        char *ajSoftwareVersion = NULL;
-        QStatus status = aboutData.GetAJSoftwareVersion(&ajSoftwareVersion);
-        LOG(LOG_INFO, "[%p] %s AJSoftwareVersion=%s", this, QCC_StatusText(status),
-            ajSoftwareVersion ? ajSoftwareVersion : "unknown");
-        m_ajSoftwareVersion = ajSoftwareVersion;
-        if (context->m_device)
+        if (context->m_langs.empty())
         {
-            context->m_device->SetInfo(objectDescription, aboutData);
-            OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-            if (!handle)
+            context->m_aboutData = aboutData;
+
+            char *lang = NULL;
+            aboutData.GetDefaultLanguage(&lang);
+            context->m_langs.push_back(lang);
+            size_t numLangs = aboutData.GetSupportedLanguages();
+            const char **langs = new const char *[numLangs];
+            aboutData.GetSupportedLanguages(langs, numLangs);
+            for (size_t i = 0; i < numLangs; ++i)
             {
-                LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+                if (strcmp(lang, langs[i]))
+                {
+                    context->m_langs.push_back(langs[i]);
+                }
             }
-            OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-            if (result != OC_STACK_OK)
+            delete[] langs;
+            context->m_lang = context->m_langs.begin();
+
+            char *ajSoftwareVersion = NULL;
+            QStatus status = aboutData.GetAJSoftwareVersion(&ajSoftwareVersion);
+            LOG(LOG_INFO, "[%p] %s AJSoftwareVersion=%s", this, QCC_StatusText(status),
+                    ajSoftwareVersion ? ajSoftwareVersion : "unknown");
+            m_ajSoftwareVersion = ajSoftwareVersion;
+        }
+        else
+        {
+            const char *lang = context->m_lang->c_str();
+            char *value = NULL;
+            aboutData.GetDeviceName(&value);
+            if (value)
             {
-                LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+                context->m_aboutData.SetDeviceName(value, lang);
+                value = NULL;
             }
+            aboutData.GetAppName(&value);
+            if (value)
+            {
+                context->m_aboutData.SetAppName(value, lang);
+                value = NULL;
+            }
+            aboutData.GetManufacturer(&value);
+            if (value)
+            {
+                context->m_aboutData.SetManufacturer(value, lang);
+                value = NULL;
+            }
+            aboutData.GetDescription(&value);
+            if (value)
+            {
+                context->m_aboutData.SetDescription(value, lang);
+                value = NULL;
+            }
+        }
+        if (++context->m_lang != context->m_langs.end())
+        {
+            ajn::MsgArg arg("s", context->m_lang->c_str());
+            QStatus status = context->m_aboutObj->MethodCallAsync(
+                ::ajn::org::alljoyn::About::InterfaceName, "GetAboutData",
+                this, static_cast<ajn::MessageReceiver::ReplyHandler>(&Bridge::GetAboutDataCB),
+                &arg, 1, context);
+            if (status != ER_OK)
+            {
+                LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                delete context;
+            }
+        }
+        else
+        {
+            if (!context->m_device)
+            {
+                context->m_device = new VirtualDevice(m_bus, msg->GetSender(), msg->GetSessionId());
+                m_virtualDevices.push_back(context->m_device);
+
+                OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+                if (!handle)
+                {
+                    LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+                }
+                OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
+                if (result != OC_STACK_OK)
+                {
+                    LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+                }
+
+                Presence *presence = new AllJoynPresence(m_bus, context->m_name);
+                m_presence.push_back(presence);
+                context->m_device->StartPresence();
+            }
+
+            ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
+            context->m_device->SetInfo(objectDescription, context->m_aboutData);
+
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];
             objectDescription.GetPaths(pa, n);
-            std::sort(pa, pa + n, ComparePath);
             std::vector<const char *> pb;
             for (VirtualResource *resource : m_virtualResources)
             {
@@ -889,9 +963,8 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             }
             std::sort(pb.begin(), pb.end(), ComparePath);
             std::vector<const char *> remove;
-            std::set_difference(pb.begin(), pb.end(),
-                                pa, pa + n,
-                                std::inserter(remove, remove.begin()), ComparePath);
+            std::set_difference(pb.begin(), pb.end(), pa, pa + n,
+                    std::inserter(remove, remove.begin()), ComparePath);
             for (size_t i = 0; i < remove.size(); ++i)
             {
                 for (std::vector<VirtualResource *>::iterator vr = m_virtualResources.begin();
@@ -899,7 +972,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
                 {
                     VirtualResource *resource = *vr;
                     if (resource->GetUniqueName() == context->m_name.c_str() &&
-                        resource->GetPath() == remove[i])
+                            resource->GetPath() == remove[i])
                     {
                         delete resource;
                         m_virtualResources.erase(vr);
@@ -908,57 +981,26 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
                 }
             }
             std::vector<const char *> add;
-            std::set_difference(pa, pa + n,
-                                pb.begin(), pb.end(),
-                                std::inserter(add, add.begin()), ComparePath);
+            std::set_difference(pa, pa + n, pb.begin(), pb.end(),
+                    std::inserter(add, add.begin()), ComparePath);
             for (size_t i = 0; i < add.size(); ++i)
             {
-                VirtualResource *resource = CreateVirtualResource(m_bus,
-                                            context->m_name.c_str(), msg->GetSessionId(), add[i],
-                                            ajSoftwareVersion);
+                VirtualResource *resource = CreateVirtualResource(m_bus, context->m_name.c_str(),
+                        msg->GetSessionId(), add[i], m_ajSoftwareVersion.c_str());
                 if (resource)
                 {
                     m_virtualResources.push_back(resource);
                 }
             }
+            delete[] pa;
+            delete context;
         }
-        else
-        {
-            Presence *presence = new AllJoynPresence(m_bus, context->m_name);
-            m_presence.push_back(presence);
-            VirtualDevice *device = new VirtualDevice(m_bus, msg->GetSender(), msg->GetSessionId());
-            device->SetInfo(objectDescription, aboutData);
-            OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-            if (!handle)
-            {
-                LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-            }
-            OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-            if (result != OC_STACK_OK)
-            {
-                LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-            }
-            m_virtualDevices.push_back(device);
-            size_t numPaths = objectDescription.GetPaths(NULL, 0);
-            const char **paths = new const char *[numPaths];
-            objectDescription.GetPaths(paths, numPaths);
-            for (size_t i = 0; i < numPaths; ++i)
-            {
-                VirtualResource *resource = CreateVirtualResource(m_bus,
-                                            context->m_name.c_str(), msg->GetSessionId(), paths[i],
-                                            ajSoftwareVersion);
-                if (resource)
-                {
-                    m_virtualResources.push_back(resource);
-                }
-            }
-            delete[] paths;
-            device->StartPresence();
-        }
-        delete context;
     }
     else if (msg->GetType() == ajn::MESSAGE_ERROR)
     {
+        qcc::String message;
+        const char *name = msg->GetErrorName(&message);
+        LOG(LOG_ERR, "%s: %s", name, message.c_str());
         QStatus status = m_bus->LeaveSessionAsync(context->m_sessionId, this, context);
         if (status != ER_OK)
         {

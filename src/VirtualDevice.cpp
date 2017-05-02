@@ -65,6 +65,10 @@ void VirtualDevice::StartPresence()
 void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
         ajn::AboutData &aboutData)
 {
+    size_t numLangs = aboutData.GetSupportedLanguages();
+    const char **langs = new const char *[numLangs];
+    aboutData.GetSupportedLanguages(langs, numLangs);
+    OCStringLL *ll = NULL;
     char *value = NULL;
     aboutData.GetAppName(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, value);
@@ -107,12 +111,38 @@ void VirtualDevice::SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &object
     value = NULL;
     aboutData.GetSoftwareVersion(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SOFTWARE_VERSION, value);
-    value = NULL;
-    aboutData.GetManufacturer(&value);
-    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MFG_NAME, value);
+    for (size_t i = 0; i < numLangs; ++i)
+    {
+        value = NULL;
+        aboutData.GetManufacturer(&value, langs[i]);
+        LOG(LOG_INFO, "Manufacturer[%s]=%s", langs[i], value);
+        if (value)
+        {
+            OCResourcePayloadAddStringLL(&ll, langs[i]);
+            OCResourcePayloadAddStringLL(&ll, value);
+        }
+    }
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MFG_NAME, ll);
+    OCFreeOCStringLL(ll);
+    ll = NULL;
     value = NULL;
     aboutData.GetModelNumber(&value);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, value);
+    for (size_t i = 0; i < numLangs; ++i)
+    {
+        value = NULL;
+        aboutData.GetDescription(&value, langs[i]);
+        LOG(LOG_INFO, "Description[%s]=%s", langs[i], value);
+        if (value)
+        {
+            OCResourcePayloadAddStringLL(&ll, langs[i]);
+            OCResourcePayloadAddStringLL(&ll, value);
+        }
+    }
+    OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_DESCRIPTION, ll);
+    OCFreeOCStringLL(ll);
+    ll = NULL;
+    delete[] langs;
 
     char *deviceId;
     aboutData.GetDeviceId(&deviceId);

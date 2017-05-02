@@ -36,11 +36,7 @@
 #include "pinoxmcommon.h"
 #endif
 
-#define OC_RSRVD_SOFTWARE_VERSION        "sv"
-#define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
-
 #define OC_RSRVD_FRIENDLY_NAME "n"
-#define OC_RSRVD_INSTANCE_ID "id"
 
 static void LogPayload(OCPayload *payload)
 {
