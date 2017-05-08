@@ -1388,8 +1388,6 @@ OCStackApplicationResult Bridge::GetIntrospectionDataCB(void *ctx, OCDoHandle ha
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
-    char *data = NULL;
-    OCPayload *outPayload = NULL;
     DiscoverContext *context;
     OCRepPayload *payload;
 
@@ -1398,20 +1396,8 @@ OCStackApplicationResult Bridge::GetIntrospectionDataCB(void *ctx, OCDoHandle ha
     {
         goto exit;
     }
-    if (!OCRepPayloadGetPropString(payload, OC_RSRVD_INTROSPECTION_DATA_NAME, &data))
-    {
-        goto exit;
-    }
-    result = ParsePayload(&outPayload, OC_FORMAT_JSON, PAYLOAD_TYPE_REPRESENTATION,
-            (const uint8_t*) data, strlen(data));
-    if (result != OC_STACK_OK)
-    {
-        goto exit;
-    }
-    OICFree(data);
-    data = NULL;
-
-    thiz->ParseIntrospectionPayload(context, (OCRepPayload *) outPayload);
+    thiz->ParseIntrospectionPayload(context, payload);
+    result = OC_STACK_OK;
 
 exit:
     if (context && (result != OC_STACK_OK))
@@ -1431,8 +1417,6 @@ exit:
             context = NULL;
         }
     }
-    OCPayloadDestroy(outPayload);
-    OICFree(data);
     delete context;
     thiz->m_discovered.erase(handle);
     return OC_STACK_DELETE_TRANSACTION;
