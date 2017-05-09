@@ -779,7 +779,18 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
         switch (GetSeenState(piidStr))
         {
             case NOT_SEEN:
-                m_execCb(piidStr, context->m_name.c_str(), isVirtual);
+                if (isVirtual)
+                {
+                    /* Delay creating virtual resources from a virtual Announce */
+                    LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
+                            this);
+                    m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
+                            piidStr, isVirtual));
+                }
+                else
+                {
+                    m_execCb(piidStr, context->m_name.c_str(), isVirtual);
+                }
                 break;
             case SEEN_NATIVE:
                 /* Do nothing */
@@ -791,11 +802,8 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
                 }
                 else
                 {
-                    /* Delay creating virtual resources from a virtual Announce */
-                    LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
-                            this);
-                    m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
-                            piidStr, isVirtual));
+                    DestroyPiid(piidStr);
+                    m_execCb(piidStr, context->m_name.c_str(), isVirtual);
                 }
                 break;
         }
@@ -1246,8 +1254,20 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     switch (thiz->GetSeenState(piid))
     {
         case NOT_SEEN:
-            context->m_bus = VirtualBusAttachment::Create(context->m_device.m_di.c_str(), piid,
-                    isVirtual);
+            if (isVirtual)
+            {
+                /* Delay creating virtual objects from a virtual device */
+                LOG(LOG_INFO, "[%p] Delaying creation of virtual objects from a virtual device",
+                        thiz);
+                thiz->m_tasks.push_back(new DiscoverTask(time(NULL) + 10, piid, payload, context));
+                context = NULL;
+                goto exit;
+            }
+            else
+            {
+                context->m_bus = VirtualBusAttachment::Create(context->m_device.m_di.c_str(), piid,
+                        isVirtual);
+            }
             break;
         case SEEN_NATIVE:
             /* Do nothing */
@@ -1259,13 +1279,11 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
             }
             else
             {
-                /* Delay creating virtual objects from a virtual device */
-                LOG(LOG_INFO, "[%p] Delaying creation of virtual objects from a virtual device",
-                        thiz);
-                thiz->m_tasks.push_back(new DiscoverTask(time(NULL) + 10, piid, payload, context));
-                context = NULL;
+                thiz->DestroyPiid(piid);
+                context->m_bus = VirtualBusAttachment::Create(context->m_device.m_di.c_str(), piid,
+                        isVirtual);
             }
-            goto exit;
+            break;
     }
     if (!context->m_bus)
     {
