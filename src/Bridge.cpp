@@ -3024,26 +3024,35 @@ void Bridge::RDPublishTask::Run(Bridge *thiz)
     /* Also write out current introspection data. */
     OCPersistentStorage *ps = OCGetPersistentStorageHandler();
     assert(ps);
+    size_t curSize = 1024;
+    uint8_t *out = NULL;
+    CborError err;
     FILE *fp = NULL;
     size_t ret;
-    std::string s;
-    std::ostringstream os;
-    OCStackResult result = Introspect(os, thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE",
-            "VERSION");
-    if (result != OC_STACK_OK)
+    for (;;)
     {
-        LOG(LOG_ERR, "Introspect() failed - %d", result);
-        goto exit;
+        out = (uint8_t *)OICCalloc(1, curSize);
+        if (!out)
+        {
+            LOG(LOG_ERR, "Failed to allocate introspection data buffer");
+            goto exit;
+        }
+        err = Introspect(thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE", "VERSION",
+                out, &curSize);
+        if (err != CborErrorOutOfMemory)
+        {
+            break;
+        }
+        OICFree(out);
     }
-    s = os.str();
     fp = ps->open(OC_INTROSPECTION_FILE_NAME, "wb");
     if (!fp)
     {
         LOG(LOG_ERR, "open failed");
         goto exit;
     }
-    ret = ps->write(s.c_str(), 1, s.size(), fp);
-    if (ret != s.size())
+    ret = ps->write(out, 1, curSize, fp);
+    if (ret != curSize)
     {
         LOG(LOG_ERR, "write failed");
         goto exit;
@@ -3053,6 +3062,7 @@ exit:
     {
         ps->close(fp);
     }
+    OICFree(out);
 
     ::RDPublish();
     thiz->m_rdPublishTask = NULL;
