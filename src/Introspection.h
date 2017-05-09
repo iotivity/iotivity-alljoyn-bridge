@@ -22,6 +22,7 @@
 #define _INTROSPECTION_H
 
 #include "cacommon.h"
+#include "cbor.h"
 #include "ocpayload.h"
 #include "octypes.h"
 #include <alljoyn/BusAttachment.h>
@@ -34,7 +35,7 @@ typedef enum
     READWRITE = (1 << 1),
 } AccessFlags;
 
-OCStackResult Introspect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
-        const char *title, const char *version);
+CborError Introspect(ajn::BusAttachment *bus, const char *ajSoftwareVersion, const char *title,
+        const char *version, uint8_t *out, size_t *outSize);
 
 #endif
