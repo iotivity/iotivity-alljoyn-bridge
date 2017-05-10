@@ -1296,7 +1296,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
+    context->m_bus->SetAboutData(OC_RSRVD_RESOURCE_TYPE_DEVICE, payload);
     result = thiz->ContinueDiscovery(context, OC_RSRVD_PLATFORM_URI,
             context->GetDevAddrs(OC_RSRVD_PLATFORM_URI), Bridge::GetPlatformCB);
     if (result == OC_STACK_OK)
@@ -1326,7 +1326,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
+    context->m_bus->SetAboutData(OC_RSRVD_RESOURCE_TYPE_PLATFORM, payload);
 
     for (context->m_rit = context->m_device.m_resources.begin();
          context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)

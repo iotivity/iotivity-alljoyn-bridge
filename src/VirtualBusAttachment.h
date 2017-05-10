@@ -21,10 +21,10 @@
 #ifndef _VIRTUALBUSATTACHMENT_H
 #define _VIRTUALBUSATTACHMENT_H
 
+#include "AboutData.h"
 #include "cacommon.h"
 #include "octypes.h"
 #include <inttypes.h>
-#include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObj.h>
 #include <alljoyn/BusAttachment.h>
 #include <mutex>
@@ -43,7 +43,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         std::string GetDi() { return m_di; }
         std::string GetProtocolIndependentId() { return m_piid; }
         bool IsVirtual() { return m_isVirtual; }
-        void SetAboutData(const char *uri, OCRepPayload *payload);
+        void SetAboutData(const char *rt, OCRepPayload *payload);
         ajn::InterfaceDescription *CreateInterface(const char* ifaceName);
         QStatus RegisterBusObject(VirtualBusObject *busObject);
         VirtualBusObject *GetBusObject(const char *path);
@@ -51,19 +51,6 @@ class VirtualBusAttachment : public ajn::BusAttachment
         void Stop();
 
     private:
-        class AboutData : public ajn::AboutData
-        {
-            public:
-                AboutData()
-                {
-                    SetNewFieldDetails("org.openconnectivity.piid", ANNOUNCED, "s");
-                }
-                QStatus SetNewFieldDetails(const char *name, AboutFieldMask mask, const char *signature)
-                {
-                    return ajn::AboutData::SetNewFieldDetails(name, mask, signature);
-                }
-        };
-
         std::string m_di;
         std::string m_piid;
         bool m_isVirtual;

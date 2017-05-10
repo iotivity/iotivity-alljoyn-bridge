@@ -28,6 +28,21 @@
 #include <stdint.h>
 #include <vector>
 
+/* Default language */
+#define OC_RSRVD_DEFAULT_LANGUAGE "dl"
+
+/* Device name, localized */
+#define OC_RSRVD_DEVICE_NAME_LOCALIZED "ln"
+
+/* Platform name, localized */
+#define OC_RSRVD_PLATFORM_NAME "mnpn"
+
+/** To represent device configuration resource type.*/
+#define OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION "oic.wk.con"
+
+/** To represent platform configuration resource type.*/
+#define OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION "oic.wk.con.p"
+
 /** To represent secure mode resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
 

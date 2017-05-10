@@ -31,30 +31,6 @@
 #include "oic_malloc.h"
 #include <assert.h>
 
-static void ToAppId(const char *di, uint8_t *appId)
-{
-    memset(appId, 0, 16);
-    for (size_t i = 0; (i < 16) && *di; ++i)
-    {
-        if (*di == '-') ++di;
-        for (size_t j = 0; (j < 2) && *di; ++j, ++di)
-        {
-            if ('0' <= *di && *di <= '9')
-            {
-                appId[i] = (appId[i] << 4) | (*di - '0');
-            }
-            else if ('a' <= *di && *di <= 'f')
-            {
-                appId[i] = (appId[i] << 4) | (*di - 'a' + 10);
-            }
-            else if ('A' <= *di && *di <= 'F')
-            {
-                appId[i] = (appId[i] << 4) | (*di - 'A' + 10);
-            }
-        }
-    }
-}
-
 VirtualBusAttachment *VirtualBusAttachment::Create(const char *di, const char *piid, bool isVirtual)
 {
     QStatus status;
@@ -108,25 +84,6 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, boo
         m_piid = piid;
     }
 
-    m_aboutData.SetDefaultLanguage("");
-    m_aboutData.SetDescription("");
-    m_aboutData.SetSoftwareVersion("");
-
-    /*
-     * Default mandatory values necessary for Announce to succeed when
-     * /oic/d or /oic/p not present.
-     */
-    m_aboutData.SetDeviceId("");
-    m_aboutData.SetManufacturer("");
-    m_aboutData.SetModelNumber("");
-    m_aboutData.SetDateOfManufacture("");
-    m_aboutData.SetHardwareVersion("");
-    m_aboutData.SetSupportUrl("");
-    uint8_t appId[16];
-    ToAppId(di, appId);
-    m_aboutData.SetAppId(appId, 16);
-    m_aboutData.SetAppName("");
-
     m_ajSecurity = new AllJoynSecurity(this, AllJoynSecurity::PRODUCER);
 }
 
@@ -154,128 +111,17 @@ void VirtualBusAttachment::Stop()
     }
 }
 
-void VirtualBusAttachment::SetAboutData(const char *uri, OCRepPayload *payload)
+void VirtualBusAttachment::SetAboutData(const char *rt, OCRepPayload *payload)
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
-    std::lock_guard<std::mutex> lock(m_mutex);
     if (!payload)
     {
         return;
     }
-    char *value = NULL;
-    if (!strcmp(uri, OC_RSRVD_DEVICE_URI))
-    {
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_ID, &value))
-        {
-            uint8_t appId[16];
-            ToAppId(value, appId);
-            m_aboutData.SetAppId(appId, 16);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MFG_NAME, &value))
-        {
-            m_aboutData.SetManufacturer(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
-        {
-            m_aboutData.SetModelNumber(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
-        {
-            m_aboutData.SetDateOfManufacture(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SOFTWARE_VERSION, &value))
-        {
-            m_aboutData.SetSoftwareVersion(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            m_aboutData.SetField("org.openconnectivity.piid", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        /* Vendor-defined properties */
-        for (OCRepPayloadValue *value = payload->values; value; value = value->next)
-        {
-            if (!strncmp(value->name, "x.", 2))
-            {
-                const char *fieldName = value->name + 2; /* Skip the leading x. */
-                char fieldSig[] = "aaaa{sv}";
-                CreateSignature(fieldSig, value); // TODO get this from introspection data when available
-                ajn::MsgArg fieldValue;
-                ToAJMsgArg(&fieldValue, fieldSig, value);
-                m_aboutData.SetNewFieldDetails(fieldName, 0, fieldSig);
-                m_aboutData.SetField(fieldName, fieldValue);
-            }
-        }
-    }
-    if (!strcmp(uri, OC_RSRVD_PLATFORM_URI))
-    {
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_ID, &value))
-        {
-            m_aboutData.SetDeviceId(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
-        {
-            m_aboutData.SetDateOfManufacture(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_HARDWARE_VERSION, &value))
-        {
-            m_aboutData.SetHardwareVersion(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SUPPORT_URL, &value))
-        {
-            m_aboutData.SetSupportUrl(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_URL, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            m_aboutData.SetField("org.openconnectivity.mnml", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_VERSION, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            m_aboutData.SetField("org.openconnectivity.mnpv", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_FIRMWARE_VERSION, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            m_aboutData.SetField("org.openconnectivity.mnfv", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SYSTEM_TIME, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            m_aboutData.SetField("org.openconnectivity.st", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_aboutData.Set(rt, payload);
 }
 
 ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char* ifaceName)
@@ -323,6 +169,10 @@ QStatus VirtualBusAttachment::Announce()
         this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_aboutData.IsValid())
+    {
+        return ER_FAIL;
+    }
     m_aboutObj = new ajn::AboutObj(*this, ajn::BusObject::ANNOUNCED);
     return m_aboutObj->Announce(m_port, m_aboutData);
 }
