@@ -20,6 +20,7 @@
 
 #include "AboutData.h"
 
+#include "Hash.h"
 #include "Payload.h"
 #include "Plugin.h"
 #include "Signature.h"
@@ -79,6 +80,12 @@ AboutData::AboutData(const char *defaultLanguage)
     {
         SetDefaultLanguage(defaultLanguage);
     }
+}
+
+QStatus AboutData::SetProtocolIndependentId(const char* piid)
+{
+    ajn::MsgArg arg("s", piid);
+    return SetField("org.openconnectivity.piid", arg);
 }
 
 QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
@@ -175,8 +182,7 @@ QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
         }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value))
         {
-            ajn::MsgArg valueArg("s", value);
-            SetField("org.openconnectivity.piid", valueArg);
+            SetProtocolIndependentId(value);
             OICFree(value);
             value = NULL;
         }
@@ -393,4 +399,81 @@ bool AboutData::IsValid()
         SetAppId(appId, 16);
     }
     return ajn::AboutData::IsValid();
+}
+
+QStatus GetProtocolIndependentId(char piid[UUID_STRING_SIZE], ajn::AboutData *aboutData,
+        const char *peerGuid)
+{
+    QStatus status = ER_FAIL;
+    ajn::MsgArg *arg = NULL;
+    aboutData->GetField("org.openconnectivity.piid", arg);
+    char *s = NULL;
+    if (arg && (arg->Get("s", &s) == ER_OK) && (strlen(s) == UUID_STRING_SIZE))
+    {
+        memcpy(piid, s, UUID_STRING_SIZE);
+        status = ER_OK;
+    }
+    else
+    {
+        OCUUIdentity id;
+        if (peerGuid && (sscanf(peerGuid, "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx"
+                "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
+                &id.id[0], &id.id[1], &id.id[2], &id.id[3], &id.id[4], &id.id[5],
+                &id.id[6], &id.id[7], &id.id[8], &id.id[9], &id.id[10], &id.id[11],
+                &id.id[12], &id.id[13], &id.id[14], &id.id[15]) == 16))
+        {
+            status = ER_OK;
+        }
+        else
+        {
+            char *deviceId = NULL;
+            aboutData->GetDeviceId(&deviceId);
+            uint8_t *appId = NULL;
+            size_t n = 0;
+            aboutData->GetAppId(&appId, &n);
+            if (deviceId && appId)
+            {
+                Hash(&id, deviceId, appId, n);
+                status = ER_OK;
+            }
+        }
+        OCConvertUuidToString(id.id, piid);
+    }
+    return status;
+}
+
+QStatus GetPlatformId(char pi[UUID_STRING_SIZE], ajn::AboutData *aboutData)
+{
+    QStatus status = ER_FAIL;
+    char *deviceId = NULL;
+    aboutData->GetDeviceId(&deviceId);
+    if (deviceId)
+    {
+        unsigned int tmp[16];
+        if (sscanf(deviceId, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4], &tmp[5], &tmp[6], &tmp[7],
+                &tmp[8], &tmp[9], &tmp[10], &tmp[11], &tmp[12], &tmp[13], &tmp[14], &tmp[15]) == 16)
+        {
+            memcpy(pi, deviceId, UUID_STRING_SIZE);
+            status = ER_OK;
+        }
+        else if (sscanf(deviceId, "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4], &tmp[5], &tmp[6], &tmp[7],
+                &tmp[8], &tmp[9], &tmp[10], &tmp[11], &tmp[12], &tmp[13], &tmp[14], &tmp[15]) == 16)
+        {
+            snprintf(pi, UUID_STRING_SIZE,
+                    "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                    tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7],
+                    tmp[8], tmp[9], tmp[10], tmp[11], tmp[12], tmp[13], tmp[14], tmp[15]);
+            status = ER_OK;
+        }
+        else
+        {
+            OCUUIdentity id;
+            Hash(&id, deviceId, NULL, 0);
+            OCConvertUuidToString(id.id, pi);
+            status = ER_OK;
+        }
+    }
+    return status;
 }

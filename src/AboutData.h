@@ -23,16 +23,22 @@
 
 #include <alljoyn/AboutData.h>
 #include "ocpayload.h"
+#include "ocrandom.h"
 
 class AboutData : public ajn::AboutData
 {
 public:
     AboutData(const char *defaultLanguage = NULL);
     QStatus Set(const char *rt, OCRepPayload *payload);
+    QStatus SetProtocolIndependentId(const char* piid);
     bool IsValid();
 private:
     char *m_n;
     void SetVendorFields(OCRepPayload *payload);
 };
+
+QStatus GetProtocolIndependentId(char piid[UUID_STRING_SIZE], ajn::AboutData *aboutData,
+        const char *peerGuid);
+QStatus GetPlatformId(char pi[UUID_STRING_SIZE], ajn::AboutData *aboutData);
 
 #endif

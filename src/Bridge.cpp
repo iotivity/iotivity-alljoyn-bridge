@@ -20,6 +20,7 @@
 
 #include "Bridge.h"
 
+#include "Hash.h"
 #include "Introspection.h"
 #include "Name.h"
 #include "Payload.h"
@@ -775,15 +776,14 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
     {
         qcc::String peerGuid;
         m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
-        OCUUIdentity piid;
-        GetPiid(&piid, peerGuid.c_str(), &context->m_aboutData);
-        char piidStr[UUID_STRING_SIZE];
-        OCConvertUuidToString(piid.id, piidStr);
+        char piid[UUID_STRING_SIZE];
+        GetProtocolIndependentId(piid, &context->m_aboutData,
+                peerGuid.empty() ? NULL : peerGuid.c_str());
 
         bool isVirtual = ajn::AboutObjectDescription(context->m_objectDescriptionArg)
                 .HasInterface("oic.d.virtual");
 
-        switch (GetSeenState(piidStr))
+        switch (GetSeenState(piid))
         {
             case NOT_SEEN:
                 if (isVirtual)
@@ -792,11 +792,11 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
                     LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
                             this);
                     m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
-                            piidStr, isVirtual));
+                            piid, isVirtual));
                 }
                 else
                 {
-                    m_execCb(piidStr, context->m_name.c_str(), isVirtual);
+                    m_execCb(piid, context->m_name.c_str(), isVirtual);
                 }
                 break;
             case SEEN_NATIVE:
@@ -809,8 +809,8 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
                 }
                 else
                 {
-                    DestroyPiid(piidStr);
-                    m_execCb(piidStr, context->m_name.c_str(), isVirtual);
+                    DestroyPiid(piid);
+                    m_execCb(piid, context->m_name.c_str(), isVirtual);
                 }
                 break;
         }
@@ -963,7 +963,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             }
 
             ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
-            context->m_device->SetInfo(objectDescription, context->m_aboutData);
+            context->m_device->SetProperties(objectDescription, context->m_aboutData);
 
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];
@@ -3201,36 +3201,4 @@ exit:
 
     ::RDPublish();
     thiz->m_rdPublishTask = NULL;
-}
-
-bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData)
-{
-    if (peerGuid && peerGuid[0])
-    {
-        return sscanf(peerGuid, "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx"
-                "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
-                &piid->id[0], &piid->id[1], &piid->id[2], &piid->id[3], &piid->id[4], &piid->id[5],
-                &piid->id[6], &piid->id[7], &piid->id[8], &piid->id[9], &piid->id[10], &piid->id[11],
-                &piid->id[12], &piid->id[13], &piid->id[14], &piid->id[15]) == 16;
-    }
-    else
-    {
-        ajn::MsgArg *piidArg = NULL;
-        aboutData->GetField("org.openconnectivity.piid", piidArg);
-        char *piidStr = NULL;
-        if (piidArg && (ER_OK == piidArg->Get("s", &piidStr)))
-        {
-            return (piidStr && OCConvertStringToUuid(piidStr, piid->id));
-        }
-        else
-        {
-            char *deviceId;
-            aboutData->GetDeviceId(&deviceId);
-            uint8_t *appId;
-            size_t n;
-            aboutData->GetAppId(&appId, &n);
-            DeriveUniqueId(piid, deviceId, appId, n);
-            return true;
-        }
-    }
 }

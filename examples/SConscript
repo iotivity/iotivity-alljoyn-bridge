@@ -25,7 +25,8 @@ Import('alljoynplugin_lib')
 alljoyn_libs = ['alljoyn', 'ajrouter']
 
 env_bridge = env.Clone()
-bridge_cpp = ['Plugin.cpp',
+bridge_cpp = ['Log.cpp',
+              'Plugin.cpp',
               'AllJoynBridge.cpp']
 manager_cpp = ['PluginManager.cpp']
 env_bridge.AppendUnique(LIBS = [alljoynplugin_lib])

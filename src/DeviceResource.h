@@ -18,11 +18,16 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _RESOURCE_H
-#define _RESOURCE_H
+#ifndef _DEVICERESOURCE_H
+#define _DEVICERESOURCE_H
 
 #include "octypes.h"
+#include <alljoyn/AboutData.h>
+#include <alljoyn/AboutObjectDescription.h>
+#include <alljoyn/BusAttachment.h>
 
-OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query);
+OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
+        ajn::AboutObjectDescription *objectDescription, ajn::AboutData *aboutData,
+        const char *peerGuid);
 
 #endif

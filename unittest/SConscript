@@ -24,11 +24,16 @@ alljoyn_libs = ['alljoyn', 'ajrouter']
 
 if env['TARGET_OS'] == 'linux':
     env_unittest = env.Clone();
+    env_unittest.VariantDir('examples', '../examples')
     env_unittest.VariantDir('src', '../src')
     unittest_cpp = ['AllJoynBridgeTest.cpp',
+                    'examples/Log.cpp',
                     'src/AboutData.cpp',
+                    'src/DeviceResource.cpp',
+                    'src/Hash.cpp',
                     'src/Name.cpp',
                     'src/Payload.cpp',
+                    'src/PlatformResource.cpp',
                     'src/Signature.cpp',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']

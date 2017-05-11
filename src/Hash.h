@@ -18,11 +18,11 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _RESOURCE_H
-#define _RESOURCE_H
+#ifndef _HASH_H
+#define _HASH_H
 
 #include "octypes.h"
 
-OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query);
+void Hash(OCUUIdentity *id, const char *deviceId, const uint8_t *appId, size_t n);
 
 #endif

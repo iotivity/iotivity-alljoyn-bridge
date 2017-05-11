@@ -1,6 +1,6 @@
 //******************************************************************
 //
-// Copyright 2017 Intel Corporation All Rights Reserved.
+// Copyright 2016 Intel Corporation All Rights Reserved.
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //
@@ -18,11 +18,24 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _RESOURCE_H
-#define _RESOURCE_H
+#ifndef _LOG_H
+#define _LOG_H
 
-#include "octypes.h"
+#include <inttypes.h>
 
-OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query);
+#define LOG_ERR         3
+#define LOG_INFO        6
 
-#endif
+void LogWriteln(
+    const char *file,
+    const char *function,
+    int32_t line,
+    int8_t severity,
+    const char *fmt,
+    ...
+);
+
+#define LOG(severity, fmt, ...)                                         \
+    LogWriteln(__FILE__, __FUNCTION__, __LINE__, severity, fmt, ##__VA_ARGS__)
+
+#endif // _LOG_H

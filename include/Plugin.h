@@ -18,11 +18,10 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef __PLUGIN_H__
-#define __PLUGIN_H__
+#ifndef _PLUGIN_H
+#define _PLUGIN_H
 
 #include "octypes.h"
-#include <inttypes.h>
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
 #include <stdint.h>
@@ -63,11 +62,7 @@ void LogWriteln(
 
 extern std::string gRD;
 
-void DeriveUniqueId(OCUUIdentity *id, const char *deviceId, uint8_t *appId, size_t n);
-
 const char *GetServerInstanceIDString();
-OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
-        ajn::AboutData &aboutData);
 OCStackResult StartPresence();
 OCStackResult StopPresence();
 
@@ -104,4 +99,4 @@ OCStackResult NotifyListOfObservers(const char *uri,
         uint8_t numberOfIds,
         OCRepPayload *payload);
 
-#endif // __PLUGIN_H__
+#endif // _PLUGIN_H

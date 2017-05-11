@@ -22,9 +22,12 @@ Import('env')
 
 iotivity_alljoyn_bridge_cpp = ['AboutData.cpp',
                                'Bridge.cpp',
+                               'DeviceResource.cpp',
+                               'Hash.cpp',
                                'Introspection.cpp',
                                'Name.cpp',
                                'Payload.cpp',
+                               'PlatformResource.cpp',
                                'Presence.cpp',
                                'Resource.cpp',
                                'Security.cpp',

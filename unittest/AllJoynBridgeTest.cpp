@@ -21,11 +21,18 @@
 #include <gtest/gtest.h>
 
 #include "AboutData.h"
+#include "DeviceResource.h"
+#include "Hash.h"
 #include "Name.h"
+#include "PlatformResource.h"
 #include "Plugin.h"
 #include "ocpayload.h"
+#include "ocrandom.h"
+#include "ocstack.h"
 #include "oic_malloc.h"
 #include <alljoyn/AboutData.h>
+#include <alljoyn/BusAttachment.h>
+#include <alljoyn/Init.h>
 
 class NameTranslationTest : public ::testing::TestWithParam<const char *> { };
 
@@ -383,4 +390,344 @@ TEST(AboutData, UseLocalizedNamesWhenNamePresent)
 
     OCRepPayloadDestroy(config);
     OCRepPayloadDestroy(device);
+}
+
+TEST(DeviceProperties, SetFromAboutData)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+    EXPECT_EQ(ER_OK, AllJoynInit());
+
+    AboutData aboutData("");
+    /* AppName => n */
+    const char *appName = "app-name";
+    EXPECT_EQ(ER_OK, aboutData.SetAppName(appName));
+    /* org.openconnectivity.piid => piid */
+    const char *piid = "10f70cc4-2398-41f5-8062-4c1facbfc41b";
+    EXPECT_EQ(ER_OK, aboutData.SetProtocolIndependentId(piid));
+    const char *peerGuid = "10f70cc4239841f580624c1facbfc41b";
+    const char *deviceId = "0ce43c8b-b997-4a05-b77d-1c92e01fe7ae";
+    EXPECT_EQ(ER_OK, aboutData.SetDeviceId(deviceId));
+    const uint8_t appId[] = { 0x46, 0xe8, 0x0b, 0xf8, 0x9f, 0xf5, 0x47, 0x8a,
+                              0xbe, 0x9f, 0x7f, 0xa3, 0x4a, 0xdc, 0x49, 0x7b };
+    EXPECT_EQ(ER_OK, aboutData.SetAppId(appId, sizeof(appId) / sizeof(appId[0])));
+    /* Version(s) => dmv */
+    const char *dmvs[] = { "org.iotivity.A.1", "org.iotivity.B.2", "org.iotivity.C.3", "org.iotivity.D.4" };
+    const char *ifs[] = {
+        "<interface name='org.iotivity.A'/>",
+        "<interface name='org.iotivity.B'>"
+        "  <annotation name='org.gtk.GDBus.Since' value='2'/>"
+        "</interface>",
+        "<interface name='org.iotivity.C'>"
+        "  <annotation name='org.gtk.GDBus.Since' value='3'/>"
+        "</interface>",
+        "<interface name='org.iotivity.D'>"
+        "  <annotation name='org.gtk.GDBus.Since' value='4'/>"
+        "</interface>",
+    };
+    ajn::BusAttachment *bus = new ajn::BusAttachment("DeviceProperties.SetFromAboutData");
+    for (size_t i = 0; i < sizeof(ifs) / sizeof(ifs[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, bus->CreateInterfacesFromXml(ifs[i]));
+    }
+    const char *ifsOne[] = { "org.iotivity.A", "org.iotivity.B" };
+    const char *ifsTwo[] = { "org.iotivity.B", "org.iotivity.C", "org.iotivity.D" };
+    ajn::MsgArg os[2];
+    os[0].Set("(oas)", "/one", sizeof(ifsOne) / sizeof(ifsOne[0]), ifsOne);
+    os[1].Set("(oas)", "/two", sizeof(ifsTwo) / sizeof(ifsTwo[0]), ifsTwo);
+    ajn::MsgArg odArg;
+    EXPECT_EQ(ER_OK, odArg.Set("a(oas)", sizeof(os) / sizeof(os[0]), os));
+    ajn::AboutObjectDescription objectDescription(odArg);
+    /* Description => ld */
+    LocalizedString descriptions[] = {
+        { "en", "en-description" },
+        { "fr", "fr-description" }
+    };
+    for (size_t i = 0; i < sizeof(descriptions) / sizeof(descriptions[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, aboutData.SetDescription(descriptions[i].value, descriptions[i].language));
+    }
+    /* SoftwareVersion => sv */
+    const char *softwareVersion = "software-version";
+    EXPECT_EQ(ER_OK, aboutData.SetSoftwareVersion(softwareVersion));
+    /* Manufacturer => dmn */
+    LocalizedString manufacturers[] = {
+        { "en", "en-manufacturer" },
+        { "fr", "fr-manufacturer" }
+    };
+    for (size_t i = 0; i < sizeof(manufacturers) / sizeof(manufacturers[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, aboutData.SetManufacturer(manufacturers[i].value, manufacturers[i].language));
+    }
+    /* ModelNumber => dmno */
+    const char *modelNumber = "model-number";
+    EXPECT_EQ(ER_OK, aboutData.SetModelNumber(modelNumber));
+    /* vendor-defined => x. */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    const char *vendorValue = "value";
+    ajn::MsgArg vendorArg("s", vendorValue);
+    EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg));
+
+    EXPECT_EQ(OC_STACK_OK, SetDeviceProperties(bus, &objectDescription, &aboutData, peerGuid));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, (void**) &s));
+    EXPECT_STREQ(appName, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, (void**) &s));
+    EXPECT_STREQ(piid, s);
+    OCStringLL *ll;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, (void**) &ll));
+    for (size_t i = 0; i < sizeof(dmvs) / sizeof(dmvs[0]); ++i)
+    {
+        EXPECT_STREQ(dmvs[i], ll->value);
+        ll = ll->next;
+    }
+    EXPECT_TRUE(ll == NULL);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_DESCRIPTION, (void**) &ll));
+    for (size_t i = 0; i < sizeof(descriptions) / sizeof(descriptions[0]); ++i)
+    {
+        EXPECT_STREQ(descriptions[i].language, ll->value);
+        ll = ll->next;
+        EXPECT_STREQ(descriptions[i].value, ll->value);
+        ll = ll->next;
+    }
+    EXPECT_TRUE(ll == NULL);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SOFTWARE_VERSION, (void**) &s));
+    EXPECT_STREQ(softwareVersion, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MFG_NAME, (void**) &ll));
+    for (size_t i = 0; i < sizeof(manufacturers) / sizeof(manufacturers[0]); ++i)
+    {
+        EXPECT_STREQ(manufacturers[i].language, ll->value);
+        ll = ll->next;
+        EXPECT_STREQ(manufacturers[i].value, ll->value);
+        ll = ll->next;
+    }
+    EXPECT_TRUE(ll == NULL);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, (void**) &s));
+    EXPECT_STREQ(modelNumber, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, vendorProperty, (void**) &s));
+    EXPECT_STREQ(vendorValue, s);
+
+    delete bus;
+    EXPECT_EQ(ER_OK, AllJoynShutdown());
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(DeviceProperties, UsePeerGuidForProtocolIndependentId)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+
+    AboutData aboutData("");
+    /* peer GUID (if org.openconnectivity.piid does not exist) => piid */
+    const char *piid = "10f70cc4-2398-41f5-8062-4c1facbfc41b";
+    const char *peerGuid = "10f70cc4239841f580624c1facbfc41b";
+    const char *deviceId = "0ce43c8b-b997-4a05-b77d-1c92e01fe7ae";
+    EXPECT_EQ(ER_OK, aboutData.SetDeviceId(deviceId));
+    const uint8_t appId[] = { 0x46, 0xe8, 0x0b, 0xf8, 0x9f, 0xf5, 0x47, 0x8a,
+                              0xbe, 0x9f, 0x7f, 0xa3, 0x4a, 0xdc, 0x49, 0x7b };
+    EXPECT_EQ(ER_OK, aboutData.SetAppId(appId, sizeof(appId) / sizeof(appId[0])));
+
+    EXPECT_EQ(OC_STACK_OK, SetDeviceProperties(NULL, NULL, &aboutData, peerGuid));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, (void**) &s));
+    EXPECT_STREQ(piid, s);
+
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(DeviceProperties, UseHashForProtocolIndependentId)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+
+    AboutData aboutData("");
+    /* Hash(DeviceId, AppId) (if org.openconnectivity.piid and peer GUID do not exist) => piid */
+    const char *deviceId = "0ce43c8b-b997-4a05-b77d-1c92e01fe7ae";
+    EXPECT_EQ(ER_OK, aboutData.SetDeviceId(deviceId));
+    const uint8_t appId[] = { 0x46, 0xe8, 0x0b, 0xf8, 0x9f, 0xf5, 0x47, 0x8a,
+                              0xbe, 0x9f, 0x7f, 0xa3, 0x4a, 0xdc, 0x49, 0x7b };
+    EXPECT_EQ(ER_OK, aboutData.SetAppId(appId, sizeof(appId) / sizeof(appId[0])));
+    OCUUIdentity id;
+    Hash(&id, deviceId, appId, sizeof(appId)/ sizeof(appId[0]));
+    char piid[UUID_STRING_SIZE];
+    OCConvertUuidToString(id.id, piid);
+
+    EXPECT_EQ(OC_STACK_OK, SetDeviceProperties(NULL, NULL, &aboutData, NULL));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, (void**) &s));
+    EXPECT_STREQ(piid, s);
+
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(DeviceProperties, NonStringVendorField)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+
+    AboutData aboutData("");
+    /* vendor-defined => x. */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    int32_t vendorValue = 1;
+    ajn::MsgArg vendorArg("i", vendorValue);
+    EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg));
+
+    EXPECT_EQ(OC_STACK_OK, SetDeviceProperties(NULL, NULL, &aboutData, NULL));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, vendorProperty, (void**) &s));
+    // TODO Verify vendorValue when get passes
+
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(DeviceProperties, LocalizedVendorField)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+
+    AboutData aboutData("");
+    /* vendor-defined => x. */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    LocalizedString vendorValues[] = {
+        { "en", "en-vendor" },
+        { "fr", "fr-vendor" }
+    };
+    for (size_t i = 0; i < sizeof(vendorValues) / sizeof(vendorValues[0]); ++i)
+    {
+        ajn::MsgArg vendorArg("s", vendorValues[i].value);
+        EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg, vendorValues[i].language));
+    }
+
+    EXPECT_EQ(OC_STACK_OK, SetDeviceProperties(NULL, NULL, &aboutData, NULL));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, vendorProperty, (void**) &s));
+    // TODO Verify vendorValues when get passes
+
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(PlatformProperties, SetFromAboutData)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+
+    AboutData aboutData("fr");
+    /* DeviceId, if it is UUID => pi */
+    const char *deviceId = "0ce43c8b-b997-4a05-b77d-1c92e01fe7ae";
+    EXPECT_EQ(ER_OK, aboutData.SetDeviceId(deviceId));
+    /* Manufacturer in DefaultLanguage and truncated to 16 bytes => mnmn */
+    LocalizedString manufacturers[] = {
+        { "en", "en-manufacturer-name" },
+        { "fr", "fr-manufacturer-name" }
+    };
+    for (size_t i = 0; i < sizeof(manufacturers) / sizeof(manufacturers[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, aboutData.SetManufacturer(manufacturers[i].value, manufacturers[i].language));
+    }
+    /* org.openconnectivity.mnml => mnml */
+    const char *manufacturerUrl = "manufacturer-url";
+    ajn::MsgArg arg("s", manufacturerUrl);
+    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnml", arg));
+    /* ModelNumber => mnmo */
+    const char *modelNumber = "model-number";
+    EXPECT_EQ(ER_OK, aboutData.SetModelNumber(modelNumber));
+    /* DateOfManufacture => mndt */
+    const char *dateOfManufacture = "date-of-manufacture";
+    EXPECT_EQ(ER_OK, aboutData.SetDateOfManufacture(dateOfManufacture));
+    /* org.openconnectivity.mnpv => mnpv */
+    const char *platformVersion = "platform-version";
+    arg.Set("s", platformVersion);
+    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnpv", arg));
+    /* org.openconnectivity.mnos => mnos */
+    const char *osVersion = "os-version";
+    arg.Set("s", osVersion);
+    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnos", arg));
+    /* HardwareVersion => mnhw */
+    const char *hardwareVersion = "hardware-version";
+    EXPECT_EQ(ER_OK, aboutData.SetHardwareVersion(hardwareVersion));
+    /* org.openconnectivity.mnfv => mnfv */
+    const char *firmwareVersion = "firmware-version";
+    arg.Set("s", firmwareVersion);
+    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnfv", arg));
+    /* SupportUrl => mnsl */
+    const char *supportUrl = "support-url";
+    EXPECT_EQ(ER_OK, aboutData.SetSupportUrl(supportUrl));
+    /* org.openconnectivity.st => st */
+    const char *systemTime = "system-time";
+    arg.Set("s", systemTime);
+    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.st", arg));
+
+    EXPECT_EQ(OC_STACK_OK, SetPlatformProperties(&aboutData));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, (void**) &s));
+    EXPECT_STREQ(deviceId, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, (void**) &s));
+    EXPECT_EQ((size_t) 16, strlen(s));
+    EXPECT_EQ(0, strncmp(manufacturers[1].value, s, 16));
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_URL, (void**) &s));
+    EXPECT_STREQ(manufacturerUrl, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MODEL_NUM, (void**) &s));
+    EXPECT_STREQ(modelNumber, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_DATE, (void**) &s));
+    EXPECT_STREQ(dateOfManufacture, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_VERSION, (void**) &s));
+    EXPECT_STREQ(platformVersion, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_OS_VERSION, (void**) &s));
+    EXPECT_STREQ(osVersion, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_HARDWARE_VERSION, (void**) &s));
+    EXPECT_STREQ(hardwareVersion, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_FIRMWARE_VERSION, (void**) &s));
+    EXPECT_STREQ(firmwareVersion, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SUPPORT_URL, (void**) &s));
+    EXPECT_STREQ(supportUrl, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_SYSTEM_TIME, (void**) &s));
+    EXPECT_STREQ(systemTime, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_VID, (void**) &s));
+    EXPECT_STREQ(deviceId, s);
+
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(PlatformProperties, UseHashForPlatformId)
+{
+    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+
+    AboutData aboutData("");
+    /* Hash(DeviceId), if DeviceId is not UUID => pi */
+    const char *deviceId = "device-id";
+    EXPECT_EQ(ER_OK, aboutData.SetDeviceId(deviceId));
+    OCUUIdentity id;
+    Hash(&id, deviceId, NULL, 0);
+    char pi[UUID_STRING_SIZE];
+    OCConvertUuidToString(id.id, pi);
+
+    EXPECT_EQ(OC_STACK_OK, SetPlatformProperties(&aboutData));
+
+    char *s;
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_PLATFORM_ID, (void**) &s));
+    EXPECT_STREQ(pi, s);
+    EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_VID, (void**) &s));
+    EXPECT_STREQ(deviceId, s);
+
+    EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+TEST(DeviceConfigurationProperties, SetFromAboutData)
+{
+    /* AppName => n */
+    /* org.openconnectivity.loc => loc */
+    /* org.openconnectivity.locn => locn */
+    /* org.openconnectivity.c => c */
+    /* org.openconnectivity.r => r */
+    /* AppName => ln */
+    /* DefaultLanguage => dl */
+    /* vendor-defined => x. */
+}
+
+TEST(PlatformConfigurationProperties, SetFromAboutData)
+{
+    /* DeviceName => n */
 }

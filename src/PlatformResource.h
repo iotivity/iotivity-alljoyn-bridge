@@ -18,11 +18,12 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _RESOURCE_H
-#define _RESOURCE_H
+#ifndef _PLATFORMRESOURCE_H
+#define _PLATFORMRESOURCE_H
 
 #include "octypes.h"
+#include <alljoyn/AboutData.h>
 
-OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query);
+OCStackResult SetPlatformProperties(ajn::AboutData *aboutData);
 
 #endif

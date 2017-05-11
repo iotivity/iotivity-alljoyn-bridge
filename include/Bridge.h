@@ -199,6 +199,4 @@ class Bridge : private ajn::AboutListener
                 const std::vector<OCDevAddr> &addrs, OCClientResponseHandler cb);
 };
 
-bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData);
-
 #endif
