@@ -512,7 +512,7 @@ QStatus GetProtocolIndependentId(char piid[UUID_STRING_SIZE], ajn::AboutData *ab
     ajn::MsgArg *arg = NULL;
     aboutData->GetField("org.openconnectivity.piid", arg);
     char *s = NULL;
-    if (arg && (arg->Get("s", &s) == ER_OK) && (strlen(s) == UUID_STRING_SIZE))
+    if (arg && (arg->Get("s", &s) == ER_OK) && (strlen(s) == UUID_STRING_SIZE - 1))
     {
         memcpy(piid, s, UUID_STRING_SIZE);
         status = ER_OK;
