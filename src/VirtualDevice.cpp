@@ -33,20 +33,12 @@
 VirtualDevice::VirtualDevice(ajn::BusAttachment *bus, const char *name, ajn::SessionId sessionId)
     : m_bus(bus), m_name(name), m_sessionId(sessionId)
 {
-    LOG(LOG_INFO, "[%p] name=%s,sessionId=%d",
-        this, name, sessionId);
+    LOG(LOG_INFO, "[%p] name=%s,sessionId=%d", this, name, sessionId);
 }
 
 VirtualDevice::~VirtualDevice()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
-
-    OCStackResult result = StopPresence();
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "StopPresence - %d", result);
-    }
+    LOG(LOG_INFO, "[%p]", this);
 }
 
 void VirtualDevice::SetProperties(ajn::AboutObjectDescription &objectDescription,
@@ -59,13 +51,4 @@ void VirtualDevice::SetProperties(ajn::AboutObjectDescription &objectDescription
     SetDeviceProperties(m_bus, &objectDescription, &aboutData,
             peerGuid.empty() ? NULL : peerGuid.c_str());
     SetPlatformProperties(&aboutData);
-}
-
-void VirtualDevice::StartPresence()
-{
-    OCStackResult result = ::StartPresence();
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "StartPresence - %d", result);
-    }
 }

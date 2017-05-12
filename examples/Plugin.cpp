@@ -35,16 +35,6 @@ const char *GetServerInstanceIDString()
     return OCGetServerInstanceIDString();
 }
 
-OCStackResult StartPresence()
-{
-    return OC_STACK_OK;
-}
-
-OCStackResult StopPresence()
-{
-    return OC_STACK_OK;
-}
-
 OCStackResult CreateResource(const char *uri,
                              const char *typeName,
                              const char *interfaceName,

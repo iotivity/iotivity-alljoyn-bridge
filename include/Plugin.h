@@ -48,8 +48,6 @@
 extern std::string gRD;
 
 const char *GetServerInstanceIDString();
-OCStackResult StartPresence();
-OCStackResult StopPresence();
 
 OCStackResult RDPublish();
 

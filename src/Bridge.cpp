@@ -960,7 +960,6 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
 
                 Presence *presence = new AllJoynPresence(m_bus, context->m_name);
                 m_presence.push_back(presence);
-                context->m_device->StartPresence();
             }
 
             ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);

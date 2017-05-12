@@ -40,7 +40,6 @@ class VirtualDevice
         ajn::SessionId GetSessionId() const { return m_sessionId; }
         void SetProperties(ajn::AboutObjectDescription &objectDescription,
                 ajn::AboutData &aboutData);
-        void StartPresence();
 
     private:
         std::mutex m_mutex;
