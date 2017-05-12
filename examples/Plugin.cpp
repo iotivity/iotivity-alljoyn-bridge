@@ -20,6 +20,7 @@
 
 #include "Plugin.h"
 
+#include "Log.h"
 #include "ocpayload.h"
 #include "ocrandom.h"
 #include "ocstack.h"

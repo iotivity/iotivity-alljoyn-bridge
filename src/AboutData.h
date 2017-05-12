@@ -28,9 +28,19 @@
 class AboutData : public ajn::AboutData
 {
 public:
+    static bool IsVendorField(const char *name);
     AboutData(const char *defaultLanguage = NULL);
     QStatus Set(const char *rt, OCRepPayload *payload);
     QStatus SetProtocolIndependentId(const char* piid);
+    QStatus SetManufacturerUrl(const char *url);
+    QStatus SetPlatformVersion(const char *version);
+    QStatus SetOperatingSystemVersion(const char *version);
+    QStatus SetFirmwareVersion(const char *version);
+    QStatus SetSystemTime(const char *systemTime);
+    QStatus SetLocation(double latitude, double longitude);
+    QStatus SetLocationName(const char *name);
+    QStatus SetCurrency(const char *currency);
+    QStatus SetRegion(const char *region);
     bool IsValid();
 private:
     char *m_n;

@@ -20,6 +20,7 @@
 
 #include "VirtualConfigBusObject.h"
 
+#include "Log.h"
 #include "Payload.h"
 #include "Plugin.h"
 #include "Signature.h"

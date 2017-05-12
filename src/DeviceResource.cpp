@@ -24,23 +24,6 @@
 #include "ocrandom.h"
 #include "ocstack.h"
 
-static bool IsStandardAboutDataField(const char *field)
-{
-    const char *fields[] = {
-        "AJSoftwareVersion", "AppId", "AppName", "DateOfManufacture", "DefaultLanguage",
-        "Description", "DeviceId", "DeviceName", "HardwareVersion", "Manufacturer", "ModelNumber",
-        "SoftwareVersion", "SupportUrl", "SupportedLanguages"
-    };
-    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i)
-    {
-        if (!strcmp(fields[i], field))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
         ajn::AboutObjectDescription *objectDescription, ajn::AboutData *aboutData,
         const char *peerGuid)
@@ -132,7 +115,7 @@ OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
     aboutData->GetFields(fs, nf);
     for (size_t i = 0; i < nf; ++i)
     {
-        if (IsStandardAboutDataField(fs[i]))
+        if (!AboutData::IsVendorField(fs[i]))
         {
             continue;
         }

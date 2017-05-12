@@ -21,6 +21,7 @@
 #include "VirtualBusAttachment.h"
 
 #include "Bridge.h"
+#include "Log.h"
 #include "Payload.h"
 #include "Plugin.h"
 #include "Security.h"

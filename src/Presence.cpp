@@ -20,6 +20,7 @@
 
 #include "Presence.h"
 
+#include "Log.h"
 #include "Plugin.h"
 
 AllJoynPresence::AllJoynPresence(ajn::BusAttachment *bus, const std::string &name)

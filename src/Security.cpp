@@ -20,6 +20,7 @@
 
 #include "Security.h"
 
+#include "Log.h"
 #include "Plugin.h"
 #include <alljoyn/BusAttachment.h>
 #include "pinoxmcommon.h"

@@ -23,6 +23,7 @@
 #include "Bridge.h"
 #include "DeviceResource.h"
 #include "Hash.h"
+#include "Log.h"
 #include "PlatformResource.h"
 #include "Plugin.h"
 #include "ocpayload.h"

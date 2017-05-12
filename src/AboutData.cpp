@@ -50,6 +50,23 @@ static void ToAppId(const char *di, uint8_t *appId)
     }
 }
 
+bool AboutData::IsVendorField(const char *name)
+{
+    const char *standardNames[] = {
+        "AJSoftwareVersion", "AppId", "AppName", "DateOfManufacture", "DefaultLanguage",
+        "Description", "DeviceId", "DeviceName", "HardwareVersion", "Manufacturer", "ModelNumber",
+        "SoftwareVersion", "SupportUrl", "SupportedLanguages"
+    };
+    for (size_t i = 0; i < sizeof(standardNames) / sizeof(standardNames[0]); ++i)
+    {
+        if (!strcmp(standardNames[i], name))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 void AboutData::SetVendorFields(OCRepPayload *payload)
 {
     for (OCRepPayloadValue *value = payload->values; value; value = value->next)
@@ -76,6 +93,10 @@ AboutData::AboutData(const char *defaultLanguage)
     SetNewFieldDetails("org.openconnectivity.mnos", 0, "s");
     SetNewFieldDetails("org.openconnectivity.mnpv", 0, "s");
     SetNewFieldDetails("org.openconnectivity.st", 0, "s");
+    SetNewFieldDetails("org.openconnectivity.loc", 0, "s");
+    SetNewFieldDetails("org.openconnectivity.locn", 0, "s");
+    SetNewFieldDetails("org.openconnectivity.c", 0, "s");
+    SetNewFieldDetails("org.openconnectivity.r", 0, "s");
     if (defaultLanguage)
     {
         SetDefaultLanguage(defaultLanguage);
@@ -86,6 +107,61 @@ QStatus AboutData::SetProtocolIndependentId(const char* piid)
 {
     ajn::MsgArg arg("s", piid);
     return SetField("org.openconnectivity.piid", arg);
+}
+
+QStatus AboutData::SetManufacturerUrl(const char *url)
+{
+    ajn::MsgArg arg("s", url);
+    return SetField("org.openconnectivity.mnml", arg);
+}
+
+QStatus AboutData::SetPlatformVersion(const char *version)
+{
+    ajn::MsgArg arg("s", version);
+    return SetField("org.openconnectivity.mnpv", arg);
+}
+
+QStatus AboutData::SetOperatingSystemVersion(const char *version)
+{
+    ajn::MsgArg arg("s", version);
+    return SetField("org.openconnectivity.mnos", arg);
+}
+
+QStatus AboutData::SetFirmwareVersion(const char *version)
+{
+    ajn::MsgArg arg("s", version);
+    return SetField("org.openconnectivity.mnfv", arg);
+}
+
+QStatus AboutData::SetSystemTime(const char *systemTime)
+{
+    ajn::MsgArg arg("s", systemTime);
+    return SetField("org.openconnectivity.st", arg);
+}
+
+QStatus AboutData::SetLocation(double latitude, double longitude)
+{
+    double location[] = { latitude, longitude };
+    ajn::MsgArg arg("ad", sizeof(location) / sizeof(location[0]), location);
+    return SetField("org.openconnectivity.loc", arg);
+}
+
+QStatus AboutData::SetLocationName(const char *name)
+{
+    ajn::MsgArg arg("s", name);
+    return SetField("org.openconnectivity.locn", arg);
+}
+
+QStatus AboutData::SetCurrency(const char *currency)
+{
+    ajn::MsgArg arg("s", currency);
+    return SetField("org.openconnectivity.c", arg);
+}
+
+QStatus AboutData::SetRegion(const char *region)
+{
+    ajn::MsgArg arg("s", region);
+    return SetField("org.openconnectivity.r", arg);
 }
 
 QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
@@ -289,6 +365,33 @@ QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
             OICFree(arr);
             arr = NULL;
         }
+        double *loc = NULL;
+        size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
+        if (OCRepPayloadGetDoubleArray(payload, "loc", &loc, dim) && (calcDimTotal(dim) == 2))
+        {
+            SetLocation(loc[0], loc[1]);
+            OICFree(loc);
+            loc = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, "locn", &value))
+        {
+            SetLocationName(value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, "c", &value))
+        {
+            SetCurrency(value);
+            OICFree(value);
+            value = NULL;
+        }
+        if (OCRepPayloadGetPropString(payload, "r", &value))
+        {
+            SetRegion(value);
+            OICFree(value);
+            value = NULL;
+        }
+        SetVendorFields(payload);
     }
     else if (!strcmp(rt, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION))
     {
@@ -315,6 +418,7 @@ QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
             OICFree(arr);
             arr = NULL;
         }
+        SetVendorFields(payload);
     }
     return ER_OK;
 }

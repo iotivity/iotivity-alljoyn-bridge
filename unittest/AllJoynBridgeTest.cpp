@@ -21,9 +21,11 @@
 #include <gtest/gtest.h>
 
 #include "AboutData.h"
+#include "DeviceConfigurationResource.h"
 #include "DeviceResource.h"
 #include "Hash.h"
 #include "Name.h"
+#include "PlatformConfigurationResource.h"
 #include "PlatformResource.h"
 #include "Plugin.h"
 #include "ocpayload.h"
@@ -92,7 +94,30 @@ TEST(IsValidErrorNameTest, Check)
     EXPECT_TRUE(IsValidErrorName("a.b:", &endp) && (*endp == ':'));
 }
 
-TEST(AboutData, IsValid)
+class AJOCSetUp : public testing::Test
+{
+protected:
+    virtual void SetUp()
+    {
+        EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+        EXPECT_EQ(ER_OK, AllJoynInit());
+    }
+    virtual void TearDown()
+    {
+        /*
+         * TODO AllJoyn has a bug where AllJoynShutdown() does not clear all the state needed to
+         * call AllJoynInit() again (an assert fires: alljoyn_core/src/XmlRulesValidator.cc:98: 
+         * static void ajn::XmlRulesValidator::MethodsValidator::Init(): Assertion `nullptr ==
+         * s_actionsMap' failed.)
+         */
+        //EXPECT_EQ(ER_OK, AllJoynShutdown());
+        EXPECT_EQ(OC_STACK_OK, OCStop());
+    }
+};
+
+class AboutDataTest : public AJOCSetUp { };
+
+TEST_F(AboutDataTest, IsValid)
 {
     AboutData aboutData;
     EXPECT_TRUE(aboutData.IsValid());
@@ -104,7 +129,7 @@ struct LocalizedString
     const char *value;
 };
 
-TEST(AboutData, SetFieldsFromDevice)
+TEST_F(AboutDataTest, SetFieldsFromDevice)
 {
     OCRepPayload *payload = OCRepPayloadCreate();
     /* di => AppId */
@@ -189,7 +214,7 @@ TEST(AboutData, SetFieldsFromDevice)
     OCRepPayloadDestroy(payload);
 }
 
-TEST(AboutData, SetFieldsFromPlatform)
+TEST_F(AboutDataTest, SetFieldsFromPlatform)
 {
     OCRepPayload *payload = OCRepPayloadCreate();
     /* p.mndt => DateOfManufacture */
@@ -254,7 +279,7 @@ TEST(AboutData, SetFieldsFromPlatform)
     OCRepPayloadDestroy(payload);
 }
 
-TEST(AboutData, SetFieldsFromDeviceConfiguration)
+TEST_F(AboutDataTest, SetFieldsFromDeviceConfiguration)
 {
     OCRepPayload *payload = OCRepPayloadCreate();
     /* con.dl => DefaultLanguage */
@@ -300,7 +325,7 @@ TEST(AboutData, SetFieldsFromDeviceConfiguration)
     OCRepPayloadDestroy(payload);
 }
 
-TEST(AboutData, SetFieldsFromPlatformConfiguration)
+TEST_F(AboutDataTest, SetFieldsFromPlatformConfiguration)
 {
     OCRepPayload *payload = OCRepPayloadCreate();
     /* con.p.mnpn => DeviceName (localized) */
@@ -333,7 +358,7 @@ TEST(AboutData, SetFieldsFromPlatformConfiguration)
     OCRepPayloadDestroy(payload);
 }
 
-TEST(AboutData, UseNameWhenLocalizedNamesNotPresent)
+TEST_F(AboutDataTest, UseNameWhenLocalizedNamesNotPresent)
 {
     OCRepPayload *payload = OCRepPayloadCreate();
     /* n => AppName (localized) */
@@ -351,7 +376,7 @@ TEST(AboutData, UseNameWhenLocalizedNamesNotPresent)
     OCRepPayloadDestroy(payload);
 }
 
-TEST(AboutData, UseLocalizedNamesWhenNamePresent)
+TEST_F(AboutDataTest, UseLocalizedNamesWhenNamePresent)
 {
     OCRepPayload *device = OCRepPayloadCreate();
     /* n => AppName (localized) */
@@ -392,11 +417,109 @@ TEST(AboutData, UseLocalizedNamesWhenNamePresent)
     OCRepPayloadDestroy(device);
 }
 
-TEST(DeviceProperties, SetFromAboutData)
-{
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
-    EXPECT_EQ(ER_OK, AllJoynInit());
+class ConfigDataTest : public AJOCSetUp { };
 
+TEST_F(ConfigDataTest, SetFieldsFromDeviceConfiguration)
+{
+    OCRepPayload *payload = OCRepPayloadCreate();
+    /* dl => DefaultLanguage */
+    const char *defaultLanguage = "en";
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, OC_RSRVD_DEFAULT_LANGUAGE, defaultLanguage));
+    /* loc => org.openconnectivity.loc */
+    double location[] = { -1.0, 1.0 };
+    size_t locationDim[MAX_REP_ARRAY_DEPTH] = { sizeof(location) / sizeof(location[0]), 0, 0 };
+    EXPECT_TRUE(OCRepPayloadSetDoubleArray(payload, "loc", location, locationDim));
+    /* locn => org.openconnectivity.locn */
+    const char *locationName = "location-name";
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "locn", locationName));
+    /* c => org.openconnectivity.c */
+    const char *currency = "currency";
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "c", currency));
+    /* r => org.openconnectivity.r */
+    const char *region = "region";
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "r", region));
+    /* vendor-defined => */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    const char *vendorValue = "value";
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, vendorProperty, vendorValue));
+    // TODO other OC types
+
+    AboutData aboutData;
+    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, payload);
+    EXPECT_TRUE(aboutData.IsValid());
+
+    char *s;
+    EXPECT_EQ(ER_OK, aboutData.GetDefaultLanguage(&s));
+    EXPECT_STREQ(defaultLanguage, s);
+    ajn::MsgArg *arg;
+    EXPECT_EQ(ER_OK, aboutData.GetField("org.openconnectivity.loc", arg));
+    double *ds;
+    size_t nd;
+    EXPECT_EQ(ER_OK, arg->Get("ad", &nd, &ds));
+    EXPECT_EQ(sizeof(location) / sizeof(location[0]), nd);
+    for (size_t i = 0; i < sizeof(location) / sizeof(location[0]); ++i)
+    {
+        EXPECT_EQ(location[i], ds[i]);
+    }
+    EXPECT_EQ(ER_OK, aboutData.GetField("org.openconnectivity.locn", arg));
+    EXPECT_EQ(ER_OK, arg->Get("s", &s));
+    EXPECT_STREQ(locationName, s);
+    EXPECT_EQ(ER_OK, aboutData.GetField("org.openconnectivity.c", arg));
+    EXPECT_EQ(ER_OK, arg->Get("s", &s));
+    EXPECT_STREQ(currency, s);
+    EXPECT_EQ(ER_OK, aboutData.GetField("org.openconnectivity.r", arg));
+    EXPECT_EQ(ER_OK, arg->Get("s", &s));
+    EXPECT_STREQ(region, s);
+    EXPECT_EQ(ER_OK, aboutData.GetField(vendorField, arg));
+    EXPECT_EQ(ER_OK, arg->Get("s", &s));
+    EXPECT_STREQ(vendorValue, s);
+}
+
+TEST_F(ConfigDataTest, SetFieldsFromPlatformConfiguration)
+{
+    OCRepPayload *payload = OCRepPayloadCreate();
+    /* mnpn => DeviceName */
+    LocalizedString names[] = {
+        { "en", "en-name" },
+        { "fr", "fr-name" }
+    };
+    size_t mnpnDim[MAX_REP_ARRAY_DEPTH] = { sizeof(names) / sizeof(names[0]), 0, 0 };
+    size_t dimTotal = calcDimTotal(mnpnDim);
+    OCRepPayload **mnpn = (OCRepPayload**) OICCalloc(dimTotal, sizeof(OCRepPayload*));
+    for (size_t i = 0; i < dimTotal; ++i)
+    {
+        mnpn[i] = OCRepPayloadCreate();
+        EXPECT_TRUE(OCRepPayloadSetPropString(mnpn[i], "language", names[i].language));
+        EXPECT_TRUE(OCRepPayloadSetPropString(mnpn[i], "value", names[i].value));
+    }
+    EXPECT_TRUE(OCRepPayloadSetPropObjectArrayAsOwner(payload, OC_RSRVD_PLATFORM_NAME, mnpn, mnpnDim));
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    const char *vendorValue = "value";
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, vendorProperty, vendorValue));
+    // TODO other OC types
+
+    AboutData aboutData("en");
+    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION, payload);
+    EXPECT_TRUE(aboutData.IsValid());
+
+    char *s;
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, aboutData.GetDeviceName(&s, names[i].language));
+        EXPECT_STREQ(names[i].value, s);
+    }
+    ajn::MsgArg *arg;
+    EXPECT_EQ(ER_OK, aboutData.GetField(vendorField, arg));
+    EXPECT_EQ(ER_OK, arg->Get("s", &s));
+    EXPECT_STREQ(vendorValue, s);
+}
+
+class DeviceProperties : public AJOCSetUp { };
+
+TEST_F(DeviceProperties, SetFromAboutData)
+{
     AboutData aboutData("");
     /* AppName => n */
     const char *appName = "app-name";
@@ -509,14 +632,10 @@ TEST(DeviceProperties, SetFromAboutData)
     EXPECT_STREQ(vendorValue, s);
 
     delete bus;
-    EXPECT_EQ(ER_OK, AllJoynShutdown());
-    EXPECT_EQ(OC_STACK_OK, OCStop());
 }
 
-TEST(DeviceProperties, UsePeerGuidForProtocolIndependentId)
+TEST_F(DeviceProperties, UsePeerGuidForProtocolIndependentId)
 {
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
-
     AboutData aboutData("");
     /* peer GUID (if org.openconnectivity.piid does not exist) => piid */
     const char *piid = "10f70cc4-2398-41f5-8062-4c1facbfc41b";
@@ -532,14 +651,10 @@ TEST(DeviceProperties, UsePeerGuidForProtocolIndependentId)
     char *s;
     EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, (void**) &s));
     EXPECT_STREQ(piid, s);
-
-    EXPECT_EQ(OC_STACK_OK, OCStop());
 }
 
-TEST(DeviceProperties, UseHashForProtocolIndependentId)
+TEST_F(DeviceProperties, UseHashForProtocolIndependentId)
 {
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
-
     AboutData aboutData("");
     /* Hash(DeviceId, AppId) (if org.openconnectivity.piid and peer GUID do not exist) => piid */
     const char *deviceId = "0ce43c8b-b997-4a05-b77d-1c92e01fe7ae";
@@ -557,14 +672,10 @@ TEST(DeviceProperties, UseHashForProtocolIndependentId)
     char *s;
     EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, (void**) &s));
     EXPECT_STREQ(piid, s);
-
-    EXPECT_EQ(OC_STACK_OK, OCStop());
 }
 
-TEST(DeviceProperties, NonStringVendorField)
+TEST_F(DeviceProperties, NonStringVendorField)
 {
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
-
     AboutData aboutData("");
     /* vendor-defined => x. */
     const char *vendorProperty = "x.org.iotivity.Field";
@@ -577,15 +688,11 @@ TEST(DeviceProperties, NonStringVendorField)
 
     char *s;
     EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, vendorProperty, (void**) &s));
-    // TODO Verify vendorValue when get passes
-
-    EXPECT_EQ(OC_STACK_OK, OCStop());
+    /* TODO Verify vendorValue when get passes */
 }
 
-TEST(DeviceProperties, LocalizedVendorField)
+TEST_F(DeviceProperties, LocalizedVendorField)
 {
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
-
     AboutData aboutData("");
     /* vendor-defined => x. */
     const char *vendorProperty = "x.org.iotivity.Field";
@@ -604,15 +711,13 @@ TEST(DeviceProperties, LocalizedVendorField)
 
     char *s;
     EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_DEVICE, vendorProperty, (void**) &s));
-    // TODO Verify vendorValues when get passes
-
-    EXPECT_EQ(OC_STACK_OK, OCStop());
+    /* TODO Verify vendorValues when get passes */
 }
 
-TEST(PlatformProperties, SetFromAboutData)
-{
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
+class PlatformProperties : public AJOCSetUp { };
 
+TEST_F(PlatformProperties, SetFromAboutData)
+{
     AboutData aboutData("fr");
     /* DeviceId, if it is UUID => pi */
     const char *deviceId = "0ce43c8b-b997-4a05-b77d-1c92e01fe7ae";
@@ -628,8 +733,7 @@ TEST(PlatformProperties, SetFromAboutData)
     }
     /* org.openconnectivity.mnml => mnml */
     const char *manufacturerUrl = "manufacturer-url";
-    ajn::MsgArg arg("s", manufacturerUrl);
-    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnml", arg));
+    EXPECT_EQ(ER_OK, aboutData.SetManufacturerUrl(manufacturerUrl));
     /* ModelNumber => mnmo */
     const char *modelNumber = "model-number";
     EXPECT_EQ(ER_OK, aboutData.SetModelNumber(modelNumber));
@@ -638,26 +742,22 @@ TEST(PlatformProperties, SetFromAboutData)
     EXPECT_EQ(ER_OK, aboutData.SetDateOfManufacture(dateOfManufacture));
     /* org.openconnectivity.mnpv => mnpv */
     const char *platformVersion = "platform-version";
-    arg.Set("s", platformVersion);
-    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnpv", arg));
+    EXPECT_EQ(ER_OK, aboutData.SetPlatformVersion(platformVersion));
     /* org.openconnectivity.mnos => mnos */
     const char *osVersion = "os-version";
-    arg.Set("s", osVersion);
-    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnos", arg));
+    EXPECT_EQ(ER_OK, aboutData.SetOperatingSystemVersion(osVersion));
     /* HardwareVersion => mnhw */
     const char *hardwareVersion = "hardware-version";
     EXPECT_EQ(ER_OK, aboutData.SetHardwareVersion(hardwareVersion));
     /* org.openconnectivity.mnfv => mnfv */
     const char *firmwareVersion = "firmware-version";
-    arg.Set("s", firmwareVersion);
-    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.mnfv", arg));
+    EXPECT_EQ(ER_OK, aboutData.SetFirmwareVersion(firmwareVersion));
     /* SupportUrl => mnsl */
     const char *supportUrl = "support-url";
     EXPECT_EQ(ER_OK, aboutData.SetSupportUrl(supportUrl));
     /* org.openconnectivity.st => st */
     const char *systemTime = "system-time";
-    arg.Set("s", systemTime);
-    EXPECT_EQ(ER_OK, aboutData.SetField("org.openconnectivity.st", arg));
+    EXPECT_EQ(ER_OK, aboutData.SetSystemTime(systemTime));
 
     EXPECT_EQ(OC_STACK_OK, SetPlatformProperties(&aboutData));
 
@@ -687,14 +787,10 @@ TEST(PlatformProperties, SetFromAboutData)
     EXPECT_STREQ(systemTime, s);
     EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_VID, (void**) &s));
     EXPECT_STREQ(deviceId, s);
-
-    EXPECT_EQ(OC_STACK_OK, OCStop());
 }
 
-TEST(PlatformProperties, UseHashForPlatformId)
+TEST_F(PlatformProperties, UseHashForPlatformId)
 {
-    EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
-
     AboutData aboutData("");
     /* Hash(DeviceId), if DeviceId is not UUID => pi */
     const char *deviceId = "device-id";
@@ -711,23 +807,150 @@ TEST(PlatformProperties, UseHashForPlatformId)
     EXPECT_STREQ(pi, s);
     EXPECT_EQ(OC_STACK_OK, OCGetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_VID, (void**) &s));
     EXPECT_STREQ(deviceId, s);
-
-    EXPECT_EQ(OC_STACK_OK, OCStop());
 }
 
-TEST(DeviceConfigurationProperties, SetFromAboutData)
+class DeviceConfigurationProperties : public AJOCSetUp { };
+
+TEST_F(DeviceConfigurationProperties, SetFromAboutData)
 {
+    AboutData aboutData("fr");
     /* AppName => n */
+    LocalizedString names[] = {
+        { "en", "en-name" },
+        { "fr", "fr-name" }
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, aboutData.SetAppName(names[i].value, names[i].language));
+    }
     /* org.openconnectivity.loc => loc */
+    double latitude = -1.0;
+    double longitude = 1.0;
+    EXPECT_EQ(ER_OK, aboutData.SetLocation(latitude, longitude));
     /* org.openconnectivity.locn => locn */
+    const char *locationName = "location-name";
+    EXPECT_EQ(ER_OK, aboutData.SetLocationName(locationName));
     /* org.openconnectivity.c => c */
+    const char *currency = "currency";
+    EXPECT_EQ(ER_OK, aboutData.SetCurrency(currency));
     /* org.openconnectivity.r => r */
+    const char *region = "region";
+    EXPECT_EQ(ER_OK, aboutData.SetRegion(region));
     /* AppName => ln */
     /* DefaultLanguage => dl */
     /* vendor-defined => x. */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    const char *vendorValue = "value";
+    ajn::MsgArg vendorArg("s", vendorValue);
+    EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg));
+
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_EQ(OC_STACK_OK, SetDeviceConfigurationProperties(payload, &aboutData));
+
+    char *s;
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_NAME, &s));
+    EXPECT_STREQ(names[1].value, s);
+    size_t locDim[MAX_REP_ARRAY_DEPTH];
+    double *locArr;
+    EXPECT_TRUE(OCRepPayloadGetDoubleArray(payload, "loc", &locArr, locDim));
+    EXPECT_EQ((size_t) 2, calcDimTotal(locDim));
+    EXPECT_EQ(latitude, locArr[0]);
+    EXPECT_EQ(longitude, locArr[1]);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "locn", &s));
+    EXPECT_STREQ(locationName, s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "c", &s));
+    EXPECT_STREQ(currency, s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "r", &s));
+    EXPECT_STREQ(region, s);
+    size_t lnDim[MAX_REP_ARRAY_DEPTH];
+    OCRepPayload **lnArr;
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "ln", &lnArr, lnDim));
+    EXPECT_EQ(sizeof(names) / sizeof(names[0]), calcDimTotal(lnDim));
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[i], "language", &s));
+        EXPECT_STREQ(names[i].language, s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[i], "value", &s));
+        EXPECT_STREQ(names[i].value, s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "dl", &s));
+    EXPECT_STREQ(names[1].language, s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, vendorProperty, &s));
+    EXPECT_STREQ(vendorValue, s);
 }
 
-TEST(PlatformConfigurationProperties, SetFromAboutData)
+TEST_F(DeviceConfigurationProperties, NonStringVendorField)
 {
+    AboutData aboutData("");
+    /* vendor-defined => x. */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    int32_t vendorValue = 1;
+    ajn::MsgArg vendorArg("i", vendorValue);
+    EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg));
+
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_EQ(OC_STACK_OK, SetDeviceConfigurationProperties(payload, &aboutData));
+
+    int64_t i;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, vendorProperty, &i));
+    /* TODO Verify vendorValue when get passes */
+}
+
+TEST_F(DeviceConfigurationProperties, LocalizedVendorField)
+{
+    AboutData aboutData("");
+    /* vendor-defined => x. */
+    const char *vendorProperty = "x.org.iotivity.Field";
+    const char *vendorField = "org.iotivity.Field";
+    LocalizedString vendorValues[] = {
+        { "en", "en-vendor" },
+        { "fr", "fr-vendor" }
+    };
+    for (size_t i = 0; i < sizeof(vendorValues) / sizeof(vendorValues[0]); ++i)
+    {
+        ajn::MsgArg vendorArg("s", vendorValues[i].value);
+        EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg, vendorValues[i].language));
+    }
+
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_EQ(OC_STACK_OK, SetDeviceConfigurationProperties(payload, &aboutData));
+
+    OCRepPayload **arr;
+    size_t dim[MAX_REP_ARRAY_DEPTH];
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, vendorProperty, &arr, dim));
+    /* TODO Verify vendorValues when get passes */
+}
+
+class PlatformConfigurationProperties : public AJOCSetUp { };
+
+TEST_F(PlatformConfigurationProperties, SetFromAboutData)
+{
+    AboutData aboutData("fr");
     /* DeviceName => n */
+    LocalizedString names[] = {
+        { "en", "en-name" },
+        { "fr", "fr-name" }
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    {
+        EXPECT_EQ(ER_OK, aboutData.SetDeviceName(names[i].value, names[i].language));
+    }
+
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_EQ(OC_STACK_OK, SetPlatformConfigurationProperties(payload, &aboutData));
+
+    size_t dim[MAX_REP_ARRAY_DEPTH];
+    OCRepPayload **arr;
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "mnpn", &arr, dim));
+    EXPECT_EQ(sizeof(names) / sizeof(names[0]), calcDimTotal(dim));
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    {
+        char *s;
+        EXPECT_TRUE(OCRepPayloadGetPropString(arr[i], "language", &s));
+        EXPECT_STREQ(names[i].language, s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(arr[i], "value", &s));
+        EXPECT_STREQ(names[i].value, s);
+    }
 }

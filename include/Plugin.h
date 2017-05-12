@@ -45,21 +45,6 @@
 /** To represent secure mode resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
 
-#define LOG_ERR         3
-#define LOG_INFO        6
-
-void LogWriteln(
-    const char *file,
-    const char *function,
-    int32_t line,
-    int8_t severity,
-    const char *fmt,
-    ...
-);
-
-#define LOG(severity, fmt, ...)                                         \
-    LogWriteln(__FILE__, __FUNCTION__, __LINE__, severity, fmt, ##__VA_ARGS__)
-
 extern std::string gRD;
 
 const char *GetServerInstanceIDString();

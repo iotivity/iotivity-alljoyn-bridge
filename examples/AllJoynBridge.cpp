@@ -19,6 +19,7 @@
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 #include "Bridge.h"
+#include "Log.h"
 #include "Plugin.h"
 #include "ocstack.h"
 #include "rd_client.h"

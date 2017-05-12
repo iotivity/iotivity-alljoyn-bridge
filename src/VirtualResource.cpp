@@ -22,6 +22,7 @@
 
 #include "Bridge.h"
 #include "Introspection.h"
+#include "Log.h"
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
