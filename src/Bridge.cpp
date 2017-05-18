@@ -20,11 +20,13 @@
 
 #include "Bridge.h"
 
+#include "DeviceConfigurationResource.h"
 #include "Hash.h"
 #include "Introspection.h"
 #include "Log.h"
 #include "Name.h"
 #include "Payload.h"
+#include "PlatformConfigurationResource.h"
 #include "Plugin.h"
 #include "Presence.h"
 #include "Resource.h"
@@ -116,6 +118,12 @@ std::vector<OCDevAddr> GetDevAddrs(OCDevAddr origin, const char *di, OCResourceP
     return addrs;
 }
 
+template <typename T>
+static bool HasResourceType(std::vector<std::string> rts, T rt)
+{
+    return std::find(rts.begin(), rts.end(), rt) != rts.end();
+}
+
 struct Resource
 {
     std::string m_uri;
@@ -178,8 +186,7 @@ struct Device
     {
         for (auto &resource : m_resources)
         {
-            if (std::find(resource.m_rts.begin(), resource.m_rts.end(), rt) !=
-                    resource.m_rts.end())
+            if (HasResourceType(resource.m_rts, rt))
             {
                 return &resource;
             }
@@ -191,8 +198,7 @@ struct Device
         Resource *resource = GetResourceUri(OC_RSRVD_DEVICE_URI);
         if (resource)
         {
-            return std::find(resource->m_rts.begin(), resource->m_rts.end(), "oic.d.virtual") !=
-                    resource->m_rts.end();
+            return HasResourceType(resource->m_rts, "oic.d.virtual");
         }
         return false;
     }
@@ -475,10 +481,9 @@ bool Bridge::Start()
             LOG(LOG_ERR, "OCSetResourceProperties() - %d", result);
             return false;
         }
-        result = CreateResource("/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
-                                OC_RSRVD_INTERFACE_READ_WRITE,
-                                Bridge::EntityHandlerCB, this,
-                                OC_DISCOVERABLE | OC_OBSERVABLE);
+        result = CreateResource(NULL, "/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
+                OC_RSRVD_INTERFACE_READ_WRITE, Bridge::EntityHandlerCB, this,
+                OC_DISCOVERABLE | OC_OBSERVABLE);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "CreateResource() - %d", result);
@@ -848,18 +853,21 @@ static bool ComparePath(const char *a, const char *b)
     return (strcmp(a, b) < 0);
 }
 
-VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path,
-        const char *ajSoftwareVersion)
+VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus, const char *name,
+        ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        ajn::AboutData *aboutData)
 {
     if (!strcmp(path, "/Config"))
     {
-        return VirtualConfigurationResource::Create(this, bus, name, sessionId, path,
-                ajSoftwareVersion);
+        VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus, name,
+                sessionId, path, ajSoftwareVersion, RDPublish, this);
+        resource->SetAboutData(aboutData);
+        return resource;
     }
     else
     {
-        return VirtualResource::Create(this, bus, name, sessionId, path, ajSoftwareVersion);
+        return VirtualResource::Create(bus, name, sessionId, path, ajSoftwareVersion, RDPublish,
+                this);
     }
 }
 
@@ -901,31 +909,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
         else
         {
             const char *lang = context->m_lang->c_str();
-            char *value = NULL;
-            aboutData.GetDeviceName(&value);
-            if (value)
-            {
-                context->m_aboutData.SetDeviceName(value, lang);
-                value = NULL;
-            }
-            aboutData.GetAppName(&value);
-            if (value)
-            {
-                context->m_aboutData.SetAppName(value, lang);
-                value = NULL;
-            }
-            aboutData.GetManufacturer(&value);
-            if (value)
-            {
-                context->m_aboutData.SetManufacturer(value, lang);
-                value = NULL;
-            }
-            aboutData.GetDescription(&value);
-            if (value)
-            {
-                context->m_aboutData.SetDescription(value, lang);
-                value = NULL;
-            }
+            context->m_aboutData.CreatefromMsgArg(*msg->GetArg(0), lang);
         }
         if (++context->m_lang != context->m_langs.end())
         {
@@ -946,24 +930,12 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             {
                 context->m_device = new VirtualDevice(m_bus, msg->GetSender(), msg->GetSessionId());
                 m_virtualDevices.push_back(context->m_device);
-
-                OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-                if (!handle)
-                {
-                    LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-                }
-                OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-                if (result != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-                }
-
                 Presence *presence = new AllJoynPresence(m_bus, context->m_name);
                 m_presence.push_back(presence);
             }
 
             ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
-            context->m_device->SetProperties(objectDescription, context->m_aboutData);
+            context->m_device->SetProperties(&objectDescription, &context->m_aboutData);
 
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];
@@ -1001,7 +973,8 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             for (size_t i = 0; i < add.size(); ++i)
             {
                 VirtualResource *resource = CreateVirtualResource(m_bus, context->m_name.c_str(),
-                        msg->GetSessionId(), add[i], m_ajSoftwareVersion.c_str());
+                        msg->GetSessionId(), add[i], m_ajSoftwareVersion.c_str(),
+                        &context->m_aboutData);
                 if (resource)
                 {
                     m_virtualResources.push_back(resource);
@@ -1066,7 +1039,7 @@ void Bridge::UpdatePresenceStatus(const OCDiscoveryPayload *payload)
 
 bool Bridge::IsSelf(const OCDiscoveryPayload *payload)
 {
-    return !strcmp(payload->sid, GetServerInstanceIDString());
+    return !strcmp(payload->sid, OCGetServerInstanceIDString());
 }
 
 bool Bridge::HasSeenBefore(const OCDiscoveryPayload *payload)
@@ -1332,7 +1305,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
          context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
     {
         Resource &r = *context->m_rit;
-        if (std::find(r.m_rts.begin(), r.m_rts.end(), "oic.r.alljoynobject") != r.m_rts.end())
+        if (HasResourceType(r.m_rts, "oic.r.alljoynobject"))
         {
             result = thiz->ContinueDiscovery(context, r.m_uri.c_str(), r.m_addrs,
                     Bridge::GetCollectionCB);
@@ -1408,7 +1381,7 @@ OCStackApplicationResult Bridge::GetCollectionCB(void *ctx, OCDoHandle handle,
     for (++context->m_rit; context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
     {
         Resource &r = *context->m_rit;
-        if (std::find(r.m_rts.begin(), r.m_rts.end(), "oic.r.alljoynobject") != r.m_rts.end())
+        if (HasResourceType(r.m_rts, "oic.r.alljoynobject"))
         {
             result = thiz->ContinueDiscovery(context, r.m_uri.c_str(), r.m_addrs,
                     Bridge::GetCollectionCB);
@@ -1881,8 +1854,7 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
         for (DiscoverContext::Iterator it = context->Begin(); it != context->End(); ++it)
         {
             Resource &r = it.GetResource();
-            if (std::find(r.m_rts.begin(), r.m_rts.end(), context->m_it.GetResourceType()) !=
-                    r.m_rts.end())
+            if (HasResourceType(r.m_rts, context->m_it.GetResourceType()))
             {
                 ifSet.insert(r.m_ifs.begin(), r.m_ifs.end());
             }
@@ -2786,12 +2758,14 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
         {
             /* These resources are not translated on-the-fly */
         }
-        else if (!strcmp(uri, "/oic/con") || !strcmp(uri, "/oic/mnt"))
+        else if (HasResourceType(it->m_rts, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION) ||
+                HasResourceType(it->m_rts, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION) ||
+                !strcmp(uri, "/oic/mnt"))
         {
             VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
             if (!obj)
             {
-                obj = new VirtualConfigBusObject(context->m_bus, context->GetDevAddrs(uri));
+                obj = new VirtualConfigBusObject(context->m_bus, uri, context->GetDevAddrs(uri));
                 status = context->m_bus->RegisterBusObject(obj);
                 if (status != ER_OK)
                 {
@@ -2921,10 +2895,10 @@ OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
                 result = OC_EH_OK;
                 response.ehResult = result;
                 response.payload = reinterpret_cast<OCPayload *>(payload);
-                OCStackResult doResult = DoResponse(&response);
+                OCStackResult doResult = OCDoResponse(&response);
                 if (doResult != OC_STACK_OK)
                 {
-                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
                     OCRepPayloadDestroy(payload);
                 }
                 break;
@@ -2949,10 +2923,10 @@ OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
                 result = OC_EH_OK;
                 response.ehResult = result;
                 response.payload = reinterpret_cast<OCPayload *>(outPayload);
-                OCStackResult doResult = DoResponse(&response);
+                OCStackResult doResult = OCDoResponse(&response);
                 if (doResult != OC_STACK_OK)
                 {
-                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
                     OCRepPayloadDestroy(outPayload);
                 }
                 break;
@@ -3134,20 +3108,19 @@ void Bridge::DestroyPiid(const char *piid)
     }
 }
 
-void Bridge::RDPublish()
+void Bridge::RDPublish(void *ctx)
 {
-    LOG(LOG_INFO, "[%p]", this);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_rdPublishTask)
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    if (thiz->m_rdPublishTask)
     {
         /* Delay the pending publication to give time for multiple resources to be created. */
-        m_rdPublishTask->m_tick = time(NULL) + 1;
+        thiz->m_rdPublishTask->m_tick = time(NULL) + 1;
     }
     else
     {
-        m_rdPublishTask = new RDPublishTask(time(NULL) + 1);
-        m_tasks.push_back(m_rdPublishTask);
+        thiz->m_rdPublishTask = new RDPublishTask(time(NULL) + 1);
+        thiz->m_tasks.push_back(thiz->m_rdPublishTask);
     }
 }
 

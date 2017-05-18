@@ -34,6 +34,17 @@ VirtualDevice::VirtualDevice(ajn::BusAttachment *bus, const char *name, ajn::Ses
     : m_bus(bus), m_name(name), m_sessionId(sessionId)
 {
     LOG(LOG_INFO, "[%p] name=%s,sessionId=%d", this, name, sessionId);
+
+    OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+    if (!handle)
+    {
+        LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+    }
+    OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
+    if (result != OC_STACK_OK)
+    {
+        LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+    }
 }
 
 VirtualDevice::~VirtualDevice()
@@ -41,14 +52,14 @@ VirtualDevice::~VirtualDevice()
     LOG(LOG_INFO, "[%p]", this);
 }
 
-void VirtualDevice::SetProperties(ajn::AboutObjectDescription &objectDescription,
-        ajn::AboutData &aboutData)
+void VirtualDevice::SetProperties(ajn::AboutObjectDescription *objectDescription,
+        ajn::AboutData *aboutData)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_aboutData = aboutData;
+    m_aboutData = *aboutData;
     qcc::String peerGuid;
     m_bus->GetPeerGUID(m_name.c_str(), peerGuid);
-    SetDeviceProperties(m_bus, &objectDescription, &aboutData,
+    SetDeviceProperties(m_bus, objectDescription, aboutData,
             peerGuid.empty() ? NULL : peerGuid.c_str());
-    SetPlatformProperties(&aboutData);
+    SetPlatformProperties(aboutData);
 }

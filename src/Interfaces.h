@@ -18,17 +18,17 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _DEVICECONFIGURATIONRESOURCE_H
-#define _DEVICECONFIGURATIONRESOURCE_H
+#ifndef _INTERFACES_H
+#define _INTERFACES_H
 
-#include "octypes.h"
-#include <alljoyn/AboutData.h>
+namespace ajn {
+    namespace org {
+        namespace alljoyn {
+            namespace Config {
+                extern const char *InterfaceXml;
+            }
+        }
+    }
+}
 
-/** To represent device configuration resource type.*/
-#define OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION "oic.wk.con"
-
-OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::AboutData *aboutData);
-OCStackResult SetDeviceConfigurationProperties(ajn::AboutData *aboutData,
-        const OCRepPayload *payload);
-
-#endif
+#endif /* _INTERFACES_H */

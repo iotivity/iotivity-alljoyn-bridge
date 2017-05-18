@@ -74,8 +74,8 @@ exit:
 }
 
 VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, bool isVirtual)
-    : ajn::BusAttachment(di), m_di(di), m_isVirtual(isVirtual), m_port(ajn::SESSION_PORT_ANY),
-    m_numSessions(0), m_aboutObj(NULL)
+    : ajn::BusAttachment(di), m_di(di), m_isVirtual(isVirtual), m_aboutData(NULL),
+    m_port(ajn::SESSION_PORT_ANY), m_numSessions(0), m_aboutObj(NULL)
 {
     LOG(LOG_INFO, "[%p] di=%s,piid=%s,isVirtual=%d",
             this, di, piid, isVirtual);

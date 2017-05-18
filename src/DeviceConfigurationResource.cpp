@@ -21,7 +21,9 @@
 #include "DeviceConfigurationResource.h"
 
 #include "AboutData.h"
+#include "Payload.h"
 #include "ocpayload.h"
+#include "ocstack.h"
 #include "oic_malloc.h"
 
 OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::AboutData *aboutData)
@@ -38,6 +40,9 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::About
     aboutData->GetFields(fs, nf);
 
     char *s = NULL;
+    aboutData->GetDefaultLanguage(&s);
+    OCRepPayloadSetPropString(payload, "dl", s);
+    s = NULL;
     aboutData->GetAppName(&s);
     OCRepPayloadSetPropString(payload, OC_RSRVD_DEVICE_NAME, s);
     ajn::MsgArg *arg = NULL;
@@ -93,9 +98,6 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::About
             goto exit;
         }
     }
-    s = NULL;
-    aboutData->GetDefaultLanguage(&s);
-    OCRepPayloadSetPropString(payload, "dl", s);
     for (size_t i = 0; i < nf; ++i)
     {
         if (!AboutData::IsVendorField(fs[i]))
@@ -126,4 +128,95 @@ exit:
         }
     }
     return result;
+}
+
+OCStackResult SetDeviceConfigurationProperties(ajn::AboutData *aboutData,
+        const OCRepPayload *payload)
+{
+    QStatus status = ER_OK;
+    /* ln is handled specially since the values are localized */
+    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    OCRepPayload **lns = NULL;
+    if (OCRepPayloadGetPropObjectArray(payload, "ln", &lns, dim))
+    {
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; (status == ER_OK) && (i < dimTotal); ++i)
+        {
+            char *language;
+            char *value;
+            if (OCRepPayloadGetPropString(lns[i], "language", &language) &&
+                    OCRepPayloadGetPropString(lns[i], "value", &value))
+            {
+                status = aboutData->SetAppName(value, language);
+                OICFree(language);
+                OICFree(value);
+            }
+        }
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(lns[i]);
+        }
+        OICFree(lns);
+    }
+    /* Update default language if it is supplied before setting other values */
+    char *s = NULL;
+    if (status == ER_OK)
+    {
+        if (OCRepPayloadGetPropString(payload, "dl", &s))
+        {
+            status = aboutData->SetDefaultLanguage(s);
+            OICFree(s);
+        }
+    }
+    /*
+     * Other values are translated as-is after translating the names.  Default language must be set
+     * by now for SetField below.
+     */
+    status = aboutData->GetDefaultLanguage(&s);
+    for (OCRepPayloadValue *value = payload->values; (status == ER_OK) && value; value = value->next)
+    {
+        const char *name = value->name;
+        if (!strcmp(name, "ln"))
+        {
+            continue;
+        }
+        if (!strcmp(name, "dl"))
+        {
+            name = "DefaultLanguage";
+        }
+        else if (!strcmp(name, OC_RSRVD_DEVICE_NAME))
+        {
+            name = "AppName";
+        }
+        else if (!strcmp(name, "loc"))
+        {
+            name = "org.openconnectivity.loc";
+        }
+        else if (!strcmp(name, "locn"))
+        {
+            name = "org.openconnectivity.locn";
+        }
+        else if (!strcmp(name, "c"))
+        {
+            name = "org.openconnectivity.c";
+        }
+        else if (!strcmp(name, "r"))
+        {
+            name = "org.openconnectivity.r";
+        }
+        else if (!strncmp(name, "x.", 2))
+        {
+            name = &name[2];
+        }
+        ajn::MsgArg val;
+        if (!ToAJMsgArg(&val, "v", value))
+        {
+            status = ER_FAIL;
+        }
+        if (status == ER_OK)
+        {
+            status = aboutData->SetField(name, val);
+        }
+    }
+    return (status == ER_OK) ? OC_STACK_OK : OC_STACK_ERROR;
 }

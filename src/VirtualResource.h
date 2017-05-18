@@ -31,23 +31,29 @@
 
 class Bridge;
 
+
+
 class VirtualResource : public ajn::ProxyBusObject
     , protected ajn::ProxyBusObject::Listener
     , private ajn::BusAttachment::AddMatchAsyncCB
     , private ajn::BusAttachment::RemoveMatchAsyncCB
 {
     public:
-        static VirtualResource *Create(Bridge *bridge, ajn::BusAttachment *bus, const char *name,
-                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
+        typedef void (*CreateCB)(void *context);
+        static VirtualResource *Create(ajn::BusAttachment *bus, const char *name,
+                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+                CreateCB createCb, void *createContext);
         virtual ~VirtualResource();
 
     protected:
         std::mutex m_mutex;
-        Bridge *m_bridge;
         ajn::BusAttachment *m_bus;
+        CreateCB m_createCb;
+        void *m_createContext;
 
-        VirtualResource(Bridge *bridge, ajn::BusAttachment *bus, const char *name,
-                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
+        VirtualResource(ajn::BusAttachment *bus, const char *name, ajn::SessionId sessionId,
+                const char *path, const char *ajSoftwareVersion, CreateCB createCb,
+                void *createContext);
 
     private:
         std::string m_ajSoftwareVersion;
@@ -71,7 +77,7 @@ class VirtualResource : public ajn::ProxyBusObject
         };
         std::map<Observation, std::vector<OCObservationId>> m_observers;
         std::map<OCObservationId, std::string> m_matchRules;
-        std::vector<std::string> m_paths;
+        std::vector<OCResourceHandle> m_handles;
 
         OCStackResult Create();
         uint8_t GetMethodCallFlags(const char *ifaceName);

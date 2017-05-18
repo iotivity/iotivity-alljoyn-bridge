@@ -24,6 +24,9 @@
 #include "octypes.h"
 #include <alljoyn/AboutData.h>
 
+/** To represent platform configuration resource type.*/
+#define OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION "oic.wk.con.p"
+
 OCStackResult SetPlatformConfigurationProperties(OCRepPayload *payload, ajn::AboutData *aboutData);
 
 #endif

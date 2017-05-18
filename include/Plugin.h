@@ -36,50 +36,19 @@
 /* Platform name, localized */
 #define OC_RSRVD_PLATFORM_NAME "mnpn"
 
-/** To represent device configuration resource type.*/
-#define OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION "oic.wk.con"
-
-/** To represent platform configuration resource type.*/
-#define OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION "oic.wk.con.p"
-
 /** To represent secure mode resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
 
 extern std::string gRD;
 
-const char *GetServerInstanceIDString();
-
 OCStackResult RDPublish();
 
-OCStackResult CreateResource(const char *uri, const char *typeName, const char *interfaceName,
-        OCEntityHandler entityHandler, void *callbackParam,
-        uint8_t properties);
-OCStackResult DestroyResource(const char *uri);
-OCStackResult AddResourceType(const char *uri, const char *typeName);
-OCStackResult AddInterface(const char *uri, const char *interfaceName);
-OCStackResult DoResponse(OCEntityHandlerResponse *response);
-
-OCStackResult DoResource(OCDoHandle *handle,
-        OCMethod method,
-        const char *uri,
-        const OCDevAddr *destination,
-        OCPayload *payload,
-        OCCallbackData *cbData,
-        OCHeaderOption *options,
-        uint8_t numOptions);
-OCStackResult DoResource(OCDoHandle *handle,
-        OCMethod method,
-        const char *uri,
-        const std::vector<OCDevAddr> &destinations,
-        OCPayload *payload,
-        OCCallbackData *cbData,
-        OCHeaderOption *options,
-        uint8_t numOptions);
+OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+        const OCDevAddr *destination, OCPayload *payload, OCCallbackData *cbData,
+        OCHeaderOption *options, uint8_t numOptions);
+OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+        const std::vector<OCDevAddr> &destinations, OCPayload *payload, OCCallbackData *cbData,
+        OCHeaderOption *options, uint8_t numOptions);
 OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos);
-
-OCStackResult NotifyListOfObservers(const char *uri,
-        OCObservationId  *obsIdList,
-        uint8_t numberOfIds,
-        OCRepPayload *payload);
 
 #endif // _PLUGIN_H

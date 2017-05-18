@@ -20,8 +20,10 @@
 
 #include "AboutData.h"
 
+#include "DeviceConfigurationResource.h"
 #include "Hash.h"
 #include "Payload.h"
+#include "PlatformConfigurationResource.h"
 #include "Plugin.h"
 #include "Signature.h"
 #include "oic_malloc.h"
@@ -84,8 +86,37 @@ void AboutData::SetVendorFields(OCRepPayload *payload)
     }
 }
 
+/*
+ * Create with empty ajn::MsgArg to ensure base class does not fill in any default fields, but note
+ * that SupportedLanguages will get filled in automatically anyways.
+ */
+AboutData::AboutData()
+    : ajn::AboutData(ajn::MsgArg()), m_n(NULL), m_setSupportedLanguage(false)
+{
+}
+
 AboutData::AboutData(const char *defaultLanguage)
-    : m_n(NULL)
+    : m_n(NULL), m_setSupportedLanguage(false)
+{
+    SetFieldDetails();
+    if (defaultLanguage)
+    {
+        SetDefaultLanguage(defaultLanguage);
+    }
+}
+
+AboutData::AboutData(const ajn::MsgArg *arg, const char *language)
+    : ajn::AboutData(*arg, language), m_n(NULL), m_setSupportedLanguage(false)
+{
+    SetFieldDetails();
+}
+
+QStatus AboutData::CreateFromMsgArg(const ajn::MsgArg *arg, const char* language)
+{
+    return CreatefromMsgArg(*arg, language);
+}
+
+void AboutData::SetFieldDetails()
 {
     SetNewFieldDetails("org.openconnectivity.piid", ANNOUNCED, "s");
     SetNewFieldDetails("org.openconnectivity.mnfv", 0, "s");
@@ -97,10 +128,50 @@ AboutData::AboutData(const char *defaultLanguage)
     SetNewFieldDetails("org.openconnectivity.locn", 0, "s");
     SetNewFieldDetails("org.openconnectivity.c", 0, "s");
     SetNewFieldDetails("org.openconnectivity.r", 0, "s");
-    if (defaultLanguage)
+}
+
+QStatus AboutData::GetConfigData(ajn::MsgArg* arg, const char* language)
+{
+    size_t numFields = GetFields();
+    const char *fieldNames[numFields];
+    GetFields(fieldNames, numFields);
+    ajn::MsgArg fields[numFields];
+    ajn::MsgArg *field = fields;
+    QStatus status = ER_OK;
+    for (size_t i = 0; (status == ER_OK) && (i < numFields); ++i)
     {
-        SetDefaultLanguage(defaultLanguage);
+        /* Don't provide implicit SupportedLanguages field */
+        if (!strcmp(fieldNames[i], "SupportedLanguages") && !m_setSupportedLanguage)
+        {
+            continue;
+        }
+        ajn::MsgArg *fieldArg = NULL;
+        status = GetField(fieldNames[i], fieldArg, language);
+        if (status == ER_OK)
+        {
+            field->typeId = ajn::ALLJOYN_DICT_ENTRY;
+            field->v_dictEntry.key = new ajn::MsgArg("s", fieldNames[i]);
+            if (fieldArg->typeId == ajn::ALLJOYN_VARIANT)
+            {
+                field->v_dictEntry.val = new ajn::MsgArg(*fieldArg);
+            }
+            else
+            {
+                field->v_dictEntry.val = new ajn::MsgArg("v", fieldArg);
+            }
+            field->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
+        }
+        ++field;
     }
+    if (status == ER_OK)
+    {
+        status = arg->Set("a{sv}", field - fields, fields);
+        if (status == ER_OK)
+        {
+            arg->Stabilize();
+        }
+    }
+    return status;
 }
 
 QStatus AboutData::SetProtocolIndependentId(const char* piid)
@@ -421,6 +492,20 @@ QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
         SetVendorFields(payload);
     }
     return ER_OK;
+}
+
+/*
+ * SupportedLanguages is set implicitly by base class.  Remember whether it's explicit or not so
+ * that we can return the proper payload for GetConfigData.
+ */
+QStatus AboutData::SetSupportedLanguage(const char* language)
+{
+    QStatus status = ajn::AboutData::SetSupportedLanguage(language);
+    if (status == ER_OK)
+    {
+        m_setSupportedLanguage = true;
+    }
+    return status;
 }
 
 static bool HasField(const char **fields, size_t numFields, const char *field)

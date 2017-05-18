@@ -26,10 +26,12 @@
 class VirtualConfigBusObject : public VirtualBusObject
 {
     public:
-        VirtualConfigBusObject(ajn::BusAttachment *bus, const std::vector<OCDevAddr> &devAddrs);
+        VirtualConfigBusObject(ajn::BusAttachment *bus, const char *uri,
+            const std::vector<OCDevAddr> &devAddrs);
         virtual ~VirtualConfigBusObject();
 
     private:
+        std::string m_uri;
         const ajn::InterfaceDescription *m_iface;
 
         virtual QStatus Get(const char *ifaceName, const char *propName, ajn::MsgArg &val);

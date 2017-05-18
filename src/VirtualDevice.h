@@ -38,8 +38,8 @@ class VirtualDevice
 
         std::string GetName() const { return m_name; }
         ajn::SessionId GetSessionId() const { return m_sessionId; }
-        void SetProperties(ajn::AboutObjectDescription &objectDescription,
-                ajn::AboutData &aboutData);
+        void SetProperties(ajn::AboutObjectDescription *objectDescription,
+                ajn::AboutData *aboutData);
 
     private:
         std::mutex m_mutex;

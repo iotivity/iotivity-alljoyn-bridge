@@ -72,9 +72,6 @@ class Bridge : private ajn::AboutListener
         bool Stop();
         bool Process();
 
-        /* Used internally */
-        void RDPublish();
-
     private:
         struct DiscoverContext;
         struct Task
@@ -137,6 +134,7 @@ class Bridge : private ajn::AboutListener
         size_t m_pending;
         std::string m_ajSoftwareVersion;
 
+        static void RDPublish(void *context);
         void WhoImplements();
         void Destroy(const char *id);
         virtual void BusDisconnected();
@@ -149,7 +147,8 @@ class Bridge : private ajn::AboutListener
         virtual void SessionLost(ajn::SessionId sessionId,
                 ajn::SessionListener::SessionLostReason reason);
         VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus, const char *name,
-                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
+                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+                ajn::AboutData *aboutData);
 
         OCRepPayload *GetSecureMode(OCEntityHandlerRequest *request);
         bool PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged);

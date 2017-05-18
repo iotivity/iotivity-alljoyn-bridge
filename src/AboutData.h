@@ -29,8 +29,13 @@ class AboutData : public ajn::AboutData
 {
 public:
     static bool IsVendorField(const char *name);
-    AboutData(const char *defaultLanguage = NULL);
+    AboutData();
+    AboutData(const char *defaultLanguage);
+    AboutData(const ajn::MsgArg *arg, const char *language);
+    QStatus CreateFromMsgArg(const ajn::MsgArg *arg, const char* language);
+    QStatus GetConfigData(ajn::MsgArg* arg, const char* language);
     QStatus Set(const char *rt, OCRepPayload *payload);
+    QStatus SetSupportedLanguage(const char* language);
     QStatus SetProtocolIndependentId(const char* piid);
     QStatus SetManufacturerUrl(const char *url);
     QStatus SetPlatformVersion(const char *version);
@@ -44,6 +49,8 @@ public:
     bool IsValid();
 private:
     char *m_n;
+    bool m_setSupportedLanguage;
+    void SetFieldDetails();
     void SetVendorFields(OCRepPayload *payload);
 };
 

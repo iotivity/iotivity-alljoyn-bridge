@@ -30,50 +30,6 @@
 
 std::string gRD;
 
-const char *GetServerInstanceIDString()
-{
-    return OCGetServerInstanceIDString();
-}
-
-OCStackResult CreateResource(const char *uri,
-                             const char *typeName,
-                             const char *interfaceName,
-                             OCEntityHandler entityHandler,
-                             void *callbackParam,
-                             uint8_t properties)
-{
-    OCStackResult result;
-    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
-    if (handle)
-    {
-        result = OC_STACK_OK;
-    }
-    else
-    {
-        result = OCCreateResource(&handle, typeName, interfaceName, uri,
-                                  entityHandler, callbackParam, properties);
-    }
-    return result;
-}
-
-OCStackResult DestroyResource(const char *uri)
-{
-    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
-    return OCDeleteResource(handle);
-}
-
-OCStackResult AddResourceType(const char *uri, const char *typeName)
-{
-    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
-    return OCBindResourceTypeToResource(handle, typeName);
-}
-
-OCStackResult AddInterface(const char *uri, const char *interfaceName)
-{
-    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
-    return OCBindResourceInterfaceToResource(handle, interfaceName);
-}
-
 OCStackResult DoResource(OCDoHandle *handle,
         OCMethod method,
         const char *uri,
@@ -83,8 +39,8 @@ OCStackResult DoResource(OCDoHandle *handle,
         OCHeaderOption *options,
         uint8_t numOptions)
 {
-    return OCDoResource(handle, method, uri, destination, payload,
-            CT_DEFAULT, OC_HIGH_QOS, cbData, options, numOptions);
+    return OCDoResource(handle, method, uri, destination, payload, CT_DEFAULT, OC_HIGH_QOS, cbData,
+            options, numOptions);
 }
 
 OCStackResult DoResource(OCDoHandle *handle,
@@ -107,8 +63,8 @@ OCStackResult DoResource(OCDoHandle *handle,
             break;
         }
     }
-    return OCDoResource(handle, method, uri, destination, payload,
-            CT_DEFAULT, OC_HIGH_QOS, cbData, options, numOptions);
+    return OCDoResource(handle, method, uri, destination, payload, CT_DEFAULT, OC_HIGH_QOS, cbData,
+            options, numOptions);
 }
 
 OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos)
@@ -116,28 +72,12 @@ OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos)
     return OCCancel(handle, qos, NULL, 0);
 }
 
-OCStackResult DoResponse(OCEntityHandlerResponse *response)
-{
-    return OCDoResponse(response);
-}
-
-OCStackResult NotifyListOfObservers(const char *uri,
-                                    OCObservationId  *obsIdList,
-                                    uint8_t numberOfIds,
-                                    OCRepPayload *payload)
-{
-    OCResourceHandle handle = OCGetResourceHandleAtUri(uri);
-    return OCNotifyListOfObservers(handle, obsIdList, numberOfIds, payload,
-                                   OC_HIGH_QOS);
-}
-
 static OCStackApplicationResult RDPublishCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
     (void) ctx;
     (void) handle;
-    LOG(LOG_INFO, "response=%p,response->result=%d",
-        response, response ? response->result : 0);
+    LOG(LOG_INFO, "response=%p,response->result=%d", response, response ? response->result : 0);
     return OC_STACK_DELETE_TRANSACTION;
 }
 
@@ -149,21 +89,18 @@ OCStackResult RDPublish()
     {
         return result;
     }
-    OCResourceHandle *hs = new OCResourceHandle[nr];
-    uint8_t nhs = 0;
+    std::vector<OCResourceHandle> hs;
     for (uint8_t i = 0; i < nr; ++i)
     {
         OCResourceHandle h = OCGetResourceHandle(i);
         if (OCGetResourceProperties(h) & OC_DISCOVERABLE)
         {
-            hs[nhs++] = h;
+            hs.push_back(h);
         }
     }
     OCCallbackData cbData;
     cbData.cb = RDPublishCB;
     cbData.context = NULL;
     cbData.cd = NULL;
-    result = OCRDPublish(NULL, gRD.c_str(), CT_DEFAULT, hs, nhs, &cbData, OC_HIGH_QOS);
-    delete[] hs;
-    return result;
+    return OCRDPublish(NULL, gRD.c_str(), CT_DEFAULT, &hs[0], hs.size(), &cbData, OC_HIGH_QOS);
 }

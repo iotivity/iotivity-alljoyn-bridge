@@ -22,7 +22,19 @@
 #define _RESOURCE_H
 
 #include "octypes.h"
+#include <map>
+#include <string>
 
-OCRepPayload *CreatePayload(OCResourceHandle handle, const char *query);
+OCStackResult CreateResource(OCResourceHandle *handle, const char *uri, const char *typeName,
+        const char *interfaceName, OCEntityHandler entityHandler, void *callbackParam,
+        uint8_t properties);
+
+bool IsValidRequest(OCEntityHandlerRequest *request);
+std::map<std::string, std::string> ParseQuery(const char *query);
+
+OCRepPayload *CreatePayload(OCResourceHandle resource, const char *query);
+bool SetResourceTypes(OCRepPayload *payload, OCResourceHandle resource);
+bool SetInterfaces(OCRepPayload *payload, OCResourceHandle resource);
+bool SetLinks(OCRepPayload *payload, OCResourceHandle *resources, uint8_t numResources);
 
 #endif

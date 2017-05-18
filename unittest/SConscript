@@ -32,14 +32,22 @@ if env['TARGET_OS'] == 'linux':
                     'src/DeviceConfigurationResource.cpp',
                     'src/DeviceResource.cpp',
                     'src/Hash.cpp',
+                    'src/Interfaces.cpp',
                     'src/Name.cpp',
                     'src/Payload.cpp',
                     'src/PlatformConfigurationResource.cpp',
                     'src/PlatformResource.cpp',
+                    'src/Resource.cpp',
                     'src/Signature.cpp',
+                    'src/VirtualConfigurationResource.cpp',
+                    'src/VirtualDevice.cpp',
+                    'src/VirtualResource.cpp',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
-    env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include', '#/src'])
+    env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include',
+                                         '${IOTIVITY_BASE}/resource/c_common/oic_time/include',
+                                         '${IOTIVITY_BASE}/resource/csdk/stack/test',
+                                         '#/src'])
     env_unittest.AppendUnique(LIBS = [
         'crypto',
         alljoyn_libs,

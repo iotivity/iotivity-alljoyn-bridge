@@ -20,6 +20,7 @@
 
 #include "VirtualConfigBusObject.h"
 
+#include "Interfaces.h"
 #include "Log.h"
 #include "Payload.h"
 #include "Plugin.h"
@@ -29,42 +30,14 @@
 #include "oic_malloc.h"
 #include <assert.h>
 
-static const char *ifaceXml =
-    "<interface name='org.alljoyn.Config'>"
-    "  <method name='FactoryReset'>"
-    "    <annotation name='org.freedesktop.DBus.Method.NoReply' value='true'/>"
-    "  </method>"
-    "  <method name='GetConfigurations'>"
-    "    <arg name='languageTag' type='s' direction='in'/>"
-    "    <arg name='languages' type='a{sv}' direction='out'/>"
-    "  </method>"
-    "  <method name='ResetConfigurations'>"
-    "    <arg name='languageTag' type='s' direction='in'/>"
-    "    <arg name='fieldList' type='as' direction='in'/>"
-    "  </method>"
-    "  <method name='Restart'>"
-    "    <annotation name='org.freedesktop.DBus.Method.NoReply' value='true'/>"
-    "  </method>"
-    "  <method name='SetPasscode'>"
-    "    <arg name='DaemonRealm' type='s' direction='in'/>"
-    "    <arg name='newPasscode' type='ay' direction='in'/>"
-    "  </method>"
-    "  <method name='UpdateConfigurations'>"
-    "    <arg name='languageTag' type='s' direction='in'/>"
-    "    <arg name='configMap' type='a{sv}' direction='in'/>"
-    "  </method>"
-    "  <property name='Version' type='q' access='read'/>"
-// TODO    "  <annotation name='org.alljoyn.Bus.Secure' value='true'/>"
-    "</interface>";
-
-VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus,
+VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const char *uri,
         const std::vector<OCDevAddr> &devAddrs)
-    : VirtualBusObject(bus, "/Config", devAddrs)
+    : VirtualBusObject(bus, "/Config", devAddrs), m_uri(uri)
 {
-    LOG(LOG_INFO, "[%p] bus=%p", this, bus);
+    LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, uri);
     QStatus status;
     (void)(status); /* Unused in release build */
-    status = bus->CreateInterfacesFromXml(ifaceXml);
+    status = bus->CreateInterfacesFromXml(ajn::org::alljoyn::Config::InterfaceXml);
     assert(status == ER_OK);
     m_iface = bus->GetInterface("org.alljoyn.Config");
     assert(m_iface);
@@ -111,7 +84,7 @@ void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    DoResource(OC_REST_GET, "/oic/con", NULL, msg,
+    DoResource(OC_REST_GET, m_uri.c_str(), NULL, msg,
             static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB));
 }
 
@@ -325,7 +298,7 @@ void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescriptio
             OCRepPayloadSetPropObjectArrayAsOwner(payload, "ln", objArray, dim);
         }
     }
-    DoResource(OC_REST_POST, "/oic/con", payload, msg,
+    DoResource(OC_REST_POST, m_uri.c_str(), payload, msg,
             static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::UpdateConfigurationsCB));
     return;
 

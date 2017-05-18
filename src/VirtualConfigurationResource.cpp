@@ -20,10 +20,13 @@
 
 #include "VirtualConfigurationResource.h"
 
+#include "AboutData.h"
 #include "Bridge.h"
+#include "DeviceConfigurationResource.h"
 #include "Log.h"
 #include "Name.h"
 #include "Payload.h"
+#include "PlatformConfigurationResource.h"
 #include "Plugin.h"
 #include "Resource.h"
 #include <alljoyn/AllJoynStd.h>
@@ -36,27 +39,15 @@
 #include <algorithm>
 #include <assert.h>
 
-#define OC_RSRVD_CONFIGURATION_URI                   "/oic/con"
-#define OC_RSRVD_RESOURCE_TYPE_CONFIGURATION         "oic.wk.con"
-
 #define OC_RSRVD_MAINTENANCE_URI                     "/oic/mnt"
 #define OC_RSRVD_RESOURCE_TYPE_MAINTENANCE           "oic.wk.mnt"
 
-static const struct { const char *aj; const char *oc; } keys[] =
+VirtualConfigurationResource *VirtualConfigurationResource::Create(ajn::BusAttachment *bus,
+        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        CreateCB createCb, void *createContext)
 {
-    { "AppName", "n" },
-    { "org.openconnectivity.loc", "loc" },
-    { "org.openconnectivity.locn", "locn" },
-    { "org.openconnectivity.c", "c" },
-    { "org.openconnectivity.r", "r" },
-    { "DefaultLanguage", "dl" }
-};
-
-VirtualResource *VirtualConfigurationResource::Create(Bridge *bridge, ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
-{
-    VirtualConfigurationResource *resource = new VirtualConfigurationResource(bridge, bus, name,
-            sessionId, path, ajSoftwareVersion);
+    VirtualConfigurationResource *resource = new VirtualConfigurationResource(bus, name, sessionId,
+            path, ajSoftwareVersion, createCb, createContext);
     OCStackResult result = resource->Create();
     if (result != OC_STACK_OK)
     {
@@ -66,21 +57,28 @@ VirtualResource *VirtualConfigurationResource::Create(Bridge *bridge, ajn::BusAt
     return resource;
 }
 
-VirtualConfigurationResource::VirtualConfigurationResource(Bridge *bridge, ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
-    : VirtualResource(bridge, bus, name, sessionId, path, ajSoftwareVersion), m_fr(false),
-      m_rb(false)
+VirtualConfigurationResource::VirtualConfigurationResource(ajn::BusAttachment *bus,
+        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        CreateCB createCb, void *createContext)
+    : VirtualResource(bus, name, sessionId, path, ajSoftwareVersion, createCb, createContext),
+      m_fr(false), m_rb(false)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s",
-        this, bus, name, sessionId, path, ajSoftwareVersion);
+    LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s", this, bus, name,
+            sessionId, path, ajSoftwareVersion);
 }
 
 VirtualConfigurationResource::~VirtualConfigurationResource()
 {
-    LOG(LOG_INFO, "[%p] name=%s,path=%s", this,
-        GetUniqueName().c_str(), GetPath().c_str());
+    LOG(LOG_INFO, "[%p] name=%s,path=%s", this, GetUniqueName().c_str(), GetPath().c_str());
 
-    DestroyResource(GetPath().c_str());
+    OCDeleteResource(m_deviceConfigurationHandle);
+    OCDeleteResource(m_platformConfigurationHandle);
+    OCDeleteResource(m_maintenanceHandle);
+}
+
+void VirtualConfigurationResource::SetAboutData(ajn::AboutData *aboutData)
+{
+    m_aboutData = *aboutData;
 }
 
 OCStackResult VirtualConfigurationResource::Create()
@@ -112,18 +110,26 @@ void VirtualConfigurationResource::IntrospectCB(QStatus status, ProxyBusObject *
             return;
         }
 
-        result = ::CreateResource(OC_RSRVD_CONFIGURATION_URI,
-                OC_RSRVD_RESOURCE_TYPE_CONFIGURATION,
-                OC_RSRVD_INTERFACE_READ_WRITE,
+        result = ::CreateResource(&m_deviceConfigurationHandle, "/con",
+                OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, OC_RSRVD_INTERFACE_READ_WRITE,
                 VirtualConfigurationResource::ConfigurationHandlerCB, this,
                 OC_DISCOVERABLE | OC_OBSERVABLE);
         if (result == OC_STACK_OK)
         {
             LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s", this,
-                    OC_RSRVD_CONFIGURATION_URI);
+                    OCGetResourceUri(m_deviceConfigurationHandle));
         }
-        result = ::CreateResource(OC_RSRVD_MAINTENANCE_URI, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
-                OC_RSRVD_INTERFACE_READ_WRITE,
+        result = ::CreateResource(&m_platformConfigurationHandle, "/con/p",
+                OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION, OC_RSRVD_INTERFACE_READ_WRITE,
+                VirtualConfigurationResource::ConfigurationHandlerCB, this,
+                OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result == OC_STACK_OK)
+        {
+            LOG(LOG_INFO, "[%p] Created VirtualConfigurationResource uri=%s", this,
+                    OCGetResourceUri(m_platformConfigurationHandle));
+        }
+        result = ::CreateResource(&m_maintenanceHandle, OC_RSRVD_MAINTENANCE_URI,
+                OC_RSRVD_RESOURCE_TYPE_MAINTENANCE, OC_RSRVD_INTERFACE_READ_WRITE,
                 VirtualConfigurationResource::MaintenanceHandlerCB, this,
                 OC_DISCOVERABLE | OC_OBSERVABLE);
         if (result == OC_STACK_OK)
@@ -138,7 +144,7 @@ void VirtualConfigurationResource::IntrospectCB(QStatus status, ProxyBusObject *
     }
     if (result == OC_STACK_OK)
     {
-        m_bridge->RDPublish();
+        m_createCb(m_createContext);
     }
 }
 
@@ -146,18 +152,41 @@ struct VirtualConfigurationResource::MethodCallContext
 {
     OCEntityHandlerResponse *m_response;
     OCRepPayload *m_payload;
-    std::map<std::string, std::string>::iterator m_appName;
-    std::map<std::string, std::string> m_appNames;
+    std::vector<std::string> m_langs;
+    std::vector<std::string>::iterator m_lang;
+    AboutData *m_configData;
     MethodCallContext(OCEntityHandlerRequest *request)
-        : m_response(NULL), m_payload(::CreatePayload(request->resource, request->query))
+        : m_response(NULL), m_payload(::CreatePayload(request->resource, request->query)),
+          m_configData(NULL)
     {
-        m_response = (OCEntityHandlerResponse *) calloc(1, sizeof(OCEntityHandlerResponse));
-        m_response->requestHandle = request->requestHandle;
-        m_response->resourceHandle = request->resource;
+        CreateResponse(request);
+    }
+    MethodCallContext(OCEntityHandlerRequest *request, OCRepPayload *payload)
+        : m_response(NULL), m_payload(OCRepPayloadClone(payload)), m_configData(NULL)
+    {
+        CreateResponse(request);
     }
     ~MethodCallContext()
     {
-        free(m_response);
+        delete m_configData;
+        OICFree(m_response);
+    }
+    void CreateResponse(OCEntityHandlerRequest *request)
+    {
+        m_response = (OCEntityHandlerResponse *) OICCalloc(1, sizeof(OCEntityHandlerResponse));
+        m_response->requestHandle = request->requestHandle;
+        m_response->resourceHandle = request->resource;
+    }
+    void SetLanguages(ajn::AboutData *aboutData)
+    {
+        size_t numLangs = aboutData->GetSupportedLanguages();
+        const char *langs[numLangs];
+        aboutData->GetSupportedLanguages(langs, numLangs);
+        for (size_t i = 0; i < numLangs; ++i)
+        {
+            m_langs.push_back(langs[i]);
+        }
+        m_lang = m_langs.begin();
     }
 };
 
@@ -165,8 +194,7 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
         OCEntityHandlerRequest *request,
         void *ctx)
 {
-    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
-        ctx, flag, request, ctx);
+    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
 
     VirtualConfigurationResource *resource = reinterpret_cast<VirtualConfigurationResource *>(ctx);
     std::lock_guard<std::mutex> lock(resource->m_mutex);
@@ -177,15 +205,17 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
         case OC_REST_GET:
             {
                 MethodCallContext *context = new MethodCallContext(request);
-                ajn::MsgArg lang("s", "");
-                const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface("org.alljoyn.Config");
-                assert(iface);
-                const ajn::InterfaceDescription::Member *member = iface->GetMember("GetConfigurations");
-                assert(member);
-                QStatus status = resource->MethodCallAsync(*member,
-                                 resource, static_cast<ajn::MessageReceiver::ReplyHandler>
-                                 (&VirtualConfigurationResource::GetSupportedLanguagesCB),
-                                 &lang, 1, context);
+                context->SetLanguages(&resource->m_aboutData);
+                const char *lang = "";
+                if (context->m_lang != context->m_langs.end())
+                {
+                    lang = context->m_lang->c_str();
+                }
+                ajn::MsgArg arg("s", lang);
+                QStatus status = resource->MethodCallAsync("org.alljoyn.Config",
+                        "GetConfigurations", resource,
+                        static_cast<ajn::MessageReceiver::ReplyHandler> (&VirtualConfigurationResource::GetConfigurationsCB),
+                        &arg, 1, context);
                 if (status == ER_OK)
                 {
                     result = OC_EH_OK;
@@ -193,6 +223,7 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
                 else
                 {
                     LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                    OCRepPayloadDestroy(context->m_payload);
                     delete context;
                     result = OC_EH_ERROR;
                 }
@@ -205,90 +236,44 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
                     result = OC_EH_ERROR;
                     break;
                 }
-                MethodCallContext *context = new MethodCallContext(request);
-                bool success = true;
-                ajn::MsgArg entries[sizeof(keys) / sizeof(keys[0])];
-                ajn::MsgArg *entry = entries;
                 OCRepPayload *payload = (OCRepPayload *) request->payload;
-                for (OCRepPayloadValue *v = payload->values; success && v; v = v->next)
+                bool success = true;
+                MethodCallContext *context = new MethodCallContext(request, payload);
+                if (!context->m_payload)
                 {
-                    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i)
-                    {
-                        if (!strcmp(v->name, keys[i].oc))
-                        {
-                            OCRepPayloadValue k;
-                            memset(&k, 0, sizeof(k));
-                            k.type = OCREP_PROP_STRING;
-                            k.str = (char *) keys[i].aj;
-                            entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
-                            entry->v_dictEntry.key = new ajn::MsgArg();
-                            entry->v_dictEntry.val = new ajn::MsgArg();
-                            entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                            success = ToAJMsgArg(entry->v_dictEntry.key, "s", &k);
-                            if (success)
-                            {
-                                success = ToAJMsgArg(entry->v_dictEntry.val, "v", v);
-                            }
-                            if (success)
-                            {
-                                /* Copy the value into the response payload */
-                                ToOCPayload(context->m_payload, keys[i].oc, entry->v_dictEntry.val, "v");
-                            }
-                            ++entry;
-                            break;
-                        }
-                    }
+                    success = false;
                 }
-                size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-                OCRepPayload **objArray = NULL;
-                if (OCRepPayloadGetPropObjectArray(payload, "ln", &objArray, dim))
-                {
-                    size_t dimTotal = calcDimTotal(dim);
-                    for (size_t i = 0; i < dimTotal; ++i)
-                    {
-                        char *language;
-                        char *value;
-                        if (OCRepPayloadGetPropString(objArray[i], "language", &language) &&
-                            OCRepPayloadGetPropString(objArray[i], "value", &value))
-                        {
-                            context->m_appNames[language] = value;
-                            OICFree(language);
-                            OICFree(value);
-                        }
-                    }
-                    /* Copy the value into the response payload */
-                    OCRepPayloadSetPropObjectArrayAsOwner(context->m_payload, "ln", objArray, dim);
-                }
-                context->m_appName = context->m_appNames.begin();
                 if (success)
                 {
-                    if (entry - entries)
-                    {
-                        ajn::MsgArg args[2];
-                        args[0].Set("s", ""); /* languageTag */
-                        args[1].Set("a{sv}", entry - entries, entries);
-                        const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface("org.alljoyn.Config");
-                        assert(iface);
-                        const ajn::InterfaceDescription::Member *member = iface->GetMember("UpdateConfigurations");
-                        assert(member);
-                        QStatus status = resource->MethodCallAsync(*member,
-                                         resource, static_cast<ajn::MessageReceiver::ReplyHandler>
-                                         (&VirtualConfigurationResource::UpdateConfigurationsCB),
-                                         args, 2, context);
-                        success = (status == ER_OK);
-                        if (status != ER_OK)
-                        {
-                            LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
-                        }
-                    }
-                    else if (!context->m_appNames.empty())
-                    {
-                        QStatus status = resource->UpdateAppNames(context);
-                        success = (status == ER_OK);
-                    }
-                    else
+                    context->m_configData = new AboutData();
+                    if (!context->m_configData)
                     {
                         success = false;
+                    }
+                }
+                if (success)
+                {
+                    char *defaultLang;
+                    resource->m_aboutData.GetDefaultLanguage(&defaultLang);
+                    context->m_configData->SetDefaultLanguage(defaultLang);
+                    SetDeviceConfigurationProperties(context->m_configData, payload);
+                    context->SetLanguages(context->m_configData);
+                    const char *lang = "";
+                    if (context->m_lang != context->m_langs.end())
+                    {
+                        lang = context->m_lang->c_str();
+                    }
+                    ajn::MsgArg args[2];
+                    args[0].Set("s", lang);
+                    context->m_configData->GetConfigData(&args[1], lang);
+                    QStatus status = resource->MethodCallAsync("org.alljoyn.Config",
+                            "UpdateConfigurations", resource,
+                            static_cast<ajn::MessageReceiver::ReplyHandler> (&VirtualConfigurationResource::UpdateConfigurationsCB),
+                            args, 2, context);
+                    success = (status == ER_OK);
+                    if (status != ER_OK)
+                    {
+                        LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
                     }
                 }
                 if (success)
@@ -297,6 +282,7 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
                 }
                 else
                 {
+                    OCRepPayloadDestroy(context->m_payload);
                     delete context;
                     result = OC_EH_ERROR;
                 }
@@ -309,143 +295,9 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
     return result;
 }
 
-void VirtualConfigurationResource::GetSupportedLanguagesCB(ajn::Message &msg, void *ctx)
-{
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    MethodCallContext *context = reinterpret_cast<MethodCallContext *>(ctx);
-    OCStackResult result = OC_STACK_ERROR;
-    switch (msg->GetType())
-    {
-        case ajn::MESSAGE_METHOD_RET:
-            {
-                const ajn::MsgArg *dict = msg->GetArg(0);
-                size_t numLangs = 0;
-                ajn::MsgArg *langs = NULL;
-                dict->GetElement("{sas}", "SupportedLanguages", &numLangs, &langs);
-                for (size_t i = 0; i < numLangs; ++i)
-                {
-                    const char *lang;
-                    langs[i].Get("s", &lang);
-                    m_appNames[lang] = "";
-                }
-                const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.alljoyn.Config");
-                assert(iface);
-                const ajn::InterfaceDescription::Member *member = iface->GetMember("GetConfigurations");
-                assert(member);
-                QStatus status;
-                if (!m_appNames.empty())
-                {
-                    context->m_appName = m_appNames.begin();
-                    ajn::MsgArg lang("s", context->m_appName->first.c_str());
-                    status = MethodCallAsync(*member,
-                                             this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualConfigurationResource::GetAppNameCB),
-                                             &lang, 1, context);
-                }
-                else
-                {
-                    ajn::MsgArg lang("s", "");
-                    status = MethodCallAsync(*member,
-                                             this, static_cast<ajn::MessageReceiver::ReplyHandler>
-                                             (&VirtualConfigurationResource::GetConfigurationsCB),
-                                             &lang, 1, context);
-                }
-                if (status == ER_OK)
-                {
-                    break;
-                }
-                /* FALLTHROUGH */
-            }
-        case ajn::MESSAGE_ERROR:
-            OCRepPayloadDestroy(context->m_payload);
-            context->m_payload = NULL;
-            context->m_response->ehResult = OC_EH_ERROR;
-            context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
-            result = DoResponse(context->m_response);
-            if (result != OC_STACK_OK)
-            {
-                LOG(LOG_ERR, "DoResponse - %d", result);
-            }
-            delete context;
-            break;
-        default:
-            assert(0);
-            break;
-    }
-}
-
-void VirtualConfigurationResource::GetAppNameCB(ajn::Message &msg, void *ctx)
-{
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    MethodCallContext *context = reinterpret_cast<MethodCallContext *>(ctx);
-    OCStackResult result = OC_STACK_ERROR;
-    switch (msg->GetType())
-    {
-        case ajn::MESSAGE_METHOD_RET:
-            {
-                const ajn::MsgArg *dict = msg->GetArg(0);
-                const char *appName;
-                QStatus status = dict->GetElement("{ss}", "AppName", &appName);
-                if (status == ER_OK)
-                {
-                    context->m_appName->second = appName;
-                    if (++context->m_appName != m_appNames.end())
-                    {
-                        ajn::MsgArg lang("s", context->m_appName->first.c_str());
-                        const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.alljoyn.Config");
-                        assert(iface);
-                        const ajn::InterfaceDescription::Member *member = iface->GetMember("GetConfigurations");
-                        assert(member);
-                        status = MethodCallAsync(*member,
-                                                 this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualConfigurationResource::GetAppNameCB),
-                                                 &lang, 1, context);
-                    }
-                    else
-                    {
-                        ajn::MsgArg lang("s", "");
-                        const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.alljoyn.Config");
-                        assert(iface);
-                        const ajn::InterfaceDescription::Member *member = iface->GetMember("GetConfigurations");
-                        assert(member);
-                        status = MethodCallAsync(*member,
-                                                 this, static_cast<ajn::MessageReceiver::ReplyHandler>
-                                                 (&VirtualConfigurationResource::GetConfigurationsCB),
-                                                 &lang, 1, context);
-                    }
-                }
-                if (status == ER_OK)
-                {
-                    break;
-                }
-                /* FALLTHROUGH */
-            }
-        case ajn::MESSAGE_ERROR:
-            OCRepPayloadDestroy(context->m_payload);
-            context->m_payload = NULL;
-            context->m_response->ehResult = OC_EH_ERROR;
-            context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
-            result = DoResponse(context->m_response);
-            if (result != OC_STACK_OK)
-            {
-                LOG(LOG_ERR, "DoResponse - %d", result);
-            }
-            delete context;
-            break;
-        default:
-            assert(0);
-            break;
-    }
-}
-
 void VirtualConfigurationResource::GetConfigurationsCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] ctx=%p", this, ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     MethodCallContext *context = reinterpret_cast<MethodCallContext *>(ctx);
@@ -454,63 +306,69 @@ void VirtualConfigurationResource::GetConfigurationsCB(ajn::Message &msg, void *
     {
         case ajn::MESSAGE_METHOD_RET:
             {
-                bool success = true;
-                const ajn::MsgArg *dict = msg->GetArg(0);
-                for (size_t i = 0; success && (i < sizeof(keys) / sizeof(keys[0])); ++i)
+                const char *lang = context->m_lang->c_str();
+                if (!context->m_configData)
                 {
-                    char *value;
-                    if (dict->GetElement("{ss}", keys[i].aj, &value) == ER_OK)
-                    {
-                        success = success && OCRepPayloadSetPropString(context->m_payload, keys[i].oc, value);
-                    }
-                }
-                if (!m_appNames.empty())
-                {
-                    size_t dim[MAX_REP_ARRAY_DEPTH] = { m_appNames.size(), 0, 0 };
-                    OCRepPayload **objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
-                    if (!objArray)
-                    {
-                        success = false;
-                    }
-                    else
-                    {
-                        size_t i = 0;
-                        for (std::map<std::string, std::string>::iterator it = m_appNames.begin(); success
-                             && it != m_appNames.end(); ++it)
-                        {
-                            OCRepPayload *value = OCRepPayloadCreate();
-                            if (!value)
-                            {
-                                success = false;
-                                break;
-                            }
-                            success = OCRepPayloadSetPropString(value, "language", it->first.c_str()) &&
-                                      OCRepPayloadSetPropString(value, "value", it->second.c_str());
-                            objArray[i++] = value;
-                        }
-                    }
-                    if (success)
-                    {
-                        success = OCRepPayloadSetPropObjectArrayAsOwner(context->m_payload, "ln", objArray, dim);
-                    }
-                    else
-                    {
-                        OICFree(objArray);
-                    }
-                }
-                if (success)
-                {
-                    context->m_response->ehResult = OC_EH_OK;
+                    context->m_configData = new AboutData(msg->GetArg(0), lang);
                 }
                 else
                 {
-                    context->m_response->ehResult = OC_EH_ERROR;
-                    OCRepPayloadDestroy(context->m_payload);
-                    context->m_payload = NULL;
+                    context->m_configData->CreateFromMsgArg(msg->GetArg(0), lang);
                 }
-                break;
+                char *appName = NULL;
+                if (context->m_configData->GetAppName(&appName, lang) != ER_OK)
+                {
+                    m_aboutData.GetAppName(&appName, lang);
+                    context->m_configData->SetAppName(appName, lang);
+                }
+                if (context->m_lang != context->m_langs.end() &&
+                        (++context->m_lang != context->m_langs.end()))
+                {
+                    lang = context->m_lang->c_str();
+                    ajn::MsgArg arg("s", lang);
+                    QStatus status = MethodCallAsync("org.alljoyn.Config", "GetConfigurations", this,
+                            static_cast<ajn::MessageReceiver::ReplyHandler> (&VirtualConfigurationResource::GetConfigurationsCB),
+                            &arg, 1, context);
+                    if (status == ER_OK)
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                        context->m_response->ehResult = OC_EH_ERROR;
+                    }
+                }
+                else
+                {
+                    if (context->m_response->resourceHandle == m_deviceConfigurationHandle)
+                    {
+                        result = SetDeviceConfigurationProperties(context->m_payload,
+                                context->m_configData);
+                    }
+                    else
+                    {
+                        result = SetPlatformConfigurationProperties(context->m_payload,
+                                context->m_configData);
+                    }
+                    if (result == OC_STACK_OK)
+                    {
+                        context->m_response->ehResult = OC_EH_OK;
+                    }
+                    else
+                    {
+                        context->m_response->ehResult = OC_EH_ERROR;
+                    }
+                }
+                if (context->m_response->ehResult == OC_EH_OK)
+                {
+                    break;
+                }
+                /* FALLTHROUGH */
             }
         case ajn::MESSAGE_ERROR:
+            OCRepPayloadDestroy(context->m_payload);
+            context->m_payload = NULL;
             context->m_response->ehResult = OC_EH_ERROR;
             break;
         default:
@@ -518,49 +376,18 @@ void VirtualConfigurationResource::GetConfigurationsCB(ajn::Message &msg, void *
             break;
     }
     context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
-    result = DoResponse(context->m_response);
+    result = OCDoResponse(context->m_response);
     if (result != OC_STACK_OK)
     {
-        LOG(LOG_ERR, "DoResponse - %d", result);
+        LOG(LOG_ERR, "OCDoResponse - %d", result);
         OCRepPayloadDestroy(context->m_payload);
     }
     delete context;
 }
 
-QStatus VirtualConfigurationResource::UpdateAppNames(MethodCallContext *context)
-{
-    if (context->m_appName == context->m_appNames.end())
-    {
-        return ER_OK;
-    }
-    ajn::MsgArg args[2];
-    args[0].Set("s", context->m_appName->first.c_str()); /* languageTag */
-    ajn::MsgArg entry;
-    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
-    entry.v_dictEntry.key = new ajn::MsgArg("s", "AppName");
-    entry.v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s",
-                                            context->m_appName->second.c_str()));
-    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
-    args[1].Set("a{sv}", 1, &entry);
-    const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.alljoyn.Config");
-    assert(iface);
-    const ajn::InterfaceDescription::Member *member = iface->GetMember("UpdateConfigurations");
-    assert(member);
-    QStatus status = MethodCallAsync(*member,
-                                     this, static_cast<ajn::MessageReceiver::ReplyHandler>
-                                     (&VirtualConfigurationResource::UpdateConfigurationsCB),
-                                     args, 2, context);
-    if (status != ER_OK)
-    {
-        LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
-    }
-    return status;
-}
-
 void VirtualConfigurationResource::UpdateConfigurationsCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] ctx=%p", this, ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     MethodCallContext *context = reinterpret_cast<MethodCallContext *>(ctx);
@@ -569,10 +396,33 @@ void VirtualConfigurationResource::UpdateConfigurationsCB(ajn::Message &msg, voi
     {
         case ajn::MESSAGE_METHOD_RET:
             {
-                QStatus status = UpdateAppNames(context);
-                if (status == ER_OK)
+                if (context->m_lang != context->m_langs.end() &&
+                        (++context->m_lang != context->m_langs.end()))
+                {
+                    const char *lang = context->m_lang->c_str();
+                    ajn::MsgArg args[2];
+                    args[0].Set("s", lang);
+                    context->m_configData->GetConfigData(&args[1], lang);
+                    QStatus status = MethodCallAsync("org.alljoyn.Config", "UpdateConfigurations",
+                            this,
+                            static_cast<ajn::MessageReceiver::ReplyHandler> (&VirtualConfigurationResource::UpdateConfigurationsCB),
+                            args, 2, context);
+                    if (status == ER_OK)
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                        context->m_response->ehResult = OC_EH_ERROR;
+                    }
+                }
+                else
                 {
                     context->m_response->ehResult = OC_EH_OK;
+                }
+                if (context->m_response->ehResult == OC_EH_OK)
+                {
                     break;
                 }
                 /* FALLTHROUGH */
@@ -586,30 +436,21 @@ void VirtualConfigurationResource::UpdateConfigurationsCB(ajn::Message &msg, voi
             assert(0);
             break;
     }
-    if (context->m_appName != context->m_appNames.end() &&
-        context->m_response->ehResult == OC_EH_OK)
+    context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
+    result = OCDoResponse(context->m_response);
+    if (result != OC_STACK_OK)
     {
-        ++context->m_appName;
+        LOG(LOG_ERR, "OCDoResponse - %d", result);
+        OCRepPayloadDestroy(context->m_payload);
     }
-    else
-    {
-        context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
-        result = DoResponse(context->m_response);
-        if (result != OC_STACK_OK)
-        {
-            LOG(LOG_ERR, "DoResponse - %d", result);
-            OCRepPayloadDestroy(context->m_payload);
-        }
-        delete context;
-    }
+    delete context;
 }
 
 OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntityHandlerFlag flag,
         OCEntityHandlerRequest *request,
         void *ctx)
 {
-    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
-        ctx, flag, request, ctx);
+    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
 
     VirtualConfigurationResource *resource = reinterpret_cast<VirtualConfigurationResource *>(ctx);
     std::lock_guard<std::mutex> lock(resource->m_mutex);
@@ -628,11 +469,8 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
                 bool value;
                 if (OCRepPayloadGetPropBool(payload, "fr", &value) && value)
                 {
-                    const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface("org.alljoyn.Config");
-                    assert(iface);
-                    const ajn::InterfaceDescription::Member *member = iface->GetMember("FactoryReset");
-                    assert(member);
-                    QStatus status = resource->MethodCallAsync(*member, NULL, NULL);
+                    QStatus status = resource->MethodCallAsync("org.alljoyn.Config", "FactoryReset",
+                            NULL, NULL);
                     if (status != ER_OK)
                     {
                         LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
@@ -642,11 +480,8 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
                 }
                 if (OCRepPayloadGetPropBool(payload, "rb", &value) && value)
                 {
-                    const ajn::InterfaceDescription *iface = resource->m_bus->GetInterface("org.alljoyn.Config");
-                    assert(iface);
-                    const ajn::InterfaceDescription::Member *member = iface->GetMember("Restart");
-                    assert(member);
-                    QStatus status = resource->MethodCallAsync(*member, NULL, NULL);
+                    QStatus status = resource->MethodCallAsync("org.alljoyn.Config", "Restart",
+                            NULL, NULL);
                     if (status != ER_OK)
                     {
                         LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
@@ -677,10 +512,10 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
                 }
                 response.ehResult = result;
                 response.payload = reinterpret_cast<OCPayload *>(payload);
-                OCStackResult doResult = DoResponse(&response);
+                OCStackResult doResult = OCDoResponse(&response);
                 if (doResult != OC_STACK_OK)
                 {
-                    LOG(LOG_ERR, "DoResponse - %d", doResult);
+                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
                     OCRepPayloadDestroy(payload);
                 }
                 break;
