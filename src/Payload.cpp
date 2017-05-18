@@ -1239,7 +1239,7 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                         if (success)
                         {
                             arg->typeId = ajn::ALLJOYN_ARRAY;
-                            success = (arg->v_array.SetElements(signature, numElems, elems) == ER_OK);
+                            success = (arg->v_array.SetElements(&signature[1], numElems, elems) == ER_OK);
                         }
                         if (success)
                         {
@@ -1257,12 +1257,22 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                         ajn::MsgArg *elems = new ajn::MsgArg[numElems];
                         for (size_t i = 0; success && i < numElems; ++i)
                         {
-                            success = ToAJMsgArg(&elems[i], &signature[1], arr, ai, di + 1);
+                            if (signature[2] == ajn::ALLJOYN_DICT_ENTRY_OPEN)
+                            {
+                                OCRepPayloadValue arrValue;
+                                arrValue.type = arr->type;
+                                arrValue.obj = arr->objArray[(*ai)++];
+                                success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
+                            }
+                            else
+                            {
+                                success = ToAJMsgArg(&elems[i], &signature[1], arr, ai, di + 1);
+                            }
                         }
                         if (success)
                         {
                             arg->typeId = ajn::ALLJOYN_ARRAY;
-                            success = (arg->v_array.SetElements(signature, numElems, elems) == ER_OK);
+                            success = (arg->v_array.SetElements(&signature[1], numElems, elems) == ER_OK);
                         }
                         if (success)
                         {
@@ -1326,34 +1336,9 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                         case OCREP_PROP_BOOL:
                         case OCREP_PROP_STRING:
                         case OCREP_PROP_BYTE_STRING:
+                        case OCREP_PROP_OBJECT:
                             success = false; /* Loss of information */
                             break;
-                        case OCREP_PROP_OBJECT:
-                            {
-                                size_t numElems = arr->dimensions[di];
-                                ajn::MsgArg *elems = new ajn::MsgArg[numElems];
-                                for (size_t i = 0; success && i < numElems; ++i, ++(*ai))
-                                {
-                                    OCRepPayloadValue arrValue;
-                                    arrValue.type = arr->type;
-                                    arrValue.obj = arr->objArray[(*ai)];
-                                    success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
-                                }
-                                if (success)
-                                {
-                                    arg->typeId = ajn::ALLJOYN_ARRAY;
-                                    success = (arg->v_array.SetElements(signature, numElems, elems) == ER_OK);
-                                }
-                                if (success)
-                                {
-                                    arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                                }
-                                else
-                                {
-                                    delete[] elems;
-                                }
-                                break;
-                            }
                         case OCREP_PROP_NULL:
                             success = false; /* Explicitly not supported */
                             break;
