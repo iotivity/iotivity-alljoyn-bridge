@@ -481,7 +481,7 @@ bool Bridge::Start()
             LOG(LOG_ERR, "OCSetResourceProperties() - %d", result);
             return false;
         }
-        result = CreateResource(NULL, "/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
+        result = CreateResource(&handle, "/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
                 OC_RSRVD_INTERFACE_READ_WRITE, Bridge::EntityHandlerCB, this,
                 OC_DISCOVERABLE | OC_OBSERVABLE);
         if (result != OC_STACK_OK)
