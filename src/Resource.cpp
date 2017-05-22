@@ -27,7 +27,6 @@
 
 #define INTERFACE_DEFAULT_QUERY "if=" OC_RSRVD_INTERFACE_DEFAULT
 
-
 OCStackResult CreateResource(OCResourceHandle *handle, const char *uri, const char *typeName,
         const char *interfaceName, OCEntityHandler entityHandler, void *callbackParam,
         uint8_t properties)

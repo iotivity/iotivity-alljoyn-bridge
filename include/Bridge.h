@@ -135,6 +135,8 @@ class Bridge : private ajn::AboutListener
         std::string m_ajSoftwareVersion;
 
         static void RDPublish(void *context);
+        void SetIntrospectionData(ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+                const char *title, const char *version);
         void WhoImplements();
         void Destroy(const char *id);
         virtual void BusDisconnected();

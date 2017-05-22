@@ -489,6 +489,7 @@ bool Bridge::Start()
             LOG(LOG_ERR, "CreateResource() - %d", result);
             return false;
         }
+        SetIntrospectionData(NULL, NULL, "TITLE", "VERSION");
     }
     LOG(LOG_INFO, "di=%s", OCGetServerInstanceIDString());
 
@@ -3125,11 +3126,11 @@ void Bridge::RDPublish(void *ctx)
 }
 
 /* Called with m_mutex held. */
-void Bridge::RDPublishTask::Run(Bridge *thiz)
+void Bridge::SetIntrospectionData(ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+        const char *title, const char *version)
 {
-    LOG(LOG_INFO, "[%p] thiz=%p", this, thiz);
+    LOG(LOG_INFO, "[%p]", this);
 
-    /* Also write out current introspection data. */
     OCPersistentStorage *ps = OCGetPersistentStorageHandler();
     assert(ps);
     size_t curSize = 1024;
@@ -3145,8 +3146,7 @@ void Bridge::RDPublishTask::Run(Bridge *thiz)
             LOG(LOG_ERR, "Failed to allocate introspection data buffer");
             goto exit;
         }
-        err = Introspect(thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE", "VERSION",
-                out, &curSize);
+        err = Introspect(bus, ajSoftwareVersion, title, version, out, &curSize);
         if (err != CborErrorOutOfMemory)
         {
             break;
@@ -3171,7 +3171,14 @@ exit:
         ps->close(fp);
     }
     OICFree(out);
+}
 
+/* Called with m_mutex held. */
+void Bridge::RDPublishTask::Run(Bridge *thiz)
+{
+    LOG(LOG_INFO, "[%p] thiz=%p", this, thiz);
+
+    thiz->SetIntrospectionData(thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE", "VERSION");
     ::RDPublish();
     thiz->m_rdPublishTask = NULL;
 }

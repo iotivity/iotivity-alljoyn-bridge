@@ -251,6 +251,10 @@ static int64_t Paths(CborEncoder *cbor)
     for (uint8_t i = 0; i < nr; ++i)
     {
         OCResourceHandle h = OCGetResourceHandle(i);
+        if (!(OCGetResourceProperties(h) & OC_ACTIVE))
+        {
+            continue;
+        }
         const char *uri = OCGetResourceUri(h);
         if (!strcmp(uri, OC_RSRVD_WELL_KNOWN_URI) ||
                 !strcmp(uri, OC_RSRVD_DEVICE_URI) ||
@@ -638,117 +642,235 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
     err |= cbor_encoder_create_map(cbor, &definitions, CborIndefiniteLength);
     VERIFY_CBOR(err);
 
-    numIfaces = bus->GetInterfaces(NULL, 0);
-    ifaces = new const ajn::InterfaceDescription*[numIfaces];
-    bus->GetInterfaces(ifaces, numIfaces);
-    for (size_t i = 0; i < numIfaces; ++i)
+    if (bus)
     {
-        const char *ifaceName = ifaces[i]->GetName();
-        if (!TranslateInterface(ifaceName))
+        numIfaces = bus->GetInterfaces(NULL, 0);
+        ifaces = new const ajn::InterfaceDescription*[numIfaces];
+        bus->GetInterfaces(ifaces, numIfaces);
+        for (size_t i = 0; i < numIfaces; ++i)
         {
-            continue;
-        }
-        size_t numProps = ifaces[i]->GetProperties(NULL, 0);
-        props = new const ajn::InterfaceDescription::Property*[numProps];
-        ifaces[i]->GetProperties(props, numProps);
-        static const char *emitsChangedValues[] = { "const", "false", "true", "invalidates", NULL };
-        for (const char **emitsChanged = emitsChangedValues; *emitsChanged; ++emitsChanged)
-        {
-            bool hasProps = false;
-            CborEncoder definition;
-            CborEncoder properties;
-            uint8_t access = NONE;
-            std::string rt = GetResourceTypeName(ifaces[i], *emitsChanged);
-            for (size_t j = 0; j < numProps; ++j)
+            const char *ifaceName = ifaces[i]->GetName();
+            if (!TranslateInterface(ifaceName))
             {
-                qcc::String value = (props[j]->name == "Version") ? "const" : "false";
-                props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, value);
-                if (value != *emitsChanged)
+                continue;
+            }
+            size_t numProps = ifaces[i]->GetProperties(NULL, 0);
+            props = new const ajn::InterfaceDescription::Property*[numProps];
+            ifaces[i]->GetProperties(props, numProps);
+            static const char *emitsChangedValues[] =
+                    { "const", "false", "true", "invalidates", NULL };
+            for (const char **emitsChanged = emitsChangedValues; *emitsChanged; ++emitsChanged)
+            {
+                bool hasProps = false;
+                CborEncoder definition;
+                CborEncoder properties;
+                uint8_t access = NONE;
+                std::string rt = GetResourceTypeName(ifaces[i], *emitsChanged);
+                for (size_t j = 0; j < numProps; ++j)
                 {
-                    continue;
+                    qcc::String value = (props[j]->name == "Version") ? "const" : "false";
+                    props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
+                            value);
+                    if (value != *emitsChanged)
+                    {
+                        continue;
+                    }
+                    if (!hasProps)
+                    {
+                        err |= cbor_encode_text_stringz(&definitions, rt.c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_map(&definitions, &definition,
+                                CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        err |= Pair(&definition, "type", "object");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&definition, "properties");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_map(&definition, &properties,
+                                CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        hasProps = true;
+                    }
+                    std::string propName = GetPropName(ifaces[i], props[j]->name);
+                    /*
+                     * Annotations prior to v16.10.00 are not guaranteed to
+                     * appear in the order they were specified, so are
+                     * unreliable.
+                     */
+                    qcc::String signature = props[j]->signature;
+                    if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
+                    {
+                        props[j]->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
+                    }
+                    qcc::String min, max, def;
+                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
+                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
+                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
+                    err  |= Property(&properties, propName, props[j]->description,
+                            (props[j]->access == ajn::PROP_ACCESS_READ), signature, min, max, def);
+                    VERIFY_CBOR(err);
+                    switch (props[j]->access)
+                    {
+                        case ajn::PROP_ACCESS_RW:
+                        case ajn::PROP_ACCESS_WRITE:
+                            access |= READWRITE;
+                            break;
+                        case ajn::PROP_ACCESS_READ:
+                            access |= READ;
+                            break;
+                    }
                 }
-                if (!hasProps)
+                if (hasProps)
                 {
-                    err |= cbor_encode_text_stringz(&definitions, rt.c_str());
+                    CborEncoder rtMap;
+                    err |= cbor_encode_text_stringz(&properties, "rt");
                     VERIFY_CBOR(err);
-                    err |= cbor_encoder_create_map(&definitions, &definition, CborIndefiniteLength);
+                    err |= cbor_encoder_create_map(&properties, &rtMap, CborIndefiniteLength);
                     VERIFY_CBOR(err);
-                    err |= Pair(&definition, "type", "object");
+                    err |= cbor_encode_text_stringz(&rtMap, "readOnly");
                     VERIFY_CBOR(err);
-                    err |= cbor_encode_text_stringz(&definition, "properties");
+                    err |= cbor_encode_boolean(&rtMap, true);
                     VERIFY_CBOR(err);
-                    err |= cbor_encoder_create_map(&definition, &properties, CborIndefiniteLength);
+                    err |= Pair(&rtMap, "type", "array");
                     VERIFY_CBOR(err);
-                    hasProps = true;
-                }
-                std::string propName = GetPropName(ifaces[i], props[j]->name);
-                /*
-                 * Annotations prior to v16.10.00 are not guaranteed to
-                 * appear in the order they were specified, so are
-                 * unreliable.
-                 */
-                qcc::String signature = props[j]->signature;
-                if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
-                {
-                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
-                }
-                qcc::String min, max, def;
-                props[j]->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
-                props[j]->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
-                props[j]->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
-                err  |= Property(&properties, propName, props[j]->description,
-                        (props[j]->access == ajn::PROP_ACCESS_READ), signature, min, max, def);
-                VERIFY_CBOR(err);
-                switch (props[j]->access)
-                {
-                    case ajn::PROP_ACCESS_RW:
-                    case ajn::PROP_ACCESS_WRITE:
-                        access |= READWRITE;
-                        break;
-                    case ajn::PROP_ACCESS_READ:
-                        access |= READ;
-                        break;
+                    CborEncoder def;
+                    err |= cbor_encode_text_stringz(&rtMap, "default");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_array(&rtMap, &def, 1);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&def, rt.c_str());
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&rtMap, &def);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&properties, &rtMap);
+                    VERIFY_CBOR(err);
+                    CborEncoder ifMap;
+                    err |= cbor_encode_text_stringz(&properties, "if");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(&properties, &ifMap, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&ifMap, "readOnly");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_boolean(&ifMap, true);
+                    VERIFY_CBOR(err);
+                    err |= Pair(&ifMap, "type", "array");
+                    VERIFY_CBOR(err);
+                    CborEncoder items;
+                    err |= cbor_encode_text_stringz(&ifMap, "items");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(&ifMap, &items, 2);
+                    VERIFY_CBOR(err);
+                    err |= Pair(&items, "type", "string");
+                    VERIFY_CBOR(err);
+                    CborEncoder enumArr;
+                    err |= cbor_encode_text_stringz(&items, "enum");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_array(&items, &enumArr, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&enumArr, "oic.if.baseline");
+                    VERIFY_CBOR(err);
+                    if (access & READ)
+                    {
+                        err |= cbor_encode_text_stringz(&enumArr, "oic.if.r");
+                        VERIFY_CBOR(err);
+                    }
+                    if (access & READWRITE)
+                    {
+                        err |= cbor_encode_text_stringz(&enumArr, "oic.if.rw");
+                        VERIFY_CBOR(err);
+                    }
+                    err |= cbor_encoder_close_container(&items, &enumArr);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&ifMap, &items);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&properties, &ifMap);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definition, &properties);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definitions, &definition);
+                    VERIFY_CBOR(err);
                 }
             }
-            if (hasProps)
+            delete[] props;
+            props = NULL;
+            size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
+            members = new const ajn::InterfaceDescription::Member*[numMembers];
+            ifaces[i]->GetMembers(members, numMembers);
+            for (size_t j = 0; j < numMembers; ++j)
             {
-                CborEncoder rtMap;
+                std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
+                CborEncoder definition;
+                err |= cbor_encode_text_stringz(&definitions, rt.c_str());
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&definitions, &definition, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= Pair(&definition, "type", "object");
+                VERIFY_CBOR(err);
+                CborEncoder properties;
+                err |= cbor_encode_text_stringz(&definition, "properties");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&definition, &properties, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                std::string propName = GetPropName(members[j], "validity");
+                CborEncoder prop;
+                err |= cbor_encode_text_stringz(&properties, propName.c_str());
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
+                {
+                    err |= cbor_encode_text_stringz(&prop, "readOnly");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_boolean(&prop, true);
+                    VERIFY_CBOR(err);
+                }
+                err |= Pair(&prop, "type", "boolean");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&properties, &prop);
+                VERIFY_CBOR(err);
+                size_t argN = 0;
+                err |= Properties(&properties, ajSoftwareVersion, members[j],
+                        members[j]->signature.c_str(), argN,
+                        (members[j]->memberType == ajn::MESSAGE_SIGNAL));
+                VERIFY_CBOR(err);
+                err |= Properties(&properties, ajSoftwareVersion, members[j],
+                        members[j]->returnSignature.c_str(), argN, true);
+                VERIFY_CBOR(err);
                 err |= cbor_encode_text_stringz(&properties, "rt");
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_create_map(&properties, &rtMap, CborIndefiniteLength);
+                err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
                 VERIFY_CBOR(err);
-                err |= cbor_encode_text_stringz(&rtMap, "readOnly");
+                err |= cbor_encode_text_stringz(&prop, "readOnly");
                 VERIFY_CBOR(err);
-                err |= cbor_encode_boolean(&rtMap, true);
+                err |= cbor_encode_boolean(&prop, true);
                 VERIFY_CBOR(err);
-                err |= Pair(&rtMap, "type", "array");
+                err |= Pair(&prop, "type", "array");
                 VERIFY_CBOR(err);
                 CborEncoder def;
-                err |= cbor_encode_text_stringz(&rtMap, "default");
+                err |= cbor_encode_text_stringz(&prop, "default");
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_create_array(&rtMap, &def, 1);
+                err |= cbor_encoder_create_array(&prop, &def, 1);
                 VERIFY_CBOR(err);
                 err |= cbor_encode_text_stringz(&def, rt.c_str());
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_close_container(&rtMap, &def);
+                err |= cbor_encoder_close_container(&prop, &def);
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_close_container(&properties, &rtMap);
+                err |= cbor_encoder_close_container(&properties, &prop);
                 VERIFY_CBOR(err);
-                CborEncoder ifMap;
                 err |= cbor_encode_text_stringz(&properties, "if");
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_create_map(&properties, &ifMap, CborIndefiniteLength);
+                err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
                 VERIFY_CBOR(err);
-                err |= cbor_encode_text_stringz(&ifMap, "readOnly");
+                err |= cbor_encode_text_stringz(&prop, "readOnly");
                 VERIFY_CBOR(err);
-                err |= cbor_encode_boolean(&ifMap, true);
+                err |= cbor_encode_boolean(&prop, true);
                 VERIFY_CBOR(err);
-                err |= Pair(&ifMap, "type", "array");
+                err |= Pair(&prop, "type", "array");
                 VERIFY_CBOR(err);
                 CborEncoder items;
-                err |= cbor_encode_text_stringz(&ifMap, "items");
+                err |= cbor_encode_text_stringz(&prop, "items");
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_create_map(&ifMap, &items, 2);
+                err |= cbor_encoder_create_map(&prop, &items, 2);
                 VERIFY_CBOR(err);
                 err |= Pair(&items, "type", "string");
                 VERIFY_CBOR(err);
@@ -759,294 +881,187 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
                 VERIFY_CBOR(err);
                 err |= cbor_encode_text_stringz(&enumArr, "oic.if.baseline");
                 VERIFY_CBOR(err);
-                if (access & READ)
+                if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
                 {
                     err |= cbor_encode_text_stringz(&enumArr, "oic.if.r");
                     VERIFY_CBOR(err);
                 }
-                if (access & READWRITE)
+                else
                 {
                     err |= cbor_encode_text_stringz(&enumArr, "oic.if.rw");
                     VERIFY_CBOR(err);
                 }
                 err |= cbor_encoder_close_container(&items, &enumArr);
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_close_container(&ifMap, &items);
+                err |= cbor_encoder_close_container(&prop, &items);
                 VERIFY_CBOR(err);
-                err |= cbor_encoder_close_container(&properties, &ifMap);
+                err |= cbor_encoder_close_container(&properties, &prop);
                 VERIFY_CBOR(err);
                 err |= cbor_encoder_close_container(&definition, &properties);
                 VERIFY_CBOR(err);
                 err |= cbor_encoder_close_container(&definitions, &definition);
                 VERIFY_CBOR(err);
             }
-        }
-        delete[] props;
-        props = NULL;
-        size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
-        members = new const ajn::InterfaceDescription::Member*[numMembers];
-        ifaces[i]->GetMembers(members, numMembers);
-        for (size_t j = 0; j < numMembers; ++j)
-        {
-            std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
-            CborEncoder definition;
-            err |= cbor_encode_text_stringz(&definitions, rt.c_str());
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&definitions, &definition, CborIndefiniteLength);
-            VERIFY_CBOR(err);
-            err |= Pair(&definition, "type", "object");
-            VERIFY_CBOR(err);
-            CborEncoder properties;
-            err |= cbor_encode_text_stringz(&definition, "properties");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&definition, &properties, CborIndefiniteLength);
-            VERIFY_CBOR(err);
-            std::string propName = GetPropName(members[j], "validity");
-            CborEncoder prop;
-            err |= cbor_encode_text_stringz(&properties, propName.c_str());
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
-            VERIFY_CBOR(err);
-            if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
+            delete[] members;
+            members = NULL;
+            if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
             {
-                err |= cbor_encode_text_stringz(&prop, "readOnly");
-                VERIFY_CBOR(err);
-                err |= cbor_encode_boolean(&prop, true);
-                VERIFY_CBOR(err);
-            }
-            err |= Pair(&prop, "type", "boolean");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&properties, &prop);
-            VERIFY_CBOR(err);
-            size_t argN = 0;
-            err |= Properties(&properties, ajSoftwareVersion, members[j],
-                    members[j]->signature.c_str(), argN,
-                    (members[j]->memberType == ajn::MESSAGE_SIGNAL));
-            VERIFY_CBOR(err);
-            err |= Properties(&properties, ajSoftwareVersion, members[j],
-                    members[j]->returnSignature.c_str(), argN, true);
-            VERIFY_CBOR(err);
-            err |= cbor_encode_text_stringz(&properties, "rt");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
-            VERIFY_CBOR(err);
-            err |= cbor_encode_text_stringz(&prop, "readOnly");
-            VERIFY_CBOR(err);
-            err |= cbor_encode_boolean(&prop, true);
-            VERIFY_CBOR(err);
-            err |= Pair(&prop, "type", "array");
-            VERIFY_CBOR(err);
-            CborEncoder def;
-            err |= cbor_encode_text_stringz(&prop, "default");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_array(&prop, &def, 1);
-            VERIFY_CBOR(err);
-            err |= cbor_encode_text_stringz(&def, rt.c_str());
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&prop, &def);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&properties, &prop);
-            VERIFY_CBOR(err);
-            err |= cbor_encode_text_stringz(&properties, "if");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
-            VERIFY_CBOR(err);
-            err |= cbor_encode_text_stringz(&prop, "readOnly");
-            VERIFY_CBOR(err);
-            err |= cbor_encode_boolean(&prop, true);
-            VERIFY_CBOR(err);
-            err |= Pair(&prop, "type", "array");
-            VERIFY_CBOR(err);
-            CborEncoder items;
-            err |= cbor_encode_text_stringz(&prop, "items");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&prop, &items, 2);
-            VERIFY_CBOR(err);
-            err |= Pair(&items, "type", "string");
-            VERIFY_CBOR(err);
-            CborEncoder enumArr;
-            err |= cbor_encode_text_stringz(&items, "enum");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_array(&items, &enumArr, CborIndefiniteLength);
-            VERIFY_CBOR(err);
-            err |= cbor_encode_text_stringz(&enumArr, "oic.if.baseline");
-            VERIFY_CBOR(err);
-            if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
-            {
-                err |= cbor_encode_text_stringz(&enumArr, "oic.if.r");
-                VERIFY_CBOR(err);
-            }
-            else
-            {
-                err |= cbor_encode_text_stringz(&enumArr, "oic.if.rw");
-                VERIFY_CBOR(err);
-            }
-            err |= cbor_encoder_close_container(&items, &enumArr);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&prop, &items);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&properties, &prop);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&definition, &properties);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&definitions, &definition);
-            VERIFY_CBOR(err);
-        }
-        delete[] members;
-        members = NULL;
-        if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
-        {
-            size_t numAnnotations = ifaces[i]->GetAnnotations();
-            names = new qcc::String[numAnnotations];
-            values = new qcc::String[numAnnotations];
-            ifaces[i]->GetAnnotations(names, values, numAnnotations);
-            CborEncoder definition;
-            CborEncoder properties;
-            qcc::String lastName;
-            for (size_t j = 0; j < numAnnotations; ++j)
-            {
-                if (names[j].find("org.alljoyn.Bus.Struct.") == 0)
+                size_t numAnnotations = ifaces[i]->GetAnnotations();
+                names = new qcc::String[numAnnotations];
+                values = new qcc::String[numAnnotations];
+                ifaces[i]->GetAnnotations(names, values, numAnnotations);
+                CborEncoder definition;
+                CborEncoder properties;
+                qcc::String lastName;
+                for (size_t j = 0; j < numAnnotations; ++j)
                 {
-                    size_t pos = sizeof("org.alljoyn.Bus.Struct.") - 1;
-                    size_t dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
+                    if (names[j].find("org.alljoyn.Bus.Struct.") == 0)
                     {
-                        continue;
-                    }
-                    qcc::String structName = names[j].substr(pos, dot - pos);
-                    pos = dot + sizeof(".Field.") - 1;
-                    dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
-                    {
-                        continue;
-                    }
-                    qcc::String fieldName = names[j].substr(pos, dot - pos);
-                    if (structName != lastName)
-                    {
-                        if (!lastName.empty())
+                        size_t pos = sizeof("org.alljoyn.Bus.Struct.") - 1;
+                        size_t dot = names[j].find(".", pos);
+                        if (dot == qcc::String::npos)
                         {
-                            err |= cbor_encoder_close_container(&definition, &properties);
+                            continue;
+                        }
+                        qcc::String structName = names[j].substr(pos, dot - pos);
+                        pos = dot + sizeof(".Field.") - 1;
+                        dot = names[j].find(".", pos);
+                        if (dot == qcc::String::npos)
+                        {
+                            continue;
+                        }
+                        qcc::String fieldName = names[j].substr(pos, dot - pos);
+                        if (structName != lastName)
+                        {
+                            if (!lastName.empty())
+                            {
+                                err |= cbor_encoder_close_container(&definition, &properties);
+                                VERIFY_CBOR(err);
+                                err |= cbor_encoder_close_container(&definitions, &definition);
+                                VERIFY_CBOR(err);
+                            }
+                            err |= cbor_encode_text_stringz(&definitions, structName.c_str());
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definitions, &definition,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            err |= Pair(&definition, "type", "object");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encode_text_stringz(&definition, "properties");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definition, &properties,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            lastName = structName;
+                        }
+                        CborEncoder prop;
+                        err |= cbor_encode_text_stringz(&properties, fieldName.c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        qcc::String min, max, def;
+                        err |= GetJsonType(&prop, values[j].c_str(), min, max, def);
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_close_container(&properties, &prop);
+                        VERIFY_CBOR(err);
+                    }
+                }
+                if (!lastName.empty())
+                {
+                    err |= cbor_encoder_close_container(&definition, &properties);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definitions, &definition);
+                    VERIFY_CBOR(err);
+                }
+                lastName.clear();
+                for (size_t j = 0; j < numAnnotations; ++j)
+                {
+                    if (names[j].find("org.alljoyn.Bus.Dict.") == 0)
+                    {
+                        size_t pos = sizeof("org.alljoyn.Bus.Dict.") - 1;
+                        size_t dot = names[j].find(".", pos);
+                        if (dot == qcc::String::npos)
+                        {
+                            continue;
+                        }
+                        qcc::String dictName = names[j].substr(pos, dot - pos);
+                        if (dictName != lastName)
+                        {
+                            err |= cbor_encode_text_stringz(&definitions, dictName.c_str());
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definitions, &definition, 1);
+                            VERIFY_CBOR(err);
+                            err |= Pair(&definition, "type", "object");
                             VERIFY_CBOR(err);
                             err |= cbor_encoder_close_container(&definitions, &definition);
                             VERIFY_CBOR(err);
+                            lastName = dictName;
                         }
-                        err |= cbor_encode_text_stringz(&definitions, structName.c_str());
-                        VERIFY_CBOR(err);
-                        err |= cbor_encoder_create_map(&definitions, &definition, CborIndefiniteLength);
-                        VERIFY_CBOR(err);
-                        err |= Pair(&definition, "type", "object");
-                        VERIFY_CBOR(err);
-                        err |= cbor_encode_text_stringz(&definition, "properties");
-                        VERIFY_CBOR(err);
-                        err |= cbor_encoder_create_map(&definition, &properties, CborIndefiniteLength);
-                        VERIFY_CBOR(err);
-                        lastName = structName;
-                    }
-                    CborEncoder prop;
-                    err |= cbor_encode_text_stringz(&properties, fieldName.c_str());
-                    VERIFY_CBOR(err);
-                    err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
-                    VERIFY_CBOR(err);
-                    qcc::String min, max, def;
-                    err |= GetJsonType(&prop, values[j].c_str(), min, max, def);
-                    VERIFY_CBOR(err);
-                    err |= cbor_encoder_close_container(&properties, &prop);
-                    VERIFY_CBOR(err);
-                }
-            }
-            if (!lastName.empty())
-            {
-                err |= cbor_encoder_close_container(&definition, &properties);
-                VERIFY_CBOR(err);
-                err |= cbor_encoder_close_container(&definitions, &definition);
-                VERIFY_CBOR(err);
-            }
-            lastName.clear();
-            for (size_t j = 0; j < numAnnotations; ++j)
-            {
-                if (names[j].find("org.alljoyn.Bus.Dict.") == 0)
-                {
-                    size_t pos = sizeof("org.alljoyn.Bus.Dict.") - 1;
-                    size_t dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
-                    {
-                        continue;
-                    }
-                    qcc::String dictName = names[j].substr(pos, dot - pos);
-                    if (dictName != lastName)
-                    {
-                        err |= cbor_encode_text_stringz(&definitions, dictName.c_str());
-                        VERIFY_CBOR(err);
-                        err |= cbor_encoder_create_map(&definitions, &definition, 1);
-                        VERIFY_CBOR(err);
-                        err |= Pair(&definition, "type", "object");
-                        VERIFY_CBOR(err);
-                        err |= cbor_encoder_close_container(&definitions, &definition);
-                        VERIFY_CBOR(err);
-                        lastName = dictName;
                     }
                 }
-            }
-            lastName.clear();
-            CborEncoder prop;
-            for (size_t j = 0; j < numAnnotations; ++j)
-            {
-                if (names[j].find("org.alljoyn.Bus.Enum.") == 0)
+                lastName.clear();
+                CborEncoder prop;
+                for (size_t j = 0; j < numAnnotations; ++j)
                 {
-                    size_t pos = sizeof("org.alljoyn.Bus.Enum.") - 1;
-                    size_t dot = names[j].find_first_of('.', pos);
-                    if (dot == qcc::String::npos)
+                    if (names[j].find("org.alljoyn.Bus.Enum.") == 0)
                     {
-                        continue;
-                    }
-                    qcc::String enumName = names[j].substr(pos, dot - pos);
-                    dot = names[j].find_last_of_std('.');
-                    qcc::String enumValue = names[j].substr(dot + 1);
-                    if (enumName != lastName)
-                    {
-                        if (!lastName.empty())
+                        size_t pos = sizeof("org.alljoyn.Bus.Enum.") - 1;
+                        size_t dot = names[j].find_first_of('.', pos);
+                        if (dot == qcc::String::npos)
                         {
-                            err |= cbor_encoder_close_container(&definitions, &prop);
-                            VERIFY_CBOR(err);
-                            err |= cbor_encoder_close_container(&definitions, &definition);
-                            VERIFY_CBOR(err);
+                            continue;
                         }
-                        err |= cbor_encode_text_stringz(&definitions, enumName.c_str());
+                        qcc::String enumName = names[j].substr(pos, dot - pos);
+                        dot = names[j].find_last_of_std('.');
+                        qcc::String enumValue = names[j].substr(dot + 1);
+                        if (enumName != lastName)
+                        {
+                            if (!lastName.empty())
+                            {
+                                err |= cbor_encoder_close_container(&definitions, &prop);
+                                VERIFY_CBOR(err);
+                                err |= cbor_encoder_close_container(&definitions, &definition);
+                                VERIFY_CBOR(err);
+                            }
+                            err |= cbor_encode_text_stringz(&definitions, enumName.c_str());
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definitions, &definition,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            err |= cbor_encode_text_stringz(&definitions, "oneOf");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_array(&definitions, &prop,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            lastName = enumName;
+                        }
+                        CborEncoder enumMap;
+                        err |= cbor_encoder_create_map(&prop, &enumMap, CborIndefiniteLength);
                         VERIFY_CBOR(err);
-                        err |= cbor_encoder_create_map(&definitions, &definition, CborIndefiniteLength);
+                        CborEncoder enumArr;
+                        err |= cbor_encode_text_stringz(&enumMap, "enum");
                         VERIFY_CBOR(err);
-                        err |= cbor_encode_text_stringz(&definitions, "oneOf");
+                        err |= cbor_encoder_create_array(&enumMap, &enumArr, CborIndefiniteLength);
                         VERIFY_CBOR(err);
-                        err |= cbor_encoder_create_array(&definitions, &prop, CborIndefiniteLength);
+                        err |= cbor_encode_text_stringz(&enumArr, values[j].c_str());
                         VERIFY_CBOR(err);
-                        lastName = enumName;
+                        err |= cbor_encoder_close_container(&enumMap, &enumArr);
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&enumMap, "title");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&enumMap, enumValue.c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_close_container(&prop, &enumMap);
+                        VERIFY_CBOR(err);
                     }
-                    CborEncoder enumMap;
-                    err |= cbor_encoder_create_map(&prop, &enumMap, CborIndefiniteLength);
+                }
+                if (!lastName.empty())
+                {
+                    err |= cbor_encoder_close_container(&definitions, &prop);
                     VERIFY_CBOR(err);
-                    CborEncoder enumArr;
-                    err |= cbor_encode_text_stringz(&enumMap, "enum");
-                    VERIFY_CBOR(err);
-                    err |= cbor_encoder_create_array(&enumMap, &enumArr, CborIndefiniteLength);
-                    VERIFY_CBOR(err);
-                    err |= cbor_encode_text_stringz(&enumArr, values[j].c_str());
-                    VERIFY_CBOR(err);
-                    err |= cbor_encoder_close_container(&enumMap, &enumArr);
-                    VERIFY_CBOR(err);
-                    err |= cbor_encode_text_stringz(&enumMap, "title");
-                    VERIFY_CBOR(err);
-                    err |= cbor_encode_text_stringz(&enumMap, enumValue.c_str());
-                    VERIFY_CBOR(err);
-                    err |= cbor_encoder_close_container(&prop, &enumMap);
+                    err |= cbor_encoder_close_container(&definitions, &definition);
                     VERIFY_CBOR(err);
                 }
-            }
-            if (!lastName.empty())
-            {
-                err |= cbor_encoder_close_container(&definitions, &prop);
-                VERIFY_CBOR(err);
-                err |= cbor_encoder_close_container(&definitions, &definition);
-                VERIFY_CBOR(err);
             }
         }
     }
