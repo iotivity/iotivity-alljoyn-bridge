@@ -66,6 +66,7 @@ class Bridge : private ajn::AboutListener
                 { m_execCb = execCb; m_killCb = killCb; m_seenStateCb = seenStateCb; }
         typedef void (*SessionLostCB)();
         void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
+        void SetManufacturerName(const char *manufacturerName) { m_manufacturerName = manufacturerName; }
         void SetSecureMode(bool secureMode) { m_secureMode = secureMode; }
 
         bool Start();
@@ -133,6 +134,7 @@ class Bridge : private ajn::AboutListener
         RDPublishTask *m_rdPublishTask;
         size_t m_pending;
         std::string m_ajSoftwareVersion;
+        std::string m_manufacturerName;
 
         static void RDPublish(void *context);
         void SetIntrospectionData(ajn::BusAttachment *bus, const char *ajSoftwareVersion,

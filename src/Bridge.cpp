@@ -457,18 +457,8 @@ bool Bridge::Start()
     }
     if (!m_sender)
     {
-        OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-        if (!handle)
-        {
-            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-            return false;
-        }
-        OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
-        if (result != OC_STACK_OK)
-        {
-            LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-            return false;
-        }
+        OCStackResult result;
+        OCResourceHandle handle;
         handle = OCGetResourceHandleAtUri(OC_RSRVD_WELL_KNOWN_URI);
         if (!handle)
         {
@@ -481,6 +471,41 @@ bool Bridge::Start()
             LOG(LOG_ERR, "OCSetResourceProperties() - %d", result);
             return false;
         }
+
+        result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, OC_SPEC_VERSION);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
+        result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION,
+                OC_DATA_MODEL_VERSION);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
+        handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+        if (!handle)
+        {
+            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            return false;
+        }
+        result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+            return false;
+        }
+
+        result = OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME,
+                m_manufacturerName.c_str());
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
+
         result = CreateResource(&handle, "/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
                 OC_RSRVD_INTERFACE_READ_WRITE, Bridge::EntityHandlerCB, this,
                 OC_DISCOVERABLE | OC_OBSERVABLE);
