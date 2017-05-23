@@ -55,9 +55,12 @@ OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
             objectDescription->GetInterfaces(ps[i], itfs, nitfs);
             for (size_t j = 0; j < nitfs; ++j)
             {
-                const ajn::InterfaceDescription *itf = bus->GetInterface(itfs[j]);
                 qcc::String version = "1";
-                itf->GetAnnotation("org.gtk.GDBus.Since", version);
+                const ajn::InterfaceDescription *itf = bus->GetInterface(itfs[j]);
+                if (itf) // TODO introspection needs to happen first for this to succeed
+                {
+                    itf->GetAnnotation("org.gtk.GDBus.Since", version);
+                }
                 dataModelVersions.insert(std::string(itfs[j]) + "." + version);
             }
             delete[] itfs;
