@@ -277,28 +277,6 @@ QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
             OICFree(arr);
             arr = NULL;
         }
-        if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_MFG_NAME, &arr, dim))
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                char *language = NULL;
-                if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
-                        OCRepPayloadGetPropString(arr[i], "value", &value))
-                {
-                    SetManufacturer(value, language);
-                }
-                OICFree(language);
-                OICFree(value);
-                value = NULL;
-            }
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OCRepPayloadDestroy(arr[i]);
-            }
-            OICFree(arr);
-            arr = NULL;
-        }
         if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
         {
             SetModelNumber(value);
