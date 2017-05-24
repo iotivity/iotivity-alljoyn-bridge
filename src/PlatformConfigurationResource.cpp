@@ -23,7 +23,7 @@
 #include "ocpayload.h"
 #include "oic_malloc.h"
 
-OCStackResult SetPlatformConfigurationProperties(OCRepPayload *payload, ajn::AboutData *aboutData)
+OCStackResult SetPlatformConfigurationProperties(OCRepPayload *payload, AboutData *aboutData)
 {
     assert(payload);
     assert(aboutData);

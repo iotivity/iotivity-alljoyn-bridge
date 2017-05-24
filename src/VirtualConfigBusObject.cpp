@@ -20,9 +20,12 @@
 
 #include "VirtualConfigBusObject.h"
 
+#include "AboutData.h"
+#include "DeviceConfigurationResource.h"
 #include "Interfaces.h"
 #include "Log.h"
 #include "Payload.h"
+#include "PlatformConfigurationResource.h"
 #include "Plugin.h"
 #include "Signature.h"
 #include <alljoyn/BusAttachment.h>
@@ -30,11 +33,10 @@
 #include "oic_malloc.h"
 #include <assert.h>
 
-VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, const char *uri,
-        const std::vector<OCDevAddr> &devAddrs)
-    : VirtualBusObject(bus, "/Config", devAddrs), m_uri(uri)
+VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, Resource &resource)
+    : VirtualBusObject(bus, "/Config", resource)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, uri);
+    LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, resource.m_uri.c_str());
     QStatus status;
     (void)(status); /* Unused in release build */
     status = bus->CreateInterfacesFromXml(ajn::org::alljoyn::Config::InterfaceXml);
@@ -59,24 +61,66 @@ VirtualConfigBusObject::~VirtualConfigBusObject()
     LOG(LOG_INFO, "[%p]", this);
 }
 
-QStatus VirtualConfigBusObject::Get(const char *ifaceName, const char *propName, ajn::MsgArg &val)
+void VirtualConfigBusObject::GetProp(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
 {
-    if (!strcmp(ifaceName, "org.alljoyn.Config"))
+    (void) member;
+    if (!strcmp(msg->GetArg(0)->v_string.str, "org.alljoyn.Config"))
     {
-        if (!strcmp(propName, "Version"))
+        if (!strcmp(msg->GetArg(1)->v_string.str, "Version"))
         {
-            return val.Set("q", 1);
+            ajn::MsgArg arg("v", new ajn::MsgArg("q", 1));
+            arg.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+            MethodReply(msg, &arg, 1);
         }
         else
         {
-            return ER_BUS_NO_SUCH_PROPERTY;
+            MethodReply(msg, ER_BUS_NO_SUCH_PROPERTY);
         }
     }
     else
     {
-        return ER_BUS_NO_SUCH_INTERFACE;
+        MethodReply(msg, ER_BUS_NO_SUCH_INTERFACE);
     }
 }
+
+void VirtualConfigBusObject::SetProp(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
+{
+    (void) member;
+    MethodReply(msg, ER_BUS_PROPERTY_ACCESS_DENIED);
+}
+
+void VirtualConfigBusObject::GetAllProps(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
+{
+    (void) member;
+    if (!strcmp(msg->GetArg(0)->v_string.str, "org.alljoyn.Config"))
+    {
+        ajn::MsgArg entry;
+        entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
+        entry.v_dictEntry.key = new ajn::MsgArg("s", "Version");
+        entry.v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("q", 1));
+        entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+        ajn::MsgArg dict;
+        dict.typeId = ajn::ALLJOYN_ARRAY;
+        dict.v_array.SetElements("{sv}", 1, &entry);
+        MethodReply(msg, &dict, 1);
+    }
+    else
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_INTERFACE);
+    }
+}
+
+struct ConfigurationsContext
+{
+    std::string m_lang;
+    AboutData *m_configData;
+    std::vector<Resource>::iterator m_resource;
+    ConfigurationsContext(const char *lang) : m_lang(lang), m_configData(NULL) { }
+    ~ConfigurationsContext() { delete m_configData; }
+};
 
 void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::Member *member,
         ajn::Message &msg)
@@ -84,222 +128,40 @@ void VirtualConfigBusObject::GetConfigurations(const ajn::InterfaceDescription::
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    DoResource(OC_REST_GET, m_uri.c_str(), NULL, msg,
-            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB));
-}
-
-static ajn::MsgArg ToAJDictEntry(const char *key, const char *value)
-{
-    ajn::MsgArg entry;
-    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
-    entry.v_dictEntry.key = new ajn::MsgArg("s", key);
-    ajn::MsgArg *valueArg = new ajn::MsgArg("s", value);
-    valueArg->Stabilize();
-    entry.v_dictEntry.val = new ajn::MsgArg("v", valueArg);
-    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
-    return entry;
-}
-
-static ajn::MsgArg ToAJDictEntry(const char *key, size_t numValues, char **values)
-{
-    ajn::MsgArg entry;
-    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
-    entry.v_dictEntry.key = new ajn::MsgArg("s", key);
-    ajn::MsgArg *valueArg = new ajn::MsgArg("as", numValues, values);
-    valueArg->Stabilize();
-    entry.v_dictEntry.val = new ajn::MsgArg("v", valueArg);
-    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
-    return entry;
-}
-
-static ajn::MsgArg ToAJDictEntry(const char *key, const ajn::MsgArg *valueArg)
-{
-    ajn::MsgArg entry;
-    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
-    entry.v_dictEntry.key = new ajn::MsgArg("s", key);
-    entry.v_dictEntry.val = new ajn::MsgArg("v", valueArg);
-    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
-    return entry;
-}
-
-/* Called with m_mutex held. */
-void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload *payload)
-{
-    LOG(LOG_INFO, "[%p]", this);
-
-    std::vector<ajn::MsgArg> entries;
-    char *dl = NULL;
-    if (OCRepPayloadGetPropString(payload, "dl", &dl))
-    {
-        entries.push_back(ToAJDictEntry("DefaultLanguage", dl));
-    }
-    char *languageTag;
-    msg->GetArgs("s", &languageTag);
-    if (dl && !strcmp(languageTag, ""))
-    {
-        languageTag = dl;
-    }
-    char *n = NULL;
-    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    OCRepPayload **objArray;
-    if (OCRepPayloadGetPropObjectArray(payload, "ln", &objArray, dim))
-    {
-        size_t numLangs = calcDimTotal(dim);
-        char **langs = new char *[numLangs];
-        memset(langs, 0, numLangs * sizeof(char *));
-        for (size_t i = 0; i < numLangs; ++i)
-        {
-            if (OCRepPayloadGetPropString(objArray[i], "language", &langs[i]))
-            {
-                if (!strcmp(langs[i], languageTag))
-                {
-                    OCRepPayloadGetPropString(objArray[i], "value", &n);
-                }
-            }
-        }
-        entries.push_back(ToAJDictEntry("SupportedLanguages", numLangs, langs));
-        for (size_t i = 0; i < numLangs; ++i)
-        {
-            OICFree(langs[i]);
-            OCRepPayloadDestroy(objArray[i]);
-        }
-        OICFree(objArray);
-        delete[] langs;
-    }
-    if (!n && (!strcmp(languageTag, "") || (dl && !strcmp(languageTag, dl))))
-    {
-        OCRepPayloadGetPropString(payload, "n", &n);
-    }
-    if (n)
-    {
-        entries.push_back(ToAJDictEntry("AppName", n));
-        char *value;
-        if (OCRepPayloadGetPropString(payload, "loc", &value))
-        {
-            entries.push_back(ToAJDictEntry("org.openconnectivity.loc", value));
-            OICFree(value);
-        }
-        if (OCRepPayloadGetPropString(payload, "locn", &value))
-        {
-            entries.push_back(ToAJDictEntry("org.openconnectivity.locn", value));
-            OICFree(value);
-        }
-        if (OCRepPayloadGetPropString(payload, "c", &value))
-        {
-            entries.push_back(ToAJDictEntry("org.openconnectivity.c", value));
-            OICFree(value);
-        }
-        if (OCRepPayloadGetPropString(payload, "r", &value))
-        {
-            entries.push_back(ToAJDictEntry("org.openconnectivity.r", value));
-            OICFree(value);
-        }
-        /* Vendor-defined properties */
-        for (OCRepPayloadValue *value = payload->values; value; value = value->next)
-        {
-            if (!strncmp(value->name, "x.", 2))
-            {
-                const char *fieldName = value->name + 2; /* Skip the leading x. */
-                char fieldSig[] = "aaaa{sv}";
-                CreateSignature(fieldSig, value);
-                ajn::MsgArg *fieldValue = new ajn::MsgArg();
-                ToAJMsgArg(fieldValue, fieldSig, value);
-                entries.push_back(ToAJDictEntry(fieldName, fieldValue));
-            }
-        }
-    }
-    if (n)
-    {
-        ajn::MsgArg arg;
-        arg.typeId = ajn::ALLJOYN_ARRAY;
-        arg.v_array.SetElements("{sv}", entries.size(), &entries[0]);
-        QStatus status = MethodReply(msg, &arg, 1);
-        if (status != ER_OK)
-        {
-            LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
-        }
-    }
-    else
-    {
-        QStatus status = MethodReply(msg, "org.alljoyn.Error.LanguageNotSupported");
-        if (status != ER_OK)
-        {
-            LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
-        }
-    }
-    OICFree(n);
-    OICFree(dl);
-}
-
-void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescription::Member *member,
-        ajn::Message &msg)
-{
-    LOG(LOG_INFO, "[%p] member=%p", this, member);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    OCRepPayload *payload = OCRepPayloadCreate();
-    if (!payload)
+    std::vector<Resource>::iterator resource;
+    ConfigurationsContext *context = new ConfigurationsContext(msg->GetArg(0)->v_string.str);
+    if (!context)
     {
         goto error;
     }
-    char *languageTag;
-    char *defaultLanguage;
-    ajn::MsgArg *dict;
-    msg->GetArgs("s*", &languageTag, &dict);
-    char *value;
-    if (dict->GetElement("{ss}", "org.openconnectivity.loc", &value) == ER_OK)
+    context->m_configData = new AboutData();
+    if (!context->m_configData)
     {
-        OCRepPayloadSetPropString(payload, "loc", value);
+        goto error;
     }
-    if (dict->GetElement("{ss}", "org.openconnectivity.locn", &value) == ER_OK)
+    /*
+     * Four cases need to be considered to handle this properly:
+     * 1. only oic.wk.con
+     * 2. only oic.wk.con.p
+     * 3. oic.wk.con and oic.wk.con.p at same href
+     * 4. oic.wk.con and oic.wk.con.p at different hrefs
+     *
+     * The first three cases reduce to one GET (case #3 will return the union of both oic.wk.con and
+     * oic.wk.con.p properties).  The fourth case requires two GETs.
+     */
+    resource = FindResourceFromType(m_resources, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION);
+    if (resource == m_resources.end())
     {
-        OCRepPayloadSetPropString(payload, "locn", value);
+        resource = FindResourceFromType(m_resources, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION);
     }
-    if (dict->GetElement("{ss}", "org.openconnectivity.c", &value) == ER_OK)
+    if (resource == m_resources.end())
     {
-        OCRepPayloadSetPropString(payload, "c", value);
+        goto error;
     }
-    if (dict->GetElement("{ss}", "org.openconnectivity.r", &value) == ER_OK)
-    {
-        OCRepPayloadSetPropString(payload, "r", value);
-    }
-    defaultLanguage = NULL;
-    if (dict->GetElement("{ss}", "DefaultLanguage", &defaultLanguage) == ER_OK)
-    {
-        OCRepPayloadSetPropString(payload, "dl", defaultLanguage);
-    }
-    if (dict->GetElement("{ss}", "AppName", &value) == ER_OK)
-    {
-        if (!strcmp(languageTag, "") && !defaultLanguage)
-        {
-            OCRepPayloadSetPropString(payload, "n", value);
-        }
-        else
-        {
-            if (!strcmp(languageTag, "") && defaultLanguage)
-            {
-                languageTag = defaultLanguage;
-            }
-            size_t dim[MAX_REP_ARRAY_DEPTH] = { 1, 0, 0 };
-            OCRepPayload **objArray = (OCRepPayload **) OICCalloc(calcDimTotal(dim), sizeof(OCRepPayload *));
-            if (!objArray)
-            {
-                goto error;
-            }
-            OCRepPayload *obj = OCRepPayloadCreate();
-            if (!obj)
-            {
-                OICFree(objArray);
-                goto error;
-            }
-            OCRepPayloadSetPropString(obj, "language", languageTag);
-            OCRepPayloadSetPropString(obj, "value", value);
-            objArray[0] = obj;
-            OCRepPayloadSetPropObjectArrayAsOwner(payload, "ln", objArray, dim);
-        }
-    }
-    DoResource(OC_REST_POST, m_uri.c_str(), payload, msg,
-            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::UpdateConfigurationsCB));
+    context->m_resource = resource;
+    DoResource(OC_REST_GET, resource->m_uri, resource->m_addrs, NULL, msg,
+            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB),
+            context);
     return;
 
 error:
@@ -308,19 +170,159 @@ error:
     {
         LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
     }
+    delete context;
 }
 
 /* Called with m_mutex held. */
-void VirtualConfigBusObject::UpdateConfigurationsCB(ajn::Message &msg, OCRepPayload *payload)
+void VirtualConfigBusObject::GetConfigurationsCB(ajn::Message &msg, OCRepPayload *payload, void *ctx)
 {
-    (void) payload;
     LOG(LOG_INFO, "[%p]", this);
 
-    QStatus status = MethodReply(msg);
+    std::vector<Resource>::iterator platform;
+    ConfigurationsContext *context = (ConfigurationsContext *) ctx;
+    QStatus status = context->m_configData->Set(payload);
+    if (status != ER_OK)
+    {
+        goto error;
+    }
+    platform = FindResourceFromType(m_resources, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION);
+    if (platform != m_resources.end() && platform != context->m_resource)
+    {
+        context->m_resource = platform;
+        DoResource(OC_REST_GET, context->m_resource->m_uri, context->m_resource->m_addrs, NULL, msg,
+                static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::GetConfigurationsCB),
+                context);
+    }
+    else
+    {
+        ajn::MsgArg arg;
+        status = context->m_configData->GetConfigData(&arg, context->m_lang.c_str());
+        if (status != ER_OK)
+        {
+            goto error;
+        }
+        status = MethodReply(msg, &arg, 1);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+        }
+        delete context;
+    }
+    return;
+
+error:
+    status = MethodReply(msg, status);
     if (status != ER_OK)
     {
         LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
     }
+    delete context;
+}
+
+void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
+{
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    OCStackResult result = OC_STACK_ERROR;
+    OCRepPayload *payload = NULL;
+    std::vector<Resource>::iterator device;
+    std::vector<Resource>::iterator platform;
+    ConfigurationsContext *context = new ConfigurationsContext(msg->GetArg(0)->v_string.str);
+    if (!context)
+    {
+        goto error;
+    }
+    context->m_configData = new AboutData(msg->GetArg(1), msg->GetArg(0)->v_string.str);
+    payload = OCRepPayloadCreate();
+    if (!payload)
+    {
+        goto error;
+    }
+    device = FindResourceFromType(m_resources, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION);
+    platform = FindResourceFromType(m_resources, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION);
+    if (device != m_resources.end())
+    {
+        result = SetDeviceConfigurationProperties(payload, context->m_configData);
+        if (result != OC_STACK_OK)
+        {
+            goto error;
+        }
+        context->m_resource = device;
+    }
+    if (platform != m_resources.end() && (device == m_resources.end() || platform == device))
+    {
+        result = SetPlatformConfigurationProperties(payload, context->m_configData);
+        if (result != OC_STACK_OK)
+        {
+            goto error;
+        }
+        context->m_resource = platform;
+    }
+    DoResource(OC_REST_POST, context->m_resource->m_uri, context->m_resource->m_addrs, payload, msg,
+            static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::UpdateConfigurationsCB),
+            context);
+    return;
+
+error:
+    QStatus status = MethodReply(msg, ER_FAIL);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+    }
+    OCRepPayloadDestroy(payload);
+    delete context;
+}
+
+/* Called with m_mutex held. */
+void VirtualConfigBusObject::UpdateConfigurationsCB(ajn::Message &msg, OCRepPayload *responsePayload,
+        void *ctx)
+{
+    (void) responsePayload;
+    LOG(LOG_INFO, "[%p]", this);
+
+    OCRepPayload *payload = NULL;
+    std::vector<Resource>::iterator platform;
+    ConfigurationsContext *context = (ConfigurationsContext *) ctx;
+    platform = FindResourceFromType(m_resources, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION);
+    if (platform != m_resources.end() && platform != context->m_resource)
+    {
+        OCStackResult result;
+        context->m_resource = platform;
+        payload = OCRepPayloadCreate();
+        if (!payload)
+        {
+            goto error;
+        }
+        result = SetPlatformConfigurationProperties(payload, context->m_configData);
+        if (result != OC_STACK_OK)
+        {
+            goto error;
+        }
+        DoResource(OC_REST_POST, context->m_resource->m_uri, context->m_resource->m_addrs, payload, msg,
+                static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::UpdateConfigurationsCB),
+                context);
+    }
+    else
+    {
+        QStatus status = MethodReply(msg);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+        }
+        delete context;
+    }
+    return;
+
+error:
+    QStatus status = MethodReply(msg, ER_FAIL);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+    }
+    OCRepPayloadDestroy(payload);
+    delete context;
 }
 
 void VirtualConfigBusObject::ResetConfigurations(const ajn::InterfaceDescription::Member *member,
@@ -346,13 +348,19 @@ void VirtualConfigBusObject::FactoryReset(const ajn::InterfaceDescription::Membe
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    OCRepPayload *payload = OCRepPayloadCreate();
+    auto resource = FindResourceFromType(m_resources, "oic.wk.mnt");
+    if (resource == m_resources.end())
+    {
+        goto error;
+    }
+    OCRepPayload *payload;
+    payload = OCRepPayloadCreate();
     if (!payload)
     {
         goto error;
     }
     OCRepPayloadSetPropBool(payload, "fr", true);
-    DoResource(OC_REST_POST, "/oic/mnt", payload, msg,
+    DoResource(OC_REST_POST, resource->m_uri, resource->m_addrs, payload, msg,
             static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::FactoryResetCB));
     return;
 
@@ -365,9 +373,10 @@ error:
 }
 
 /* Called with m_mutex held. */
-void VirtualConfigBusObject::FactoryResetCB(ajn::Message &msg, OCRepPayload *payload)
+void VirtualConfigBusObject::FactoryResetCB(ajn::Message &msg, OCRepPayload *payload, void *ctx)
 {
     (void) payload;
+    (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);
@@ -384,13 +393,19 @@ void VirtualConfigBusObject::Restart(const ajn::InterfaceDescription::Member *me
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    OCRepPayload *payload = OCRepPayloadCreate();
+    auto resource = FindResourceFromType(m_resources, "oic.wk.mnt");
+    if (resource == m_resources.end())
+    {
+        goto error;
+    }
+    OCRepPayload *payload;
+    payload = OCRepPayloadCreate();
     if (!payload)
     {
         goto error;
     }
     OCRepPayloadSetPropBool(payload, "rb", true);
-    DoResource(OC_REST_POST, "/oic/mnt", payload, msg,
+    DoResource(OC_REST_POST, resource->m_uri, resource->m_addrs, payload, msg,
             static_cast<VirtualBusObject::DoResourceHandler>(&VirtualConfigBusObject::RestartCB));
     return;
 
@@ -403,9 +418,10 @@ error:
 }
 
 /* Called with m_mutex held. */
-void VirtualConfigBusObject::RestartCB(ajn::Message &msg, OCRepPayload *payload)
+void VirtualConfigBusObject::RestartCB(ajn::Message &msg, OCRepPayload *payload, void *ctx)
 {
     (void) payload;
+    (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);

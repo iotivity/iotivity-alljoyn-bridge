@@ -43,12 +43,4 @@ extern std::string gRD;
 
 OCStackResult RDPublish();
 
-OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
-        const OCDevAddr *destination, OCPayload *payload, OCCallbackData *cbData,
-        OCHeaderOption *options, uint8_t numOptions);
-OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
-        const std::vector<OCDevAddr> &destinations, OCPayload *payload, OCCallbackData *cbData,
-        OCHeaderOption *options, uint8_t numOptions);
-OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos);
-
 #endif // _PLUGIN_H

@@ -75,89 +75,6 @@ static bool TranslateResourceType(const char *type)
              strcmp(type, "oic.r.securemode") == 0);
 }
 
-std::vector<OCDevAddr> GetDevAddrs(OCDevAddr origin, const char *di, OCResourcePayload *resource)
-{
-    if (resource->secure)
-    {
-        origin.flags = (OCTransportFlags) (origin.flags | OC_FLAG_SECURE);
-        if (origin.adapter == OC_ADAPTER_IP)
-        {
-            origin.port = resource->port;
-        }
-#ifdef TCP_ADAPTER
-        else if (origin.adapter == OC_ADAPTER_TCP)
-        {
-            origin.port = resource->tcpPort;
-        }
-#endif
-    }
-    std::vector<OCDevAddr> addrs;
-    if (!resource->eps)
-    {
-        addrs.push_back(origin);
-    }
-    for (const OCEndpointPayload *ep = resource->eps; ep; ep = ep->next)
-    {
-        OCDevAddr addr;
-        if (!strcmp(ep->tps, "coap") || !strcmp(ep->tps, "coaps"))
-        {
-            addr.adapter = OC_ADAPTER_IP;
-        }
-        else if (!strcmp(ep->tps, "coap+tcp") || !strcmp(ep->tps, "coaps+tcp"))
-        {
-            addr.adapter = OC_ADAPTER_TCP;
-        }
-        addr.flags = ep->family;
-        addr.port = ep->port;
-        strncpy(addr.addr, ep->addr, MAX_ADDR_STR_SIZE);
-        addr.ifindex = 0;
-        addr.routeData[0] = '\0';
-        strncpy(addr.remoteId, di, MAX_IDENTITY_SIZE);
-        addrs.push_back(addr);
-    }
-    return addrs;
-}
-
-template <typename T>
-static bool HasResourceType(std::vector<std::string> rts, T rt)
-{
-    return std::find(rts.begin(), rts.end(), rt) != rts.end();
-}
-
-struct Resource
-{
-    std::string m_uri;
-    std::vector<std::string> m_ifs;
-    std::vector<std::string> m_rts;
-    bool m_isObservable;
-    std::vector<OCDevAddr> m_addrs;
-    std::vector<Resource> m_resources;
-    Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource)
-        : m_uri(resource->uri), m_isObservable(resource->bitmap & OC_OBSERVABLE)
-    {
-        for (OCStringLL *ifc = resource->interfaces; ifc; ifc = ifc->next)
-        {
-            m_ifs.push_back(ifc->value);
-        }
-        for (OCStringLL *type = resource->types; type; type = type->next)
-        {
-            m_rts.push_back(type->value);
-        }
-        m_addrs = GetDevAddrs(origin, di, resource);
-    }
-    bool IsSecure()
-    {
-        for (auto &addr : m_addrs)
-        {
-            if (addr.flags & OC_FLAG_SECURE)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-
 struct Device
 {
     std::string m_di;
@@ -544,10 +461,10 @@ bool Bridge::Stop()
     }
     if (m_discoverHandle)
     {
-        OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS);
+        OCStackResult result = OCCancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "Cancel() - %d", result);
+            LOG(LOG_ERR, "OCCancel() - %d", result);
         }
         m_discoverHandle = NULL;
     }
@@ -598,10 +515,10 @@ bool Bridge::Process()
         {
             if (m_discoverHandle)
             {
-                OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS);
+                OCStackResult result = OCCancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
                 if (result != OC_STACK_OK)
                 {
-                    LOG(LOG_ERR, "Cancel() - %d", result);
+                    LOG(LOG_ERR, "OCCancel() - %d", result);
                 }
                 m_discoverHandle = NULL;
             }
@@ -1295,7 +1212,7 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_RESOURCE_TYPE_DEVICE, payload);
+    context->m_bus->SetAboutData(payload);
     result = thiz->ContinueDiscovery(context, OC_RSRVD_PLATFORM_URI,
             context->GetDevAddrs(OC_RSRVD_PLATFORM_URI), Bridge::GetPlatformCB);
     if (result == OC_STACK_OK)
@@ -1325,7 +1242,7 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_RESOURCE_TYPE_PLATFORM, payload);
+    context->m_bus->SetAboutData(payload);
 
     for (context->m_rit = context->m_device.m_resources.begin();
          context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
@@ -1386,17 +1303,13 @@ OCStackApplicationResult Bridge::GetCollectionCB(void *ctx, OCDoHandle handle,
         {
             goto exit;
         }
-        std::vector<Resource>::iterator rit = std::find_if(context->m_device.m_resources.begin(),
-                context->m_device.m_resources.end(),
-                [href](Resource &r) -> bool {return r.m_uri == href;}); // TODO code dup
+        auto rit = FindResourceFromUri(context->m_device.m_resources, href);
         if (rit != context->m_device.m_resources.end())
         {
             context->m_rit->m_resources.push_back(*rit);
             context->m_device.m_resources.erase(rit);
             /* Find collection again since resources has been modified */
-            context->m_rit = std::find_if(context->m_device.m_resources.begin(),
-                    context->m_device.m_resources.end(),
-                    [colUri](Resource &r) -> bool {return r.m_uri == colUri;});
+            context->m_rit = FindResourceFromUri(context->m_device.m_resources, colUri);
         }
         else
         {
@@ -2791,18 +2704,21 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
             VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
             if (!obj)
             {
-                obj = new VirtualConfigBusObject(context->m_bus, uri, context->GetDevAddrs(uri));
+                obj = new VirtualConfigBusObject(context->m_bus, *it);
                 status = context->m_bus->RegisterBusObject(obj);
                 if (status != ER_OK)
                 {
                     delete obj;
                 }
             }
+            else
+            {
+                obj->AddResource(*it);
+            }
         }
         else
         {
-            VirtualBusObject *obj = new VirtualBusObject(context->m_bus, uri,
-                    context->GetDevAddrs(uri));
+            VirtualBusObject *obj = new VirtualBusObject(context->m_bus, *it);
             ParseIntrospectionPayload(obj, path, ajNames);
             for (std::vector<Resource>::iterator jt = it->m_resources.begin();
                  jt != it->m_resources.end(); ++jt)
@@ -2830,8 +2746,7 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
     resource = context->m_device.GetResourceUri(OC_RSRVD_DEVICE_URI);
     if (resource)
     {
-        VirtualBusObject *obj = new VirtualBusObject(context->m_bus, OC_RSRVD_DEVICE_URI,
-                resource->m_addrs);
+        VirtualBusObject *obj = new VirtualBusObject(context->m_bus, *resource);
         for (auto &rt : resource->m_rts)
         {
             if (TranslateResourceType(rt.c_str()))
@@ -3088,7 +3003,7 @@ void Bridge::DiscoverTask::Run(Bridge *thiz)
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, m_payload);
+    context->m_bus->SetAboutData(m_payload);
     result = thiz->ContinueDiscovery(context, OC_RSRVD_PLATFORM_URI,
             context->GetDevAddrs(OC_RSRVD_PLATFORM_URI), Bridge::GetPlatformCB);
     if (result == OC_STACK_OK)

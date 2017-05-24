@@ -39,6 +39,8 @@ if env['TARGET_OS'] == 'linux':
                     'src/PlatformResource.cpp',
                     'src/Resource.cpp',
                     'src/Signature.cpp',
+                    'src/VirtualBusObject.cpp',
+                    'src/VirtualConfigBusObject.cpp',
                     'src/VirtualConfigurationResource.cpp',
                     'src/VirtualDevice.cpp',
                     'src/VirtualResource.cpp',

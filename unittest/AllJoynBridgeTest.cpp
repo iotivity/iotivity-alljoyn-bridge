@@ -31,6 +31,7 @@
 #include "PlatformResource.h"
 #include "Plugin.h"
 #include "Resource.h"
+#include "VirtualConfigBusObject.h"
 #include "VirtualConfigurationResource.h"
 #include "VirtualDevice.h"
 #include "ocpayload.h"
@@ -116,6 +117,54 @@ private:
     {
         CreateCallback *callback = (CreateCallback *) ctx;
         callback->m_called = true;
+    }
+};
+
+class MethodCall : public ajn::MessageReceiver
+{
+public:
+    MethodCall(ajn::BusAttachment *bus, ajn::ProxyBusObject *proxyObj)
+        : m_proxyObj(proxyObj), m_reply(*bus), m_called(false) { }
+    QStatus Call(const char *iface, const char *method, const ajn::MsgArg *args, size_t numArgs)
+    {
+        return m_proxyObj->MethodCallAsync(iface, method, this,
+                static_cast<MessageReceiver::ReplyHandler>(&MethodCall::ReplyHandler), args,
+                numArgs);
+    }
+    OCStackResult Wait(long waitTime)
+    {
+        uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
+        while (!m_called)
+        {
+            uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
+            long elapsed = (long)((currTime - startTime) / MS_PER_SEC);
+            if (elapsed > waitTime)
+            {
+                break;
+            }
+            OCProcess();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (!m_called)
+        {
+            return OC_STACK_TIMEOUT;
+        }
+        if (m_reply->GetType() != ajn::MESSAGE_METHOD_RET)
+        {
+            return OC_STACK_ERROR;
+        }
+        return OC_STACK_OK;
+    }
+    ajn::Message &Reply() { return m_reply; }
+private:
+    ajn::ProxyBusObject *m_proxyObj;
+    ajn::Message m_reply;
+    bool m_called;
+    void ReplyHandler(ajn::Message &reply, void *context)
+    {
+        (void) context;
+        m_reply = reply;
+        m_called = true;
     }
 };
 
@@ -266,7 +315,7 @@ TEST_F(AboutDataTest, SetFieldsFromDevice)
     EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.property", "value"));
 
     AboutData aboutData(NULL);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     size_t nb;
@@ -334,7 +383,7 @@ TEST_F(AboutDataTest, SetFieldsFromPlatform)
     EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.property", "value"));
 
     AboutData aboutData(NULL);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_PLATFORM, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     char *s;
@@ -386,7 +435,7 @@ TEST_F(AboutDataTest, SetFieldsFromDeviceConfiguration)
     EXPECT_TRUE(OCRepPayloadSetPropObjectArrayAsOwner(payload, OC_RSRVD_DEVICE_NAME_LOCALIZED, ln, lnDim));
 
     AboutData aboutData(defaultLanguage);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     char *s;
@@ -429,7 +478,7 @@ TEST_F(AboutDataTest, SetFieldsFromPlatformConfiguration)
     EXPECT_TRUE(OCRepPayloadSetPropObjectArrayAsOwner(payload, OC_RSRVD_PLATFORM_NAME, mnpn, mnpnDim));
 
     AboutData aboutData(NULL);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     char *s;
@@ -450,7 +499,7 @@ TEST_F(AboutDataTest, UseNameWhenLocalizedNamesNotPresent)
     EXPECT_TRUE(OCRepPayloadSetPropString(payload, OC_RSRVD_DEVICE_NAME, name));
 
     AboutData aboutData(NULL);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     char *s;
@@ -484,8 +533,8 @@ TEST_F(AboutDataTest, UseLocalizedNamesWhenNamePresent)
     EXPECT_TRUE(OCRepPayloadSetPropObjectArrayAsOwner(config, OC_RSRVD_DEVICE_NAME_LOCALIZED, ln, lnDim));
 
     AboutData aboutData(NULL);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE, device);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, config);
+    aboutData.Set(device);
+    aboutData.Set(config);
     EXPECT_TRUE(aboutData.IsValid());
 
     size_t ns = sizeof(names) / sizeof(names[0]);
@@ -530,7 +579,7 @@ TEST_F(ConfigDataTest, SetFieldsFromDeviceConfiguration)
     /* TODO other OC types */
 
     AboutData aboutData(NULL);
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     char *s;
@@ -585,7 +634,7 @@ TEST_F(ConfigDataTest, SetFieldsFromPlatformConfiguration)
     /* TODO other OC types */
 
     AboutData aboutData("en");
-    aboutData.Set(OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION, payload);
+    aboutData.Set(payload);
     EXPECT_TRUE(aboutData.IsValid());
 
     char *s;
@@ -598,6 +647,30 @@ TEST_F(ConfigDataTest, SetFieldsFromPlatformConfiguration)
     EXPECT_EQ(ER_OK, aboutData.GetField(vendorField, arg));
     EXPECT_EQ(ER_OK, arg->Get("s", &s));
     EXPECT_STREQ(vendorValue, s);
+}
+
+TEST_F(ConfigDataTest, WithoutDefaultOrSupportedLanguages)
+{
+    const char *name = "app-name";
+    ajn::MsgArg entry;
+    entry.typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry.v_dictEntry.key = new ajn::MsgArg("s", "AppName");
+    entry.v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s", name));
+    entry.SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ajn::MsgArg dict;
+    dict.typeId = ajn::ALLJOYN_ARRAY;
+    dict.v_array.SetElements("{sv}", 1, &entry);
+
+    const char *lang = "";
+    AboutData aboutData(&dict, lang);
+    char *s;
+    EXPECT_EQ(ER_OK, aboutData.GetAppName(&s, lang));
+    EXPECT_STREQ(name, s);
+
+    ajn::MsgArg arg, elem;
+    EXPECT_EQ(ER_OK, aboutData.GetConfigData(&arg, lang));
+    EXPECT_NE(ER_OK, arg.GetElement("{sv}", "DefaultLanguage", &elem));
+    EXPECT_NE(ER_OK, arg.GetElement("{sv}", "SupportedLanguages", &elem));
 }
 
 class DeviceProperties : public AJOCSetUp { };
@@ -964,6 +1037,89 @@ TEST_F(DeviceConfigurationProperties, SetFromAboutData)
     EXPECT_STREQ(vendorValue, s);
 }
 
+TEST_F(DeviceConfigurationProperties, SetFromMsgArg)
+{
+    ajn::MsgArg entries[6];
+    ajn::MsgArg *entry = entries;
+    const char *name = "app-name";
+    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry->v_dictEntry.key = new ajn::MsgArg("s", "AppName");
+    entry->v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s", name));
+    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ++entry;
+    double loc[2] = { -1.0, 1.0 };
+    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry->v_dictEntry.key = new ajn::MsgArg("s", "org.openconnectivity.loc");
+    entry->v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("ad", 2, loc));
+    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ++entry;
+    const char *locn = "locn";
+    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry->v_dictEntry.key = new ajn::MsgArg("s", "org.openconnectivity.locn");
+    entry->v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s", locn));
+    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ++entry;
+    const char *c = "c";
+    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry->v_dictEntry.key = new ajn::MsgArg("s", "org.openconnectivity.c");
+    entry->v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s", c));
+    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ++entry;
+    const char *r = "r";
+    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry->v_dictEntry.key = new ajn::MsgArg("s", "org.openconnectivity.r");
+    entry->v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s", r));
+    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ++entry;
+    const char *vendorField = "org.iotivity.Field";
+    const char *vendorValue = "vendor-value";
+    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+    entry->v_dictEntry.key = new ajn::MsgArg("s", vendorField);
+    entry->v_dictEntry.val = new ajn::MsgArg("v", new ajn::MsgArg("s", vendorValue));
+    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, true);
+    ++entry;
+    ajn::MsgArg dict;
+    dict.typeId = ajn::ALLJOYN_ARRAY;
+    dict.v_array.SetElements("{sv}", entry - entries, entries);
+
+    const char *lang = "";
+    AboutData aboutData(&dict, lang);
+
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_EQ(OC_STACK_OK, SetDeviceConfigurationProperties(payload, &aboutData));
+
+    /* Verify */
+    size_t numValues = 0;
+    for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+    {
+        ++numValues;
+    }
+    EXPECT_EQ((size_t) (entry - entries) + 1 /* ln from AppName */, numValues);
+    char *s = NULL;
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_NAME, &s));
+    EXPECT_STREQ(name, s);
+    size_t locDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    double *locArr = NULL;
+    EXPECT_TRUE(OCRepPayloadGetDoubleArray(payload, "loc", &locArr, locDim));
+    EXPECT_EQ((size_t) 2, calcDimTotal(locDim));
+    EXPECT_EQ(loc[0], locArr[0]);
+    EXPECT_EQ(loc[1], locArr[1]);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "locn", &s));
+    EXPECT_STREQ(locn, s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "c", &s));
+    EXPECT_STREQ(c, s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "r", &s));
+    EXPECT_STREQ(r, s);
+    size_t lnDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    OCRepPayload **lnArr = NULL;
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "ln", &lnArr, lnDim));
+    EXPECT_EQ(1u, calcDimTotal(lnDim));
+    EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[0], "language", &s));
+    EXPECT_STREQ("", s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[0], "value", &s));
+    EXPECT_STREQ(name, s);
+}
+
 TEST_F(DeviceConfigurationProperties, NonStringVendorField)
 {
     AboutData aboutData("");
@@ -1193,7 +1349,6 @@ public:
     void UpdateConfigurations(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
     {
         (void) member;
-        fprintf(stderr, "%s\n", msg->ToString().c_str());
         EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
     }
 
@@ -1700,4 +1855,814 @@ TEST_F(VirtualServer, PlatformResource)
 
     delete resource;
     delete device;
+}
+
+class VirtualProducer : public AJOCSetUp
+{
+protected:
+    ajn::BusAttachment *bus;
+    virtual void SetUp()
+    {
+        AJOCSetUp::SetUp();
+        bus = new ajn::BusAttachment("Consumer");
+        EXPECT_EQ(ER_OK, bus->Start());
+        EXPECT_EQ(ER_OK, bus->Connect());
+    }
+    virtual void TearDown()
+    {
+        delete bus;
+        AJOCSetUp::TearDown();
+    }
+};
+
+class ConfigurationResource
+{
+public:
+    ConfigurationResource(bool createResources = true, bool separateResources = false,
+            ExpectedProperties *properties = NULL)
+        : m_includeOptionalProperties(false), m_con(NULL), m_conp(NULL), m_mnt(NULL),
+          m_properties(properties)
+    {
+        if (createResources)
+        {
+            /*
+             * TODO discovery with large /oic/res responses doesn't work over localhost, so only the
+             * first resource is OC_DISCOVERABLE and the tests derive the others.
+             */
+            EXPECT_EQ(OC_STACK_OK, CreateResource(&m_con, "/con", "oic.wk.con", "oic.if.rw",
+                    ConfigurationResource::ConfigurationHandler, this, OC_DISCOVERABLE));
+            if (separateResources)
+            {
+                EXPECT_EQ(OC_STACK_OK, CreateResource(&m_conp, "/con/p", "oic.wk.con", "oic.if.rw",
+                        ConfigurationResource::ConfigurationHandler, this, 0));
+            }
+            else
+            {
+                EXPECT_EQ(OC_STACK_OK, OCBindResourceTypeToResource(m_con, "oic.wk.con.p"));
+            }
+            EXPECT_EQ(OC_STACK_OK, CreateResource(&m_mnt, "/oic/mnt", "oic.wk.mnt", "oic.if.rw",
+                    ConfigurationResource::MaintenanceHandler, this, 0));
+            EXPECT_EQ(OC_STACK_OK, OCBindResourceInterfaceToResource(m_mnt, "oic.if.r"));
+        }
+    }
+    ~ConfigurationResource()
+    {
+        OCDeleteResource(m_mnt);
+        OCDeleteResource(m_conp);
+        OCDeleteResource(m_con);
+    }
+    void SetMandatoryProperties() { m_includeOptionalProperties = false; }
+    void SetAllProperties() { m_includeOptionalProperties = true; }
+    void SetMandatoryDeviceProperties(OCRepPayload *payload)
+    {
+        EXPECT_TRUE(OCRepPayloadSetPropString(payload, "n", "en-name"));
+    }
+    void SetOptionalDeviceProperties(OCRepPayload *payload)
+    {
+        double loc[2] = { -1.0, 1.0 };
+        size_t dim[MAX_REP_ARRAY_DEPTH] = { 2, 0, 0 };
+        EXPECT_TRUE(OCRepPayloadSetDoubleArray(payload, "loc", loc, dim));
+        EXPECT_TRUE(OCRepPayloadSetPropString(payload, "locn", "locn"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(payload, "c", "c"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(payload, "r", "r"));
+        OCRepPayload **ln = (OCRepPayload **) OICCalloc(2, sizeof(OCRepPayload*));
+        ln[0] = OCRepPayloadCreate();
+        EXPECT_TRUE(ln[0] != NULL);
+        EXPECT_TRUE(OCRepPayloadSetPropString(ln[0], "language", "en"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(ln[0], "value", "en-name"));
+        ln[1] = OCRepPayloadCreate();
+        EXPECT_TRUE(ln[1] != NULL);
+        EXPECT_TRUE(OCRepPayloadSetPropString(ln[1], "language", "fr"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(ln[1], "value", "fr-name"));
+        EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "ln", (const OCRepPayload **) ln, dim));
+        EXPECT_TRUE(OCRepPayloadSetPropString(payload, "dl", "en"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.property", "value"));
+    }
+    void SetOptionalPlatformProperties(OCRepPayload *payload)
+    {
+        size_t dim[MAX_REP_ARRAY_DEPTH] = { 2, 0, 0 };
+        OCRepPayload **mnpn = (OCRepPayload **) OICCalloc(2, sizeof(OCRepPayload*));
+        mnpn[0] = OCRepPayloadCreate();
+        EXPECT_TRUE(mnpn[0] != NULL);
+        EXPECT_TRUE(OCRepPayloadSetPropString(mnpn[0], "language", "en"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(mnpn[0], "value", "en-name"));
+        mnpn[1] = OCRepPayloadCreate();
+        EXPECT_TRUE(mnpn[1] != NULL);
+        EXPECT_TRUE(OCRepPayloadSetPropString(mnpn[1], "language", "fr"));
+        EXPECT_TRUE(OCRepPayloadSetPropString(mnpn[1], "value", "fr-name"));
+        EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "mnpn", (const OCRepPayload **) mnpn, dim));
+    }
+    void SetMandatoryMaintenanceProperties(OCRepPayload *payload)
+    {
+        EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "fr", false));
+        EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "rb", false));
+    }
+    void VerifyDeviceProperties(OCRepPayload *payload)
+    {
+        char *s;
+        EXPECT_TRUE(OCRepPayloadGetPropString(payload, OC_RSRVD_DEFAULT_LANGUAGE, &s));
+        EXPECT_STREQ(m_properties->dl, s);
+        size_t locDim[MAX_REP_ARRAY_DEPTH];
+        double *locArr;
+        EXPECT_TRUE(OCRepPayloadGetDoubleArray(payload, "loc", &locArr, locDim));
+        EXPECT_EQ((size_t) 2, calcDimTotal(locDim));
+        EXPECT_EQ(m_properties->loc[0], locArr[0]);
+        EXPECT_EQ(m_properties->loc[1], locArr[1]);
+        EXPECT_TRUE(OCRepPayloadGetPropString(payload, "locn", &s));
+        EXPECT_STREQ(m_properties->locn, s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(payload, "c", &s));
+        EXPECT_STREQ(m_properties->c, s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(payload, "r", &s));
+        EXPECT_STREQ(m_properties->r, s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(payload, m_properties->vendorProperty, &s));
+        EXPECT_STREQ(m_properties->vendorValue, s);
+    }
+    void VerifyPlatformProperties(OCRepPayload *payload)
+    {
+        size_t lnDim[MAX_REP_ARRAY_DEPTH];
+        OCRepPayload **lnArr;
+        EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "mnpn", &lnArr, lnDim));
+        EXPECT_EQ(m_properties->nmnpn, calcDimTotal(lnDim));
+        for (size_t i = 0; i < m_properties->nmnpn; ++i)
+        {
+            char *s;
+            EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[i], "language", &s));
+            EXPECT_STREQ(m_properties->mnpn[i].language, s);
+            EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[i], "value", &s));
+            EXPECT_STREQ(m_properties->mnpn[i].value, s);
+        }
+    }
+    void DoResponse(OCEntityHandlerRequest *request, OCRepPayload *payload)
+    {
+        OCEntityHandlerResponse response;
+        memset(&response, 0, sizeof(response));
+        response.requestHandle = request->requestHandle;
+        response.resourceHandle = request->resource;
+        response.ehResult = OC_EH_OK;
+        response.payload = reinterpret_cast<OCPayload *>(payload);
+        EXPECT_EQ(OC_STACK_OK, OCDoResponse(&response));
+    }
+    static OCEntityHandlerResult ConfigurationHandler(OCEntityHandlerFlag flag,
+            OCEntityHandlerRequest *request, void *callbackParam)
+    {
+        (void) flag;
+        ConfigurationResource *thiz = (ConfigurationResource *) callbackParam;
+        switch (request->method)
+        {
+            case OC_REST_GET:
+                {
+                    OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                    EXPECT_TRUE(payload != NULL);
+                    if (request->resource == thiz->m_con)
+                    {
+                        thiz->SetMandatoryDeviceProperties(payload);
+                    }
+                    if (thiz->m_includeOptionalProperties)
+                    {
+                        if (request->resource == thiz->m_con)
+                        {
+                            thiz->SetOptionalDeviceProperties(payload);
+                        }
+                        if (!thiz->m_conp || request->resource == thiz->m_conp)
+                        {
+                            thiz->SetOptionalPlatformProperties(payload);
+                        }
+                    }
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            case OC_REST_POST:
+                {
+                    OCRepPayload *payload = (OCRepPayload *) request->payload;
+                    if (request->resource == thiz->m_con)
+                    {
+                        thiz->VerifyDeviceProperties(payload);
+                    }
+                    if (!thiz->m_conp || request->resource == thiz->m_conp)
+                    {
+                        thiz->VerifyPlatformProperties(payload);
+                    }
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            default:
+                return OC_EH_METHOD_NOT_ALLOWED;
+        }
+    }
+    static OCEntityHandlerResult MaintenanceHandler(OCEntityHandlerFlag flag,
+            OCEntityHandlerRequest *request, void *callbackParam)
+    {
+        (void) flag;
+        ConfigurationResource *thiz = (ConfigurationResource *) callbackParam;
+        switch (request->method)
+        {
+            case OC_REST_GET:
+                {
+                    OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                    EXPECT_TRUE(payload != NULL);
+                    thiz->SetMandatoryMaintenanceProperties(payload);
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            default:
+                return OC_EH_METHOD_NOT_ALLOWED;
+        }
+    }
+    bool m_includeOptionalProperties;
+    OCResourceHandle m_con;
+    OCResourceHandle m_conp;
+    OCResourceHandle m_mnt;
+    ExpectedProperties *m_properties;
+};
+
+class DeviceConfigurationResource : public ConfigurationResource
+{
+public:
+    DeviceConfigurationResource() : ConfigurationResource(false)
+    {
+        EXPECT_EQ(OC_STACK_OK, CreateResource(&m_con, "/con", "oic.wk.con", "oic.if.rw",
+                DeviceConfigurationResource::EntityHandler, this, OC_DISCOVERABLE));
+    }
+    DeviceConfigurationResource(ExpectedProperties *properties)
+        : ConfigurationResource(false, false, properties)
+    {
+        EXPECT_EQ(OC_STACK_OK, CreateResource(&m_con, "/con", "oic.wk.con", "oic.if.rw",
+                DeviceConfigurationResource::EntityHandler, this, OC_DISCOVERABLE));
+    }
+    static OCEntityHandlerResult EntityHandler(OCEntityHandlerFlag flag,
+            OCEntityHandlerRequest *request, void *callbackParam)
+    {
+        (void) flag;
+        DeviceConfigurationResource *thiz = (DeviceConfigurationResource *) callbackParam;
+        switch (request->method)
+        {
+            case OC_REST_GET:
+                {
+                    OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                    EXPECT_TRUE(payload != NULL);
+                    thiz->SetMandatoryDeviceProperties(payload);
+                    if (thiz->m_includeOptionalProperties)
+                    {
+                        thiz->SetOptionalDeviceProperties(payload);
+                    }
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            case OC_REST_POST:
+                {
+                    OCRepPayload *payload = (OCRepPayload *) request->payload;
+                    thiz->VerifyDeviceProperties(payload);
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            default:
+                return OC_EH_METHOD_NOT_ALLOWED;
+        }
+    }
+};
+
+class PlatformConfigurationResource : public ConfigurationResource
+{
+public:
+    PlatformConfigurationResource() : ConfigurationResource(false)
+    {
+        EXPECT_EQ(OC_STACK_OK, CreateResource(&m_conp, "/con/p", "oic.wk.con.p", "oic.if.rw",
+                PlatformConfigurationResource::EntityHandler, this, OC_DISCOVERABLE));
+    }
+    PlatformConfigurationResource(ExpectedProperties *properties)
+        : ConfigurationResource(false, false, properties)
+    {
+        EXPECT_EQ(OC_STACK_OK, CreateResource(&m_conp, "/con/p", "oic.wk.con.p", "oic.if.rw",
+                PlatformConfigurationResource::EntityHandler, this, OC_DISCOVERABLE));
+    }
+    static OCEntityHandlerResult EntityHandler(OCEntityHandlerFlag flag,
+            OCEntityHandlerRequest *request, void *callbackParam)
+    {
+        (void) flag;
+        PlatformConfigurationResource *thiz = (PlatformConfigurationResource *) callbackParam;
+        switch (request->method)
+        {
+            case OC_REST_GET:
+                {
+                    OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                    EXPECT_TRUE(payload != NULL);
+                    if (thiz->m_includeOptionalProperties)
+                    {
+                        thiz->SetOptionalPlatformProperties(payload);
+                    }
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            case OC_REST_POST:
+                {
+                    OCRepPayload *payload = (OCRepPayload *) request->payload;
+                    thiz->VerifyPlatformProperties(payload);
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            default:
+                return OC_EH_METHOD_NOT_ALLOWED;
+        }
+    }
+};
+
+static OCStackApplicationResult DiscoverConfigurationResource(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Resource **r = (Resource **) ctx;
+    (void) handle;
+    EXPECT_EQ(OC_STACK_OK, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
+    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
+         payload = payload->next)
+    {
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            if (!strcmp(resource->uri, "/con"))
+            {
+                *r = new Resource(response->devAddr, payload->sid, resource);
+            }
+        }
+    }
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+static OCStackApplicationResult DiscoverPlatformConfigurationResource(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Resource **r = (Resource **) ctx;
+    (void) handle;
+    EXPECT_EQ(OC_STACK_OK, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
+    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
+         payload = payload->next)
+    {
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            if (!strcmp(resource->uri, "/con/p"))
+            {
+                *r = new Resource(response->devAddr, payload->sid, resource);
+            }
+        }
+    }
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+TEST_F(VirtualProducer, DeviceConfigurationProperties)
+{
+    DeviceConfigurationResource deviceConfiguration;
+
+    Resource *resource = NULL;
+    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    /* org.freedesktop.DBus.Properties */
+    ajn::MsgArg property;
+    EXPECT_EQ(ER_OK, proxyObj->GetProperty("org.alljoyn.Config", "Version", property));
+    EXPECT_EQ(1, property.v_variant.val->v_uint16);
+
+    EXPECT_NE(ER_OK, proxyObj->SetProperty("org.alljoyn.Config", "Version", property));
+
+    ajn::MsgArg properties;
+    EXPECT_EQ(ER_OK, proxyObj->GetAllProperties("org.alljoyn.Config", properties));
+    uint16_t version;
+    EXPECT_EQ(1u, properties.v_array.GetNumElements());
+    EXPECT_EQ(ER_OK, properties.GetElement("{sq}", "Version", &version));
+    EXPECT_EQ(1, version);
+
+    /* org.alljoyn.Config.GetConfigurations */
+
+    /* Mandatory properties */
+    deviceConfiguration.SetMandatoryProperties();
+    ajn::MsgArg arg("s", "");
+    MethodCall get(bus, proxyObj);
+    EXPECT_EQ(ER_OK, get.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
+    EXPECT_EQ(OC_STACK_OK, get.Wait(1));
+    size_t numArgs;
+    const ajn::MsgArg *args;
+    get.Reply()->GetArgs(numArgs, args);
+    EXPECT_EQ(1u, numArgs);
+    EXPECT_EQ(0u, args[0].v_array.GetNumElements());
+
+    /* All properties */
+    deviceConfiguration.SetAllProperties();
+    MethodCall getAll(bus, proxyObj);
+    EXPECT_EQ(ER_OK, getAll.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
+    EXPECT_EQ(OC_STACK_OK, getAll.Wait(1));
+    getAll.Reply()->GetArgs(numArgs, args);
+    EXPECT_EQ(1u, numArgs);
+    EXPECT_EQ(8u, args[0].v_array.GetNumElements());
+    char *s = NULL;
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "DefaultLanguage", &s));
+    EXPECT_STREQ("en", s);
+    size_t n;
+    double *ds = NULL;
+    EXPECT_EQ(ER_OK, args[0].GetElement("{sad}", "org.openconnectivity.loc", &n, &ds));
+    EXPECT_EQ(2u, n);
+    EXPECT_EQ(-1, ds[0]);
+    EXPECT_EQ(1, ds[1]);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.openconnectivity.locn", &s));
+    EXPECT_STREQ("locn", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.openconnectivity.c", &s));
+    EXPECT_STREQ("c", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.openconnectivity.r", &s));
+    EXPECT_STREQ("r", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.iotivity.property", &s));
+    EXPECT_STREQ("value", s);
+
+    delete proxyObj;
+    delete obj;
+}
+
+TEST_F(VirtualProducer, PlatformConfigurationProperties)
+{
+    PlatformConfigurationResource platformConfiguration;
+
+    Resource *resource = NULL;
+    Callback discoverPlatformCB(&DiscoverPlatformConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverPlatformCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverPlatformCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    /* org.alljoyn.Config.GetConfigurations */
+
+    /* All properties (there are no mandatory properties) */
+    platformConfiguration.SetAllProperties();
+    ajn::MsgArg lang("s", "");
+    MethodCall getAll(bus, proxyObj);
+    EXPECT_EQ(ER_OK, getAll.Call("org.alljoyn.Config", "GetConfigurations", &lang, 1));
+    EXPECT_EQ(OC_STACK_OK, getAll.Wait(1));
+    size_t numArgs;
+    const ajn::MsgArg *args;
+    getAll.Reply()->GetArgs(numArgs, args);
+    EXPECT_EQ(1u, numArgs);
+    EXPECT_EQ(1u, args[0].v_array.GetNumElements());
+    char *s = NULL;
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "DeviceName", &s));
+    EXPECT_STREQ("en-name", s);
+
+    delete proxyObj;
+    delete obj;
+}
+
+static void ConfigurationPropertiesVerify(ConfigurationResource *configuration,
+        ajn::BusAttachment *bus, ajn::ProxyBusObject *proxyObj)
+{
+    /* org.alljoyn.Config.GetConfigurations */
+
+    /* Mandatory properties */
+    configuration->SetMandatoryProperties();
+    ajn::MsgArg arg("s", "");
+    MethodCall get(bus, proxyObj);
+    EXPECT_EQ(ER_OK, get.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
+    EXPECT_EQ(OC_STACK_OK, get.Wait(1));
+    size_t numArgs;
+    const ajn::MsgArg *args;
+    get.Reply()->GetArgs(numArgs, args);
+    EXPECT_EQ(1u, numArgs);
+    EXPECT_EQ(0u, args[0].v_array.GetNumElements());
+
+    /* All properties */
+    configuration->SetAllProperties();
+    MethodCall getAll(bus, proxyObj);
+    EXPECT_EQ(ER_OK, getAll.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
+    EXPECT_EQ(OC_STACK_OK, getAll.Wait(1));
+    getAll.Reply()->GetArgs(numArgs, args);
+    EXPECT_EQ(1u, numArgs);
+    EXPECT_EQ(9u, args[0].v_array.GetNumElements());
+    char *s = NULL;
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "DefaultLanguage", &s));
+    EXPECT_STREQ("en", s);
+    size_t n;
+    double *ds = NULL;
+    EXPECT_EQ(ER_OK, args[0].GetElement("{sad}", "org.openconnectivity.loc", &n, &ds));
+    EXPECT_EQ(2u, n);
+    EXPECT_EQ(-1, ds[0]);
+    EXPECT_EQ(1, ds[1]);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.openconnectivity.locn", &s));
+    EXPECT_STREQ("locn", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.openconnectivity.c", &s));
+    EXPECT_STREQ("c", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.openconnectivity.r", &s));
+    EXPECT_STREQ("r", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "org.iotivity.property", &s));
+    EXPECT_STREQ("value", s);
+    EXPECT_EQ(ER_OK, args[0].GetElement("{ss}", "DeviceName", &s));
+    EXPECT_STREQ("en-name", s);
+}
+
+TEST_F(VirtualProducer, ConfigurationPropertiesSameResource)
+{
+    ConfigurationResource configuration;
+
+    Resource *resource = NULL;
+    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+
+    resource->m_uri = "/oic/mnt";
+    resource->m_ifs.clear();
+    resource->m_ifs.push_back("oic.if.rw");
+    resource->m_ifs.push_back("oic.if.r");
+    resource->m_ifs.push_back("oic.if.baseline");
+    resource->m_rts.clear();
+    resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    ConfigurationPropertiesVerify(&configuration, bus, proxyObj);
+
+    delete proxyObj;
+    delete obj;
+}
+
+TEST_F(VirtualProducer, ConfigurationPropertiesDifferentResources)
+{
+    ConfigurationResource configuration(true, true);
+
+    Resource *resource = NULL;
+    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+
+    resource->m_uri = "/con/p";
+    resource->m_ifs.clear();
+    resource->m_ifs.push_back("oic.if.rw");
+    resource->m_ifs.push_back("oic.if.baseline");
+    resource->m_rts.clear();
+    resource->m_rts.push_back("oic.wk.con.p");
+    obj->AddResource(*resource);
+
+    resource->m_uri = "/oic/mnt";
+    resource->m_ifs.clear();
+    resource->m_ifs.push_back("oic.if.rw");
+    resource->m_ifs.push_back("oic.if.r");
+    resource->m_ifs.push_back("oic.if.baseline");
+    resource->m_rts.clear();
+    resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*resource);
+
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    ConfigurationPropertiesVerify(&configuration, bus, proxyObj);
+
+    delete proxyObj;
+    delete obj;
+}
+
+TEST_F(VirtualProducer, UpdateDeviceConfigurationProperties)
+{
+    ExpectedProperties properties;
+    memset(&properties, 0, sizeof(properties));
+    properties.dl = "en";
+    properties.loc[0] = -1;
+    properties.loc[1] = 1;
+    properties.locn = "locn";
+    properties.c = "c";
+    properties.r = "r";
+    properties.vendorProperty = "x.org.iotivity.property";
+    properties.vendorValue = "value";
+    DeviceConfigurationResource deviceConfiguration(&properties);
+
+    Resource *resource = NULL;
+    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    /* org.alljoyn.Config.UpdateConfigurations */
+    MethodCall update(bus, proxyObj);
+    ajn::MsgArg elems[8];
+    ajn::MsgArg *elem = elems;
+    elem->Set("{sv}", "DefaultLanguage", new ajn::MsgArg("s", properties.dl));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.loc", new ajn::MsgArg("ad", 2, properties.loc));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.locn", new ajn::MsgArg("s", properties.locn));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.c", new ajn::MsgArg("s", properties.c));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.r", new ajn::MsgArg("s", properties.r));
+    ++elem;
+    elem->Set("{sv}", &properties.vendorProperty[2], new ajn::MsgArg("s", properties.vendorValue));
+    ++elem;
+    ajn::MsgArg args[2];
+    args[0].Set("s", "");
+    args[1].Set("a{sv}", elem - elems, elems);
+    EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+
+    delete proxyObj;
+    delete obj;
+}
+
+TEST_F(VirtualProducer, UpdatePlatformConfigurationProperties)
+{
+    ExpectedProperties properties;
+    memset(&properties, 0, sizeof(properties));
+    LocalizedString deviceNames[] = {
+        { "en", "en-device-name" },
+    };
+    properties.mnpn = deviceNames;
+    properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
+    PlatformConfigurationResource platformConfiguration(&properties);
+
+    Resource *resource = NULL;
+    Callback discoverPlatformCB(&DiscoverPlatformConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverPlatformCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverPlatformCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    /* org.alljoyn.Config.UpdateConfigurations */
+    MethodCall update(bus, proxyObj);
+    ajn::MsgArg elems[1];
+    ajn::MsgArg *elem = elems;
+    elem->Set("{sv}", "DeviceName", new ajn::MsgArg("s", deviceNames[0].value));
+    ++elem;
+    ajn::MsgArg args[2];
+    args[0].Set("s", deviceNames[0].language);
+    args[1].Set("a{sv}", elem - elems, elems);
+    EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+
+    delete proxyObj;
+    delete obj;
+}
+
+TEST_F(VirtualProducer, UpdateConfigurationPropertiesSameResource)
+{
+    ExpectedProperties properties;
+    memset(&properties, 0, sizeof(properties));
+    properties.dl = "en";
+    properties.loc[0] = -1;
+    properties.loc[1] = 1;
+    properties.locn = "locn";
+    properties.c = "c";
+    properties.r = "r";
+    properties.vendorProperty = "x.org.iotivity.property";
+    properties.vendorValue = "value";
+    LocalizedString deviceNames[] = {
+        { "en", "en-device-name" },
+    };
+    properties.mnpn = deviceNames;
+    properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
+    ConfigurationResource configuration(true, false, &properties);
+
+    Resource *resource = NULL;
+    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+
+    resource->m_uri = "/oic/mnt";
+    resource->m_ifs.clear();
+    resource->m_ifs.push_back("oic.if.rw");
+    resource->m_ifs.push_back("oic.if.r");
+    resource->m_ifs.push_back("oic.if.baseline");
+    resource->m_rts.clear();
+    resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    /* org.alljoyn.Config.UpdateConfigurations */
+    MethodCall update(bus, proxyObj);
+    ajn::MsgArg elems[9];
+    ajn::MsgArg *elem = elems;
+    elem->Set("{sv}", "DefaultLanguage", new ajn::MsgArg("s", properties.dl));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.loc", new ajn::MsgArg("ad", 2, properties.loc));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.locn", new ajn::MsgArg("s", properties.locn));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.c", new ajn::MsgArg("s", properties.c));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.r", new ajn::MsgArg("s", properties.r));
+    ++elem;
+    elem->Set("{sv}", &properties.vendorProperty[2], new ajn::MsgArg("s", properties.vendorValue));
+    ++elem;
+    elem->Set("{sv}", "DeviceName", new ajn::MsgArg("s", deviceNames[0].value));
+    ++elem;
+    ajn::MsgArg args[2];
+    args[0].Set("s", deviceNames[0].language);
+    args[1].Set("a{sv}", elem - elems, elems);
+    EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+
+    delete proxyObj;
+    delete obj;
+}
+
+TEST_F(VirtualProducer, UpdateConfigurationPropertiesDifferentResource)
+{
+    ExpectedProperties properties;
+    memset(&properties, 0, sizeof(properties));
+    properties.dl = "en";
+    properties.loc[0] = -1;
+    properties.loc[1] = 1;
+    properties.locn = "locn";
+    properties.c = "c";
+    properties.r = "r";
+    properties.vendorProperty = "x.org.iotivity.property";
+    properties.vendorValue = "value";
+    LocalizedString deviceNames[] = {
+        { "en", "en-device-name" },
+    };
+    properties.mnpn = deviceNames;
+    properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
+    ConfigurationResource configuration(true, true, &properties);
+
+    Resource *resource = NULL;
+    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+
+    resource->m_uri = "/con/p";
+    resource->m_ifs.clear();
+    resource->m_ifs.push_back("oic.if.rw");
+    resource->m_ifs.push_back("oic.if.baseline");
+    resource->m_rts.clear();
+    resource->m_rts.push_back("oic.wk.con.p");
+    obj->AddResource(*resource);
+
+    resource->m_uri = "/oic/mnt";
+    resource->m_ifs.clear();
+    resource->m_ifs.push_back("oic.if.rw");
+    resource->m_ifs.push_back("oic.if.r");
+    resource->m_ifs.push_back("oic.if.baseline");
+    resource->m_rts.clear();
+    resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*resource);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+
+    /* org.alljoyn.Config.UpdateConfigurations */
+    MethodCall update(bus, proxyObj);
+    ajn::MsgArg elems[9];
+    ajn::MsgArg *elem = elems;
+    elem->Set("{sv}", "DefaultLanguage", new ajn::MsgArg("s", properties.dl));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.loc", new ajn::MsgArg("ad", 2, properties.loc));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.locn", new ajn::MsgArg("s", properties.locn));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.c", new ajn::MsgArg("s", properties.c));
+    ++elem;
+    elem->Set("{sv}", "org.openconnectivity.r", new ajn::MsgArg("s", properties.r));
+    ++elem;
+    elem->Set("{sv}", &properties.vendorProperty[2], new ajn::MsgArg("s", properties.vendorValue));
+    ++elem;
+    elem->Set("{sv}", "DeviceName", new ajn::MsgArg("s", deviceNames[0].value));
+    ++elem;
+    ajn::MsgArg args[2];
+    args[0].Set("s", deviceNames[0].language);
+    args[1].Set("a{sv}", elem - elems, elems);
+    EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+
+    delete proxyObj;
+    delete obj;
 }

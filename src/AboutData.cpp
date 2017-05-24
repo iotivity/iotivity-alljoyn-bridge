@@ -27,6 +27,7 @@
 #include "Plugin.h"
 #include "Signature.h"
 #include "oic_malloc.h"
+#include <alljoyn/version.h>
 
 static void ToAppId(const char *di, uint8_t *appId)
 {
@@ -57,7 +58,10 @@ bool AboutData::IsVendorField(const char *name)
     const char *standardNames[] = {
         "AJSoftwareVersion", "AppId", "AppName", "DateOfManufacture", "DefaultLanguage",
         "Description", "DeviceId", "DeviceName", "HardwareVersion", "Manufacturer", "ModelNumber",
-        "SoftwareVersion", "SupportUrl", "SupportedLanguages"
+        "SoftwareVersion", "SupportUrl", "SupportedLanguages", "org.openconnectivity.piid",
+        "org.openconnectivity.mnfv", "org.openconnectivity.mnml", "org.openconnectivity.mnos",
+        "org.openconnectivity.mnpv", "org.openconnectivity.st", "org.openconnectivity.loc",
+        "org.openconnectivity.locn", "org.openconnectivity.c", "org.openconnectivity.r"
     };
     for (size_t i = 0; i < sizeof(standardNames) / sizeof(standardNames[0]); ++i)
     {
@@ -91,29 +95,59 @@ void AboutData::SetVendorFields(OCRepPayload *payload)
  * that SupportedLanguages will get filled in automatically anyways.
  */
 AboutData::AboutData()
-    : ajn::AboutData(ajn::MsgArg()), m_n(NULL), m_setSupportedLanguage(false)
+    : ajn::AboutData(ajn::MsgArg()), m_n(NULL), m_setDefaultLanguage(false),
+    m_setSupportedLanguage(false)
 {
+    SetFieldDetails();
+    SetField("DefaultLanguage", ajn::MsgArg("s", ""));
 }
 
 AboutData::AboutData(const char *defaultLanguage)
-    : m_n(NULL), m_setSupportedLanguage(false)
+    : ajn::AboutData(ajn::MsgArg()), m_n(NULL), m_setDefaultLanguage(false),
+    m_setSupportedLanguage(false)
 {
     SetFieldDetails();
     if (defaultLanguage)
     {
         SetDefaultLanguage(defaultLanguage);
+        m_setDefaultLanguage = true;
     }
 }
 
 AboutData::AboutData(const ajn::MsgArg *arg, const char *language)
-    : ajn::AboutData(*arg, language), m_n(NULL), m_setSupportedLanguage(false)
+    : ajn::AboutData(ajn::MsgArg()), m_n(NULL), m_setDefaultLanguage(false),
+    m_setSupportedLanguage(false)
 {
     SetFieldDetails();
+    ajn::MsgArg defaultLangArg;
+    m_setDefaultLanguage = (arg->GetElement("{sv}", "DefaultLanguage", &defaultLangArg) == ER_OK);
+    if (m_setDefaultLanguage)
+    {
+        if (!strcmp(language, ""))
+        {
+            language = NULL;
+        }
+        else
+        {
+            SetSupportedLanguage(language);
+        }
+    }
+    else
+    {
+        SetDefaultLanguage(language);
+    }
+    CreatefromMsgArg(*arg, language);
 }
 
 QStatus AboutData::CreateFromMsgArg(const ajn::MsgArg *arg, const char* language)
 {
-    return CreatefromMsgArg(*arg, language);
+    ajn::MsgArg element;
+    QStatus status = CreatefromMsgArg(*arg, language);
+    if (status == ER_OK && arg->GetElement("{sv}", "DefaultLanguage", &element) == ER_OK)
+    {
+        m_setDefaultLanguage = true;
+    }
+    return status;
 }
 
 void AboutData::SetFieldDetails()
@@ -124,7 +158,7 @@ void AboutData::SetFieldDetails()
     SetNewFieldDetails("org.openconnectivity.mnos", 0, "s");
     SetNewFieldDetails("org.openconnectivity.mnpv", 0, "s");
     SetNewFieldDetails("org.openconnectivity.st", 0, "s");
-    SetNewFieldDetails("org.openconnectivity.loc", 0, "s");
+    SetNewFieldDetails("org.openconnectivity.loc", 0, "ad");
     SetNewFieldDetails("org.openconnectivity.locn", 0, "s");
     SetNewFieldDetails("org.openconnectivity.c", 0, "s");
     SetNewFieldDetails("org.openconnectivity.r", 0, "s");
@@ -132,6 +166,16 @@ void AboutData::SetFieldDetails()
 
 QStatus AboutData::GetConfigData(ajn::MsgArg* arg, const char* language)
 {
+    if (!m_setDefaultLanguage)
+    {
+        /* When DefaultLanguage has not been set use the first supported language if available. */
+        const char *lang;
+        if (GetSupportedLanguages(&lang, 1))
+        {
+            SetDefaultLanguage(lang);
+        }
+    }
+
     size_t numFields = GetFields();
     const char *fieldNames[numFields];
     GetFields(fieldNames, numFields);
@@ -140,8 +184,13 @@ QStatus AboutData::GetConfigData(ajn::MsgArg* arg, const char* language)
     QStatus status = ER_OK;
     for (size_t i = 0; (status == ER_OK) && (i < numFields); ++i)
     {
-        /* Don't provide implicit SupportedLanguages field */
-        if (!strcmp(fieldNames[i], "SupportedLanguages") && !m_setSupportedLanguage)
+        /* Don't provide implicit fields */
+        if (!strcmp(fieldNames[i], "DefaultLanguage") && !m_setDefaultLanguage)
+        {
+            continue;
+        }
+        if (!strcmp(fieldNames[i], "SupportedLanguages") &&
+                !(m_setSupportedLanguage || m_setDefaultLanguage))
         {
             continue;
         }
@@ -172,6 +221,18 @@ QStatus AboutData::GetConfigData(ajn::MsgArg* arg, const char* language)
         }
     }
     return status;
+}
+
+QStatus AboutData::GetDefaultLanguage(char** defaultLanguage)
+{
+    if (m_setDefaultLanguage)
+    {
+        return ajn::AboutData::GetDefaultLanguage(defaultLanguage);
+    }
+    else
+    {
+        return ER_ABOUT_INVALID_ABOUTDATA_FIELD_VALUE;
+    }
 }
 
 QStatus AboutData::SetProtocolIndependentId(const char* piid)
@@ -235,240 +296,222 @@ QStatus AboutData::SetRegion(const char *region)
     return SetField("org.openconnectivity.r", arg);
 }
 
-QStatus AboutData::Set(const char *rt, OCRepPayload *payload)
+QStatus AboutData::Set(OCRepPayload *payload)
 {
     char *value = NULL;
     OCRepPayload **arr = NULL;
     size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    if (!strcmp(rt, OC_RSRVD_RESOURCE_TYPE_DEVICE))
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_NAME, &value))
     {
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_NAME, &value))
-        {
-            /* Prefer OC_RSRVD_DEVICE_NAME_LOCALIZED for AppName */
-            m_n = value;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_ID, &value))
-        {
-            uint8_t appId[16];
-            ToAppId(value, appId);
-            SetAppId(appId, 16);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_MFG_NAME, &arr, dim))
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                char *language = NULL;
-                if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
-                        OCRepPayloadGetPropString(arr[i], "value", &value))
-                {
-                    SetManufacturer(value, language);
-                }
-                OICFree(language);
-                OICFree(value);
-                value = NULL;
-            }
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OCRepPayloadDestroy(arr[i]);
-            }
-            OICFree(arr);
-            arr = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
-        {
-            SetModelNumber(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_DESCRIPTION, &arr, dim))
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                char *language = NULL;
-                if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
-                        OCRepPayloadGetPropString(arr[i], "value", &value))
-                {
-                    SetDescription(value, language);
-                }
-                OICFree(language);
-                OICFree(value);
-                value = NULL;
-            }
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OCRepPayloadDestroy(arr[i]);
-            }
-            OICFree(arr);
-            arr = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value))
-        {
-            SetProtocolIndependentId(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SOFTWARE_VERSION, &value))
-        {
-            SetSoftwareVersion(value);
-            OICFree(value);
-            value = NULL;
-        }
-        SetVendorFields(payload);
+        /* Prefer OC_RSRVD_DEVICE_NAME_LOCALIZED for AppName */
+        m_n = value;
     }
-    else if (!strcmp(rt, OC_RSRVD_RESOURCE_TYPE_PLATFORM))
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_ID, &value))
     {
-        char *value = NULL;
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
-        {
-            SetDateOfManufacture(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_FIRMWARE_VERSION, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            SetField("org.openconnectivity.mnfv", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_HARDWARE_VERSION, &value))
-        {
-            SetHardwareVersion(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_URL, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            SetField("org.openconnectivity.mnml", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_OS_VERSION, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            SetField("org.openconnectivity.mnos", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_VERSION, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            SetField("org.openconnectivity.mnpv", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SUPPORT_URL, &value))
-        {
-            SetSupportUrl(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_ID, &value))
-        {
-            SetDeviceId(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_SYSTEM_TIME, &value))
-        {
-            ajn::MsgArg valueArg("s", value);
-            SetField("org.openconnectivity.st", valueArg);
-            OICFree(value);
-            value = NULL;
-        }
-        SetVendorFields(payload);
+        uint8_t appId[16];
+        ToAppId(value, appId);
+        SetAppId(appId, 16);
+        OICFree(value);
+        value = NULL;
     }
-    else if (!strcmp(rt, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION))
+    if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_MFG_NAME, &arr, dim))
     {
-        char *value = NULL;
-        if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEFAULT_LANGUAGE, &value))
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; i < dimTotal; ++i)
         {
-            SetDefaultLanguage(value);
-            OICFree(value);
-            value = NULL;
-        }
-        if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_NAME_LOCALIZED, &arr, dim))
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for (size_t i = 0; i < dimTotal; ++i)
+            char *language = NULL;
+            if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
+                    OCRepPayloadGetPropString(arr[i], "value", &value))
             {
-                char *language = NULL;
-                if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
-                        OCRepPayloadGetPropString(arr[i], "value", &value))
-                {
-                    SetAppName(value, language);
-                }
-                OICFree(language);
-                OICFree(value);
-                value = NULL;
+                SetManufacturer(value, language);
             }
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OCRepPayloadDestroy(arr[i]);
-            }
-            OICFree(arr);
-            arr = NULL;
-        }
-        double *loc = NULL;
-        size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-        if (OCRepPayloadGetDoubleArray(payload, "loc", &loc, dim) && (calcDimTotal(dim) == 2))
-        {
-            SetLocation(loc[0], loc[1]);
-            OICFree(loc);
-            loc = NULL;
-        }
-        if (OCRepPayloadGetPropString(payload, "locn", &value))
-        {
-            SetLocationName(value);
+            OICFree(language);
             OICFree(value);
             value = NULL;
         }
-        if (OCRepPayloadGetPropString(payload, "c", &value))
+        for (size_t i = 0; i < dimTotal; ++i)
         {
-            SetCurrency(value);
-            OICFree(value);
-            value = NULL;
+            OCRepPayloadDestroy(arr[i]);
         }
-        if (OCRepPayloadGetPropString(payload, "r", &value))
-        {
-            SetRegion(value);
-            OICFree(value);
-            value = NULL;
-        }
-        SetVendorFields(payload);
+        OICFree(arr);
+        arr = NULL;
     }
-    else if (!strcmp(rt, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION))
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEVICE_MODEL_NUM, &value))
     {
-        char *value = NULL;
-        if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_PLATFORM_NAME, &arr, dim))
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                char *language = NULL;
-                if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
-                        OCRepPayloadGetPropString(arr[i], "value", &value))
-                {
-                    SetDeviceName(value, language);
-                }
-                OICFree(language);
-                OICFree(value);
-                value = NULL;
-            }
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OCRepPayloadDestroy(arr[i]);
-            }
-            OICFree(arr);
-            arr = NULL;
-        }
-        SetVendorFields(payload);
+        SetModelNumber(value);
+        OICFree(value);
+        value = NULL;
     }
+    if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_DESCRIPTION, &arr, dim))
+    {
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            char *language = NULL;
+            if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
+                    OCRepPayloadGetPropString(arr[i], "value", &value))
+            {
+                SetDescription(value, language);
+            }
+            OICFree(language);
+            OICFree(value);
+            value = NULL;
+        }
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(arr[i]);
+        }
+        OICFree(arr);
+        arr = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_PROTOCOL_INDEPENDENT_ID, &value))
+    {
+        SetProtocolIndependentId(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_SOFTWARE_VERSION, &value))
+    {
+        SetSoftwareVersion(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_DATE, &value))
+    {
+        SetDateOfManufacture(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_FIRMWARE_VERSION, &value))
+    {
+        ajn::MsgArg valueArg("s", value);
+        SetField("org.openconnectivity.mnfv", valueArg);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_HARDWARE_VERSION, &value))
+    {
+        SetHardwareVersion(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_MFG_URL, &value))
+    {
+        ajn::MsgArg valueArg("s", value);
+        SetField("org.openconnectivity.mnml", valueArg);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_OS_VERSION, &value))
+    {
+        ajn::MsgArg valueArg("s", value);
+        SetField("org.openconnectivity.mnos", valueArg);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_VERSION, &value))
+    {
+        ajn::MsgArg valueArg("s", value);
+        SetField("org.openconnectivity.mnpv", valueArg);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_SUPPORT_URL, &value))
+    {
+        SetSupportUrl(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_PLATFORM_ID, &value))
+    {
+        SetDeviceId(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_SYSTEM_TIME, &value))
+    {
+        ajn::MsgArg valueArg("s", value);
+        SetField("org.openconnectivity.st", valueArg);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_DEFAULT_LANGUAGE, &value))
+    {
+        SetDefaultLanguage(value);
+        m_setDefaultLanguage = true;
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_DEVICE_NAME_LOCALIZED, &arr, dim))
+    {
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            char *language = NULL;
+            if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
+                    OCRepPayloadGetPropString(arr[i], "value", &value))
+            {
+                SetAppName(value, language);
+            }
+            OICFree(language);
+            OICFree(value);
+            value = NULL;
+        }
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(arr[i]);
+        }
+        OICFree(arr);
+        arr = NULL;
+    }
+    double *loc = NULL;
+    if (OCRepPayloadGetDoubleArray(payload, "loc", &loc, dim) && (calcDimTotal(dim) == 2))
+    {
+        SetLocation(loc[0], loc[1]);
+        OICFree(loc);
+        loc = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, "locn", &value))
+    {
+        SetLocationName(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, "c", &value))
+    {
+        SetCurrency(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropString(payload, "r", &value))
+    {
+        SetRegion(value);
+        OICFree(value);
+        value = NULL;
+    }
+    if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_PLATFORM_NAME, &arr, dim))
+    {
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            char *language = NULL;
+            if (OCRepPayloadGetPropString(arr[i], "language", &language) &&
+                    OCRepPayloadGetPropString(arr[i], "value", &value))
+            {
+                SetDeviceName(value, language);
+            }
+            OICFree(language);
+            OICFree(value);
+            value = NULL;
+        }
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(arr[i]);
+        }
+        OICFree(arr);
+        arr = NULL;
+    }
+    SetVendorFields(payload);
     return ER_OK;
 }
 
@@ -511,6 +554,11 @@ bool AboutData::IsValid()
      * Set default mandatory values necessary for Announce to succeed when /oic/d or /oic/p not
      * present.
      */
+    if (!HasField(fields, numFields, "AJSoftwareVersion"))
+    {
+        ajn::MsgArg arg("s", ajn::GetVersion());
+        SetField("AJSoftwareVersion", arg);
+    }
     if (!HasField(fields, numFields, "DefaultLanguage"))
     {
         /* When DefaultLanguage has not been set use the first supported language if available. */

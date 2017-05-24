@@ -27,6 +27,90 @@
 
 #define INTERFACE_DEFAULT_QUERY "if=" OC_RSRVD_INTERFACE_DEFAULT
 
+static std::vector<OCDevAddr> GetDevAddrs(OCDevAddr origin, const char *di,
+        OCResourcePayload *resource)
+{
+    if (resource->secure)
+    {
+        origin.flags = (OCTransportFlags) (origin.flags | OC_FLAG_SECURE);
+        if (origin.adapter == OC_ADAPTER_IP)
+        {
+            origin.port = resource->port;
+        }
+#ifdef TCP_ADAPTER
+        else if (origin.adapter == OC_ADAPTER_TCP)
+        {
+            origin.port = resource->tcpPort;
+        }
+#endif
+    }
+    std::vector<OCDevAddr> addrs;
+    if (!resource->eps)
+    {
+        addrs.push_back(origin);
+    }
+    for (const OCEndpointPayload *ep = resource->eps; ep; ep = ep->next)
+    {
+        OCDevAddr addr;
+        if (!strcmp(ep->tps, "coap") || !strcmp(ep->tps, "coaps"))
+        {
+            addr.adapter = OC_ADAPTER_IP;
+        }
+        else if (!strcmp(ep->tps, "coap+tcp") || !strcmp(ep->tps, "coaps+tcp"))
+        {
+            addr.adapter = OC_ADAPTER_TCP;
+        }
+        addr.flags = ep->family;
+        addr.port = ep->port;
+        strncpy(addr.addr, ep->addr, MAX_ADDR_STR_SIZE);
+        addr.ifindex = 0;
+        addr.routeData[0] = '\0';
+        strncpy(addr.remoteId, di, MAX_IDENTITY_SIZE);
+        addrs.push_back(addr);
+    }
+    return addrs;
+}
+
+Resource::Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource)
+    : m_uri(resource->uri), m_isObservable(resource->bitmap & OC_OBSERVABLE)
+{
+    for (OCStringLL *ifc = resource->interfaces; ifc; ifc = ifc->next)
+    {
+        m_ifs.push_back(ifc->value);
+    }
+    for (OCStringLL *type = resource->types; type; type = type->next)
+    {
+        m_rts.push_back(type->value);
+    }
+    m_addrs = GetDevAddrs(origin, di, resource);
+}
+
+bool Resource::IsSecure()
+{
+    for (auto &addr : m_addrs)
+    {
+        if (addr.flags & OC_FLAG_SECURE)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<Resource>::iterator FindResourceFromUri(std::vector<Resource> &resources,
+        std::string uri)
+{
+    return std::find_if(resources.begin(), resources.end(),
+            [uri](Resource &r) -> bool {return r.m_uri == uri;});
+}
+
+std::vector<Resource>::iterator FindResourceFromType(std::vector<Resource> &resources,
+        std::string rt)
+{
+    return std::find_if(resources.begin(), resources.end(),
+            [rt](Resource &r) -> bool {return HasResourceType(r.m_rts, rt);});
+}
+
 OCStackResult CreateResource(OCResourceHandle *handle, const char *uri, const char *typeName,
         const char *interfaceName, OCEntityHandler entityHandler, void *callbackParam,
         uint8_t properties)
@@ -43,6 +127,33 @@ OCStackResult CreateResource(OCResourceHandle *handle, const char *uri, const ch
                 callbackParam, properties);
     }
     return result;
+}
+
+OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+        const OCDevAddr *destination, OCPayload *payload, OCCallbackData *cbData,
+        OCHeaderOption *options, uint8_t numOptions)
+{
+    return OCDoResource(handle, method, uri, destination, payload, CT_DEFAULT, OC_HIGH_QOS, cbData,
+            options, numOptions);
+}
+
+OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+        const std::vector<OCDevAddr> &destinations, OCPayload *payload, OCCallbackData *cbData,
+        OCHeaderOption *options, uint8_t numOptions)
+{
+    /* Prefer secure destination when present otherwise just use the first destination */
+    const OCDevAddr *destination = destinations.empty() ? NULL : &destinations[0];
+    for (std::vector<OCDevAddr>::const_iterator it = destinations.begin(); it != destinations.end();
+         ++it)
+    {
+        if (it->flags & OC_FLAG_SECURE)
+        {
+            destination = &(*it);
+            break;
+        }
+    }
+    return OCDoResource(handle, method, uri, destination, payload, CT_DEFAULT, OC_HIGH_QOS, cbData,
+            options, numOptions);
 }
 
 std::map<std::string, std::string> ParseQuery(const char *query)

@@ -112,7 +112,7 @@ void VirtualBusAttachment::Stop()
     }
 }
 
-void VirtualBusAttachment::SetAboutData(const char *rt, OCRepPayload *payload)
+void VirtualBusAttachment::SetAboutData(OCRepPayload *payload)
 {
     LOG(LOG_INFO, "[%p]", this);
 
@@ -122,7 +122,7 @@ void VirtualBusAttachment::SetAboutData(const char *rt, OCRepPayload *payload)
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_aboutData.Set(rt, payload);
+    m_aboutData.Set(payload);
 }
 
 ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char* ifaceName)

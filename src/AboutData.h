@@ -34,7 +34,8 @@ public:
     AboutData(const ajn::MsgArg *arg, const char *language);
     QStatus CreateFromMsgArg(const ajn::MsgArg *arg, const char* language);
     QStatus GetConfigData(ajn::MsgArg* arg, const char* language);
-    QStatus Set(const char *rt, OCRepPayload *payload);
+    QStatus GetDefaultLanguage(char** defaultLanguage);
+    QStatus Set(OCRepPayload *payload);
     QStatus SetSupportedLanguage(const char* language);
     QStatus SetProtocolIndependentId(const char* piid);
     QStatus SetManufacturerUrl(const char *url);
@@ -49,6 +50,7 @@ public:
     bool IsValid();
 private:
     char *m_n;
+    bool m_setDefaultLanguage;
     bool m_setSupportedLanguage;
     void SetFieldDetails();
     void SetVendorFields(OCRepPayload *payload);

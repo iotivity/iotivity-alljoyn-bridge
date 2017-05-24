@@ -20,13 +20,13 @@
 
 #include "DeviceConfigurationResource.h"
 
-#include "AboutData.h"
+#include "Log.h"
 #include "Payload.h"
 #include "ocpayload.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
 
-OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::AboutData *aboutData)
+OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData *aboutData)
 {
     assert(payload);
     assert(aboutData);
@@ -41,10 +41,17 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::About
 
     char *s = NULL;
     aboutData->GetDefaultLanguage(&s);
-    OCRepPayloadSetPropString(payload, "dl", s);
-    s = NULL;
-    aboutData->GetAppName(&s);
-    OCRepPayloadSetPropString(payload, OC_RSRVD_DEVICE_NAME, s);
+    if (s)
+    {
+        OCRepPayloadSetPropString(payload, "dl", s);
+    }
+    char *name = NULL;
+    aboutData->GetAppName(&name);
+    if (name)
+    {
+        // TODO This is a mandatory parameter on OC side, but not AJ side.
+        OCRepPayloadSetPropString(payload, OC_RSRVD_DEVICE_NAME, name);
+    }
     ajn::MsgArg *arg = NULL;
     size_t nd;
     double *d;
@@ -74,7 +81,7 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::About
     }
     size_t lnsDim[MAX_REP_ARRAY_DEPTH] = { numLangs, 0, 0 };
     OCRepPayload **lns = NULL;
-    if (numLangs)
+    if (name && numLangs)
     {
         OCRepPayload **lns = (OCRepPayload **) OICCalloc(numLangs, sizeof(OCRepPayload *));
         if (!lns)
@@ -90,8 +97,15 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::About
             }
             s = NULL;
             aboutData->GetAppName(&s, langs[i]);
-            OCRepPayloadSetPropString(lns[i], "value", s);
-            OCRepPayloadSetPropString(lns[i], "language", langs[i]);
+            if (s)
+            {
+                OCRepPayloadSetPropString(lns[i], "value", s);
+                OCRepPayloadSetPropString(lns[i], "language", langs[i]);
+            }
+            else
+            {
+                LOG(LOG_INFO, "Invalid AboutData - missing AppName in supported language");
+            }
         }
         if (!OCRepPayloadSetPropObjectArrayAsOwner(payload, "ln", lns, lnsDim))
         {
@@ -128,95 +142,4 @@ exit:
         }
     }
     return result;
-}
-
-OCStackResult SetDeviceConfigurationProperties(ajn::AboutData *aboutData,
-        const OCRepPayload *payload)
-{
-    QStatus status = ER_OK;
-    /* ln is handled specially since the values are localized */
-    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    OCRepPayload **lns = NULL;
-    if (OCRepPayloadGetPropObjectArray(payload, "ln", &lns, dim))
-    {
-        size_t dimTotal = calcDimTotal(dim);
-        for (size_t i = 0; (status == ER_OK) && (i < dimTotal); ++i)
-        {
-            char *language;
-            char *value;
-            if (OCRepPayloadGetPropString(lns[i], "language", &language) &&
-                    OCRepPayloadGetPropString(lns[i], "value", &value))
-            {
-                status = aboutData->SetAppName(value, language);
-                OICFree(language);
-                OICFree(value);
-            }
-        }
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            OCRepPayloadDestroy(lns[i]);
-        }
-        OICFree(lns);
-    }
-    /* Update default language if it is supplied before setting other values */
-    char *s = NULL;
-    if (status == ER_OK)
-    {
-        if (OCRepPayloadGetPropString(payload, "dl", &s))
-        {
-            status = aboutData->SetDefaultLanguage(s);
-            OICFree(s);
-        }
-    }
-    /*
-     * Other values are translated as-is after translating the names.  Default language must be set
-     * by now for SetField below.
-     */
-    status = aboutData->GetDefaultLanguage(&s);
-    for (OCRepPayloadValue *value = payload->values; (status == ER_OK) && value; value = value->next)
-    {
-        const char *name = value->name;
-        if (!strcmp(name, "ln"))
-        {
-            continue;
-        }
-        if (!strcmp(name, "dl"))
-        {
-            name = "DefaultLanguage";
-        }
-        else if (!strcmp(name, OC_RSRVD_DEVICE_NAME))
-        {
-            name = "AppName";
-        }
-        else if (!strcmp(name, "loc"))
-        {
-            name = "org.openconnectivity.loc";
-        }
-        else if (!strcmp(name, "locn"))
-        {
-            name = "org.openconnectivity.locn";
-        }
-        else if (!strcmp(name, "c"))
-        {
-            name = "org.openconnectivity.c";
-        }
-        else if (!strcmp(name, "r"))
-        {
-            name = "org.openconnectivity.r";
-        }
-        else if (!strncmp(name, "x.", 2))
-        {
-            name = &name[2];
-        }
-        ajn::MsgArg val;
-        if (!ToAJMsgArg(&val, "v", value))
-        {
-            status = ER_FAIL;
-        }
-        if (status == ER_OK)
-        {
-            status = aboutData->SetField(name, val);
-        }
-    }
-    return (status == ER_OK) ? OC_STACK_OK : OC_STACK_ERROR;
 }

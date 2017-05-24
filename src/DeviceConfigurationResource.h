@@ -21,14 +21,12 @@
 #ifndef _DEVICECONFIGURATIONRESOURCE_H
 #define _DEVICECONFIGURATIONRESOURCE_H
 
+#include "AboutData.h"
 #include "octypes.h"
-#include <alljoyn/AboutData.h>
 
 /** To represent device configuration resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION "oic.wk.con"
 
-OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, ajn::AboutData *aboutData);
-OCStackResult SetDeviceConfigurationProperties(ajn::AboutData *aboutData,
-        const OCRepPayload *payload);
+OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData *aboutData);
 
 #endif

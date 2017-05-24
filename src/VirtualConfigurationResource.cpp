@@ -245,7 +245,9 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
                 }
                 if (success)
                 {
-                    context->m_configData = new AboutData();
+                    char *defaultLang = (char *) "";
+                    resource->m_aboutData.GetDefaultLanguage(&defaultLang);
+                    context->m_configData = new AboutData(defaultLang);
                     if (!context->m_configData)
                     {
                         success = false;
@@ -253,10 +255,7 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
                 }
                 if (success)
                 {
-                    char *defaultLang;
-                    resource->m_aboutData.GetDefaultLanguage(&defaultLang);
-                    context->m_configData->SetDefaultLanguage(defaultLang);
-                    SetDeviceConfigurationProperties(context->m_configData, payload);
+                    context->m_configData->Set(payload);
                     context->SetLanguages(context->m_configData);
                     const char *lang = "";
                     if (context->m_lang != context->m_langs.end())
