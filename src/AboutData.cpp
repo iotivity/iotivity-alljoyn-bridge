@@ -596,18 +596,6 @@ bool AboutData::IsValid()
     {
         SetModelNumber("");
     }
-    if (!HasField(fields, numFields, "DateOfManufacture"))
-    {
-        SetDateOfManufacture("");
-    }
-    if (!HasField(fields, numFields, "HardwareVersion"))
-    {
-        SetHardwareVersion("");
-    }
-    if (!HasField(fields, numFields, "SupportUrl"))
-    {
-        SetSupportUrl("");
-    }
     if (!HasField(fields, numFields, "AppId"))
     {
         uint8_t appId[16] = { 0 };
