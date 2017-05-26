@@ -44,7 +44,6 @@ class VirtualBusAttachment : public ajn::BusAttachment
         std::string GetProtocolIndependentId() { return m_piid; }
         bool IsVirtual() { return m_isVirtual; }
         void SetAboutData(OCRepPayload *payload);
-        ajn::InterfaceDescription *CreateInterface(const char* ifaceName);
         QStatus RegisterBusObject(VirtualBusObject *busObject);
         VirtualBusObject *GetBusObject(const char *path);
         QStatus Announce();

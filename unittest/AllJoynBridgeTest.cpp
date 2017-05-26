@@ -23,8 +23,9 @@
 #include "AboutData.h"
 #include "DeviceConfigurationResource.h"
 #include "DeviceResource.h"
-#include "Interfaces.h"
 #include "Hash.h"
+#include "Interfaces.h"
+#include "Introspection.h"
 #include "Name.h"
 #include "Payload.h"
 #include "PlatformConfigurationResource.h"
@@ -167,6 +168,22 @@ private:
         m_called = true;
     }
 };
+
+static void Wait(long waitMs)
+{
+    uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
+    for (;;)
+    {
+        uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
+        long elapsed = (long)(currTime - startTime);
+        if (elapsed > waitMs)
+        {
+            break;
+        }
+        OCProcess();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
 
 class NameTranslationTest : public ::testing::TestWithParam<const char *> { };
 
@@ -1947,25 +1964,53 @@ TEST_F(VirtualServer, MaintenanceResource)
     delete resource;
 }
 
-class VirtualProducer : public AJOCSetUp
+class VirtualProducer
+    : public ajn::SessionPortListener, public AJOCSetUp
 {
 protected:
     ajn::BusAttachment *bus;
+    ajn::SessionPort m_port;
+    ajn::SessionOpts m_opts;
     virtual void SetUp()
     {
         AJOCSetUp::SetUp();
         bus = new ajn::BusAttachment("Consumer");
         EXPECT_EQ(ER_OK, bus->Start());
         EXPECT_EQ(ER_OK, bus->Connect());
+        m_port = ajn::SESSION_PORT_ANY;
+        EXPECT_EQ(ER_OK, bus->BindSessionPort(m_port, m_opts, *this));
     }
     virtual void TearDown()
     {
         delete bus;
         AJOCSetUp::TearDown();
     }
+    virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
+            const ajn::SessionOpts& opts)
+    {
+        (void) port;
+        (void) name;
+        (void) opts;
+        return true;
+    }
 };
 
-class ConfigurationResource
+class TestResource
+{
+public:
+    void DoResponse(OCEntityHandlerRequest *request, OCRepPayload *payload)
+    {
+        OCEntityHandlerResponse response;
+        memset(&response, 0, sizeof(response));
+        response.requestHandle = request->requestHandle;
+        response.resourceHandle = request->resource;
+        response.ehResult = OC_EH_OK;
+        response.payload = reinterpret_cast<OCPayload *>(payload);
+        EXPECT_EQ(OC_STACK_OK, OCDoResponse(&response));
+    }
+};
+
+class ConfigurationResource : public TestResource
 {
 public:
     ConfigurationResource(bool createResources = true, bool separateResources = false,
@@ -2081,16 +2126,6 @@ public:
             EXPECT_TRUE(OCRepPayloadGetPropString(lnArr[i], "value", &s));
             EXPECT_STREQ(m_properties->mnpn[i].value, s);
         }
-    }
-    void DoResponse(OCEntityHandlerRequest *request, OCRepPayload *payload)
-    {
-        OCEntityHandlerResponse response;
-        memset(&response, 0, sizeof(response));
-        response.requestHandle = request->requestHandle;
-        response.resourceHandle = request->resource;
-        response.ehResult = OC_EH_OK;
-        response.payload = reinterpret_cast<OCPayload *>(payload);
-        EXPECT_EQ(OC_STACK_OK, OCDoResponse(&response));
     }
     static OCEntityHandlerResult ConfigurationHandler(OCEntityHandlerFlag flag,
             OCEntityHandlerRequest *request, void *callbackParam)
@@ -2755,4 +2790,136 @@ TEST_F(VirtualProducer, UpdateConfigurationPropertiesDifferentResource)
 
     delete proxyObj;
     delete obj;
+}
+
+class BinarySwitchResource : public TestResource
+{
+public:
+    BinarySwitchResource(const char *path, uint8_t props)
+        : m_value(false)
+    {
+        EXPECT_EQ(OC_STACK_OK, CreateResource(&m_handle, path, "oic.r.switch.binary", "oic.if.a",
+                BinarySwitchResource::EntityHandler, this, props));
+    }
+    void Notify()
+    {
+        EXPECT_EQ(OC_STACK_OK, OCNotifyAllObservers(m_handle, OC_HIGH_QOS));
+    }
+    static OCEntityHandlerResult EntityHandler(OCEntityHandlerFlag flag,
+            OCEntityHandlerRequest *request, void *callbackParam)
+    {
+        (void) flag;
+        BinarySwitchResource *thiz = (BinarySwitchResource *) callbackParam;
+        switch (request->method)
+        {
+            case OC_REST_GET:
+                {
+                    OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                    EXPECT_TRUE(payload != NULL);
+                    EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "value", thiz->m_value));
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            case OC_REST_POST:
+                {
+                    OCRepPayload *payload = (OCRepPayload *) request->payload;
+                    EXPECT_TRUE(payload != NULL);
+                    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "value", &thiz->m_value));
+                    thiz->DoResponse(request, payload);
+                    return OC_EH_OK;
+                }
+            default:
+                return OC_EH_METHOD_NOT_ALLOWED;
+        }
+    }
+    OCResourceHandle m_handle;
+    bool m_value;
+};
+
+static OCStackApplicationResult DiscoverBinarySwitchResource(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Resource **r = (Resource **) ctx;
+    (void) handle;
+    EXPECT_EQ(OC_STACK_OK, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
+    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
+         payload = payload->next)
+    {
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            if (!strcmp(resource->uri, "/r0"))
+            {
+                *r = new Resource(response->devAddr, payload->sid, resource);
+            }
+        }
+    }
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+class PropertiesChangedListener : public ajn::ProxyBusObject::PropertiesChangedListener
+{
+public:
+    size_t m_calls;
+    PropertiesChangedListener() : m_calls(0) { }
+    virtual ~PropertiesChangedListener() { }
+    void PropertiesChanged(ajn::ProxyBusObject& proxyObj, const char* ifaceName,
+            const ajn::MsgArg& changed, const ajn::MsgArg& invalidated, void* context)
+    {
+        (void) proxyObj;
+        (void) ifaceName;
+        (void) changed;
+        (void) invalidated;
+        (void) context;
+        ++m_calls;
+    }
+};
+
+TEST_F(VirtualProducer, Observe)
+{
+    BinarySwitchResource r0("/r0", OC_DISCOVERABLE | OC_OBSERVABLE);
+    BinarySwitchResource r1("/r1", OC_OBSERVABLE);
+
+    Resource *resource = NULL;
+    Callback discoverCB(&DiscoverBinarySwitchResource, &resource);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, discoverCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(1));
+    VirtualBusObject *obj = new VirtualBusObject(bus, *resource);
+    resource->m_uri = "/r1";
+    obj->AddResource(*resource);
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "value", false));
+    OCRepPayload *definitions = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropObject(definitions, "oic.r.switch.binary",
+            IntrospectDefinition(payload, resource->m_rts[0], resource->m_ifs)));
+    std::map<std::string, Annotations> annotations;
+    ParseAnnotations(definitions, annotations);
+    std::map<std::string, bool> isObservable;
+    isObservable["oic.r.switch.binary"] = true;
+    std::map<std::string, std::string> ajNames;
+    ParseInterfaces(definitions, annotations, isObservable, bus, ajNames);
+    OCRepPayload *path = IntrospectPath(resource->m_rts, resource->m_ifs);
+    ParsePath(path, ajNames, obj);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+
+    ajn::SessionId id;
+    ajn::SessionOpts opts;
+    EXPECT_EQ(ER_OK, bus->JoinSession(bus->GetUniqueName().c_str(), m_port, NULL, id, opts));
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/r0", id);
+    EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
+    PropertiesChangedListener listener;
+    EXPECT_EQ(ER_OK, proxyObj->RegisterPropertiesChangedListener("oic.r.switch.binary", NULL, 0, listener, NULL));
+    obj->Observe();
+    Wait(100); /* Must wait for Observe to be processed */
+
+    listener.m_calls = 0;
+    r0.Notify();
+    Wait(100);
+    EXPECT_EQ(1u, listener.m_calls);
+    r1.Notify();
+    Wait(100);
+    EXPECT_EQ(2u, listener.m_calls);
 }

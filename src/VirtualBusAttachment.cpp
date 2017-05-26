@@ -125,15 +125,6 @@ void VirtualBusAttachment::SetAboutData(OCRepPayload *payload)
     m_aboutData.Set(payload);
 }
 
-ajn::InterfaceDescription *VirtualBusAttachment::CreateInterface(const char* ifaceName)
-{
-    LOG(LOG_INFO, "[%p] ifaceName=%s", this, ifaceName);
-
-    ajn::InterfaceDescription *iface = NULL;
-    ajn::BusAttachment::CreateInterface(ifaceName, iface, ajn::AJ_IFC_SECURITY_INHERIT);
-    return iface;
-}
-
 QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject)
 {
     LOG(LOG_INFO, "[%p] busObject=%p",

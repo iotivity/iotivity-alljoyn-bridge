@@ -20,6 +20,7 @@
 
 #include "Introspection.h"
 
+#include "Log.h"
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
@@ -36,6 +37,8 @@
     {                                                               \
         goto exit;                                                  \
     }
+
+static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj);
 
 static int64_t Pair(CborEncoder *cbor, const char *key, const char *value)
 {
@@ -1108,4 +1111,552 @@ exit:
         *outSize = cbor_encoder_get_buffer_size(&encoder, out);
     }
     return (CborError)err;
+}
+
+static bool SetPropertiesSchema(OCRepPayload *property, OCRepPayloadPropType type,
+        OCRepPayload *obj)
+{
+    OCRepPayload *child = NULL;
+    bool success;
+
+    switch (type)
+    {
+        case OCREP_PROP_NULL:
+            success = false;
+            break;
+        case OCREP_PROP_INT:
+            success = OCRepPayloadSetPropString(property, "type", "integer");
+            break;
+        case OCREP_PROP_DOUBLE:
+            success = OCRepPayloadSetPropString(property, "type", "number");
+            break;
+        case OCREP_PROP_BOOL:
+            success = OCRepPayloadSetPropString(property, "type", "boolean");
+            break;
+        case OCREP_PROP_STRING:
+            success = OCRepPayloadSetPropString(property, "type", "string");
+            break;
+        case OCREP_PROP_BYTE_STRING:
+            child = OCRepPayloadCreate();
+            success = child &&
+                    OCRepPayloadSetPropString(child, "binaryEncoding", "base64") &&
+                    OCRepPayloadSetPropObjectAsOwner(property, "media", child) &&
+                    OCRepPayloadSetPropString(property, "type", "string");
+            if (success)
+            {
+                child = NULL;
+            }
+            break;
+        case OCREP_PROP_OBJECT:
+            child = OCRepPayloadCreate();
+            success = child &&
+                    SetPropertiesSchema(child, obj) &&
+                    OCRepPayloadSetPropObjectAsOwner(property, "properties", child) &&
+                    OCRepPayloadSetPropString(property, "type", "object");
+            if (success)
+            {
+                child = NULL;
+            }
+            break;
+        case OCREP_PROP_ARRAY:
+            success = false;
+            break;
+    }
+    if (!success)
+    {
+        goto exit;
+    }
+    success = true;
+
+exit:
+    OCRepPayloadDestroy(child);
+    return success;
+}
+
+static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj)
+{
+    OCRepPayload *property = NULL;
+    OCRepPayload *child = NULL;
+    OCRepPayload *array = NULL;
+    bool success;
+
+    if (!obj)
+    {
+        success = true;
+        goto exit;
+    }
+    for (OCRepPayloadValue *value = obj->values; value; value = value->next)
+    {
+        property = OCRepPayloadCreate();
+        if (!property)
+        {
+            LOG(LOG_ERR, "Failed to create payload");
+            success = false;
+            goto exit;
+        }
+        switch (value->type)
+        {
+            case OCREP_PROP_NULL:
+                success = false;
+                break;
+            case OCREP_PROP_INT:
+                success = OCRepPayloadSetPropString(property, "type", "integer");
+                break;
+            case OCREP_PROP_DOUBLE:
+                success = OCRepPayloadSetPropString(property, "type", "number");
+                break;
+            case OCREP_PROP_BOOL:
+                success = OCRepPayloadSetPropString(property, "type", "boolean");
+                break;
+            case OCREP_PROP_STRING:
+                success = OCRepPayloadSetPropString(property, "type", "string");
+                break;
+            case OCREP_PROP_BYTE_STRING:
+                child = OCRepPayloadCreate();
+                success = child &&
+                        OCRepPayloadSetPropString(child, "binaryEncoding", "base64") &&
+                        OCRepPayloadSetPropObjectAsOwner(property, "media", child) &&
+                        OCRepPayloadSetPropString(property, "type", "string");
+                if (success)
+                {
+                    child = NULL;
+                }
+                break;
+            case OCREP_PROP_OBJECT:
+                child = OCRepPayloadCreate();
+                success = child &&
+                        SetPropertiesSchema(child, value->obj) &&
+                        OCRepPayloadSetPropObjectAsOwner(property, "properties", child) &&
+                        OCRepPayloadSetPropString(property, "type", "object");
+                if (success)
+                {
+                    child = NULL;
+                }
+                break;
+            case OCREP_PROP_ARRAY:
+                success = true;
+                array = property;
+                for (size_t i = 0; success && (i < MAX_REP_ARRAY_DEPTH) && value->arr.dimensions[i];
+                     ++i)
+                {
+                    child = OCRepPayloadCreate();
+                    success = child &&
+                            OCRepPayloadSetPropObjectAsOwner(array, "items", child) &&
+                            OCRepPayloadSetPropString(array, "type", "array");
+                    if (success)
+                    {
+                        array = child;
+                        child = NULL;
+                    }
+                }
+                if (success)
+                {
+                    success = SetPropertiesSchema(array, value->arr.type, value->arr.objArray[0]);
+                }
+                break;
+        }
+        if (!success)
+        {
+            goto exit;
+        }
+
+        if (!OCRepPayloadSetPropObjectAsOwner(parent, value->name, property))
+        {
+            success = false;
+            goto exit;
+        }
+        property = NULL;
+    }
+    success = true;
+
+exit:
+    OCRepPayloadDestroy(child);
+    OCRepPayloadDestroy(property);
+    return success;
+}
+
+OCRepPayload *IntrospectDefinition(OCRepPayload *payload, std::string resourceType,
+        std::vector<std::string> &interfaces)
+{
+    OCRepPayload *definition = NULL;
+    OCRepPayload *properties = NULL;
+    OCRepPayload *rt = NULL;
+    size_t rtsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    size_t dimTotal;
+    char **rts = NULL;
+    std::vector<std::string>::iterator ifIt;
+    OCRepPayload *itf = NULL;
+    OCRepPayload *items = NULL;
+    size_t itfsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    char **itfs = NULL;
+    definition = OCRepPayloadCreate();
+    if (!definition)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(definition, "type", "object"))
+    {
+        goto error;
+    }
+    properties = OCRepPayloadCreate();
+    if (!properties)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    rt = OCRepPayloadCreate();
+    if (!rt)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropBool(rt, "readOnly", true) ||
+            !OCRepPayloadSetPropString(rt, "type", "array"))
+    {
+        goto error;
+    }
+    rtsDim[0] = 1;
+    dimTotal = calcDimTotal(rtsDim);
+    rts = (char**) OICCalloc(dimTotal, sizeof(char*));
+    if (!rts)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    rts[0] = OICStrdup(resourceType.c_str());
+    if (!OCRepPayloadSetStringArrayAsOwner(rt, "default", rts, rtsDim))
+    {
+        goto error;
+    }
+    rts = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(properties, "rt", rt))
+    {
+        goto error;
+    }
+    rt = NULL;
+    itf = OCRepPayloadCreate();
+    if (!itf)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropBool(itf, "readOnly", true) ||
+            !OCRepPayloadSetPropString(itf, "type", "array"))
+    {
+        goto error;
+    }
+    items = OCRepPayloadCreate();
+    if (!items)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(items, "type", "string"))
+    {
+        goto error;
+    }
+    itfsDim[0] = interfaces.size();
+    dimTotal = calcDimTotal(itfsDim);
+    itfs = (char **) OICCalloc(dimTotal, sizeof(char *));
+    if (!itfs)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    ifIt = interfaces.begin();
+    for (size_t i = 0; i < dimTotal; ++i, ++ifIt)
+    {
+        itfs[i] = OICStrdup(ifIt->c_str());
+    }
+    if (!OCRepPayloadSetStringArrayAsOwner(items, "enum", itfs, itfsDim))
+    {
+        goto error;
+    }
+    itfs = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(itf, "items", items))
+    {
+        goto error;
+    }
+    items = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(properties, "if", itf))
+    {
+        goto error;
+    }
+    itf = NULL;
+    if (!SetPropertiesSchema(properties, payload))
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetPropObjectAsOwner(definition, "properties", properties))
+    {
+        goto error;
+    }
+    properties = NULL;
+    return definition;
+
+error:
+    OCRepPayloadDestroy(items);
+    OCRepPayloadDestroy(itf);
+    if (itfs)
+    {
+        dimTotal = calcDimTotal(itfsDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OICFree(itfs[i]);
+        }
+        OICFree(itfs);
+    }
+    if (rts)
+    {
+        dimTotal = calcDimTotal(rtsDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OICFree(rts[i]);
+        }
+        OICFree(rts);
+    }
+    OCRepPayloadDestroy(rt);
+    OCRepPayloadDestroy(properties);
+    OCRepPayloadDestroy(definition);
+    return NULL;
+}
+
+OCRepPayload *IntrospectPath(std::vector<std::string> &resourceTypes,
+        std::vector<std::string> &interfaces)
+{
+    OCRepPayload *path = NULL;
+    OCRepPayload *method = NULL;
+    size_t dimTotal;
+    size_t parametersDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    OCRepPayload **parameters = NULL;
+    size_t itfsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    char **itfs = NULL;
+    OCRepPayload *responses = NULL;
+    OCRepPayload *code = NULL;
+    OCRepPayload *schema = NULL;
+    size_t oneOfDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    OCRepPayload **oneOf = NULL;
+    std::string ref;
+    path = OCRepPayloadCreate();
+    if (!path)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    /* oic.if.baseline is mandatory and it supports post */
+    method = OCRepPayloadCreate();
+    if (!method)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    parametersDim[0] = 2;
+    dimTotal = calcDimTotal(parametersDim);
+    parameters = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload*));
+    if (!parameters)
+    {
+        LOG(LOG_ERR, "Failed to allocate object array");
+        goto error;
+    }
+    parameters[0] = OCRepPayloadCreate();
+    if (!parameters[0])
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(parameters[0], "name", "if") ||
+            !OCRepPayloadSetPropString(parameters[0], "in", "query") ||
+            !OCRepPayloadSetPropString(parameters[0], "type", "string"))
+    {
+        goto error;
+    }
+    itfs = (char **) OICCalloc(interfaces.size(), sizeof(char *));
+    if (!itfs)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    itfsDim[0] = 0;
+    for (size_t i = 0; i < interfaces.size(); ++i)
+    {
+        /* Filter out read-only interfaces from post method */
+        std::string &itf = interfaces[i];
+        if (itf == "oic.if.ll" || itf == "oic.if.r" || itf == "oic.if.s")
+        {
+            continue;
+        }
+        itfs[itfsDim[0]++] = OICStrdup(itf.c_str());
+    }
+    if (!OCRepPayloadSetStringArrayAsOwner(parameters[0], "enum", itfs, itfsDim))
+    {
+        goto error;
+    }
+    itfs = NULL;
+    parameters[1] = OCRepPayloadCreate();
+    if (!parameters[1])
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(parameters[1], "name", "body") ||
+            !OCRepPayloadSetPropString(parameters[1], "in", "body"))
+    {
+        goto error;
+    }
+    schema = OCRepPayloadCreate();
+    if (!schema)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    oneOfDim[0] = resourceTypes.size();
+    dimTotal = calcDimTotal(oneOfDim);
+    oneOf = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload*));
+    if (!oneOf)
+    {
+        LOG(LOG_ERR, "Failed to allocate object array");
+        goto error;
+    }
+    for (size_t i = 0; i < dimTotal; ++i)
+    {
+        oneOf[i] = OCRepPayloadCreate();
+        if (!oneOf[i])
+        {
+            LOG(LOG_ERR, "Failed to create payload");
+            goto error;
+        }
+        ref = std::string("#/definitions/") + resourceTypes[i];
+        if (!OCRepPayloadSetPropString(oneOf[i], "$ref", ref.c_str()))
+        {
+            goto error;
+        }
+    }
+    if (!OCRepPayloadSetPropObjectArrayAsOwner(schema, "oneOf", oneOf, oneOfDim))
+    {
+        goto error;
+    }
+    oneOf = NULL;
+    /* schema will be re-used in "responses" (so no ...AsOwner here) */
+    if (!OCRepPayloadSetPropObject(parameters[1], "schema", schema))
+    {
+        goto error;
+    }
+    /* parameters will be re-used in "get" (so no ...AsOwner here) */
+    if (!OCRepPayloadSetPropObjectArray(method, "parameters", (const OCRepPayload **)parameters,
+            parametersDim))
+    {
+        goto error;
+    }
+    responses = OCRepPayloadCreate();
+    if (!responses)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    code = OCRepPayloadCreate();
+    if (!code)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(code, "description", ""))
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetPropObjectAsOwner(code, "schema", schema))
+    {
+        goto error;
+    }
+    schema = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(responses, "200", code))
+    {
+        goto error;
+    }
+    code = NULL;
+    /* responses will be re-used in "get" (so no ...AsOwner here) */
+    if (!OCRepPayloadSetPropObject(method, "responses", responses))
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetPropObjectAsOwner(path, "post", method))
+    {
+        goto error;
+    }
+    method = NULL;
+    method = OCRepPayloadCreate();
+    if (!method)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    itfs = (char **) OICCalloc(interfaces.size(), sizeof(char *));
+    if (!itfs)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    itfsDim[0] = 0;
+    for (size_t i = 0; i < interfaces.size(); ++i)
+    {
+        /* All interfaces support get method */
+        itfs[itfsDim[0]++] = OICStrdup(interfaces[i].c_str());
+    }
+    if (!OCRepPayloadSetStringArrayAsOwner(parameters[0], "enum", itfs, itfsDim))
+    {
+        goto error;
+    }
+    itfs = NULL;
+    parametersDim[0] = 1; /* only use "if" parameter */
+    if (!OCRepPayloadSetPropObjectArrayAsOwner(method, "parameters", parameters, parametersDim))
+    {
+        goto error;
+    }
+    parameters = NULL;
+    if (!OCRepPayloadSetPropObject(method, "responses", responses))
+    {
+        goto error;
+    }
+    responses = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(path, "get", method))
+    {
+        goto error;
+    }
+    method = NULL;
+    return path;
+
+error:
+    if (oneOf)
+    {
+        dimTotal = calcDimTotal(oneOfDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(oneOf[i]);
+        }
+        OICFree(oneOf);
+    }
+    OCRepPayloadDestroy(schema);
+    OCRepPayloadDestroy(code);
+    if (parameters)
+    {
+        dimTotal = calcDimTotal(parametersDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(parameters[i]);
+        }
+        OICFree(parameters);
+    }
+    if (itfs)
+    {
+        dimTotal = calcDimTotal(itfsDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OICFree(itfs[i]);
+        }
+        OICFree(itfs);
+    }
+    OCRepPayloadDestroy(responses);
+    OCRepPayloadDestroy(method);
+    OCRepPayloadDestroy(path);
+    return NULL;
 }
