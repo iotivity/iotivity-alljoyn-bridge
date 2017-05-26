@@ -454,9 +454,26 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
     VirtualConfigurationResource *resource = reinterpret_cast<VirtualConfigurationResource *>(ctx);
     std::lock_guard<std::mutex> lock(resource->m_mutex);
 
-    OCEntityHandlerResult result;
+    OCRepPayload *payload = NULL;
+    OCEntityHandlerResult result = OC_EH_OK;
     switch (request->method)
     {
+        case OC_REST_GET:
+            {
+                payload = ::CreatePayload(request->resource, request->query);
+                if (!payload)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                if (!OCRepPayloadSetPropBool(payload, "fr", resource->m_fr) ||
+                    !OCRepPayloadSetPropBool(payload, "rb", resource->m_rb))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                break;
+            }
         case OC_REST_POST:
             {
                 if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
@@ -464,7 +481,7 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
                     result = OC_EH_ERROR;
                     break;
                 }
-                OCRepPayload *payload = (OCRepPayload *) request->payload;
+                payload = OCRepPayloadClone((OCRepPayload *) request->payload);
                 bool value;
                 if (OCRepPayloadGetPropBool(payload, "fr", &value) && value)
                 {
@@ -488,40 +505,28 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
                         break;
                     }
                 }
-                /* FALLTHROUGH */
-            }
-        case OC_REST_GET:
-            {
-                OCEntityHandlerResponse response;
-                memset(&response, 0, sizeof(response));
-                response.requestHandle = request->requestHandle;
-                response.resourceHandle = request->resource;
-                OCRepPayload *payload = ::CreatePayload(request->resource, request->query);
-                if (!payload)
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                if (!OCRepPayloadSetPropBool(payload, "fr", resource->m_fr) ||
-                    !OCRepPayloadSetPropBool(payload, "rb", resource->m_rb))
-                {
-                    result = OC_EH_ERROR;
-                    OCRepPayloadDestroy(payload);
-                    payload = NULL;
-                }
-                response.ehResult = result;
-                response.payload = reinterpret_cast<OCPayload *>(payload);
-                OCStackResult doResult = OCDoResponse(&response);
-                if (doResult != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
-                    OCRepPayloadDestroy(payload);
-                }
                 break;
             }
         default:
             result = OC_EH_METHOD_NOT_ALLOWED;
             break;
     }
-    return result;
+    if (result != OC_EH_OK)
+    {
+        OCRepPayloadDestroy(payload);
+        payload = NULL;
+    }
+    OCEntityHandlerResponse response;
+    memset(&response, 0, sizeof(response));
+    response.requestHandle = request->requestHandle;
+    response.resourceHandle = request->resource;
+    response.ehResult = result;
+    response.payload = reinterpret_cast<OCPayload *>(payload);
+    OCStackResult doResult = OCDoResponse(&response);
+    if (doResult != OC_STACK_OK)
+    {
+        LOG(LOG_ERR, "OCDoResponse - %d", doResult);
+        OCRepPayloadDestroy(payload);
+    }
+    return OC_EH_OK;
 }

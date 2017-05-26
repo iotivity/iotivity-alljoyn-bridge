@@ -112,6 +112,7 @@ void VirtualBusObject::Stop()
 
 void VirtualBusObject::AddResource(Resource &resource)
 {
+    LOG(LOG_INFO, "[%p] uri=%s", this, resource.m_uri.c_str());
     m_resources.push_back(resource);
 }
 

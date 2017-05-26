@@ -1266,7 +1266,9 @@ public:
         const MethodEntry methodEntries[] =
         {
             { iface->GetMember("GetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&ConfigBusObject::GetConfigurations) },
-            { iface->GetMember("UpdateConfigurations"), static_cast<MessageReceiver::MethodHandler>(&ConfigBusObject::UpdateConfigurations) }
+            { iface->GetMember("UpdateConfigurations"), static_cast<MessageReceiver::MethodHandler>(&ConfigBusObject::UpdateConfigurations) },
+            { iface->GetMember("FactoryReset"), static_cast<MessageReceiver::MethodHandler>(&ConfigBusObject::FactoryReset) },
+            { iface->GetMember("Restart"), static_cast<MessageReceiver::MethodHandler>(&ConfigBusObject::Restart) }
         };
         AddMethodHandlers(methodEntries, sizeof(methodEntries) / sizeof(methodEntries[0]));
     }
@@ -1347,6 +1349,16 @@ public:
         EXPECT_EQ(ER_OK, MethodReply(msg, &arg, 1));
     }
     void UpdateConfigurations(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
+    {
+        (void) member;
+        EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
+    }
+    void FactoryReset(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
+    {
+        (void) member;
+        EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
+    }
+    void Restart(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
     {
         (void) member;
         EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
@@ -1855,6 +1867,84 @@ TEST_F(VirtualServer, PlatformResource)
 
     delete resource;
     delete device;
+}
+
+static OCStackApplicationResult MaintenanceResourceVerify(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    (void) handle;
+    (void) ctx;
+    EXPECT_EQ(OC_STACK_OK, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) response->payload;
+    bool b;
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "fr", &b));
+    EXPECT_FALSE(b);
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "rb", &b));
+    EXPECT_FALSE(b);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+static OCStackApplicationResult FactoryResetVerify(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    (void) handle;
+    (void) ctx;
+    EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) response->payload;
+    bool b;
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "fr", &b));
+    EXPECT_TRUE(b);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+static OCStackApplicationResult RebootVerify(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    (void) handle;
+    (void) ctx;
+    EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) response->payload;
+    bool b;
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "rb", &b));
+    EXPECT_TRUE(b);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+TEST_F(VirtualServer, MaintenanceResource)
+{
+    ConfigBusObject configObj(bus, NULL);
+    EXPECT_EQ(ER_OK, bus->RegisterBusObject(configObj));
+    CreateCallback createCB;
+    VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus,
+            bus->GetUniqueName().c_str(), 0, "/Config", "v16.10.00", createCB, &createCB);
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1));
+
+    Callback getCB(&MaintenanceResourceVerify);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "127.0.0.1/oic/mnt", NULL, 0,
+            CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1));
+
+    OCRepPayload *payload = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "fr", true));
+    Callback setFactoryResetCB(&FactoryResetVerify);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "127.0.0.1/oic/mnt", NULL,
+            (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, setFactoryResetCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, setFactoryResetCB.Wait(1));
+
+    payload = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "rb", true));
+    Callback setRebootCB(&RebootVerify);
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "127.0.0.1/oic/mnt", NULL,
+            (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, setRebootCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, setRebootCB.Wait(1));
+
+    delete resource;
 }
 
 class VirtualProducer : public AJOCSetUp

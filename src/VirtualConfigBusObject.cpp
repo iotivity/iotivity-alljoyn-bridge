@@ -48,9 +48,9 @@ VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, Resource
     {
         { m_iface->GetMember("FactoryReset"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::FactoryReset) },
         { m_iface->GetMember("GetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::GetConfigurations) },
-        { m_iface->GetMember("ResetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::ResetConfigurations) },
+        { m_iface->GetMember("ResetConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::NotImplemented) },
         { m_iface->GetMember("Restart"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::Restart) },
-        { m_iface->GetMember("SetPasscode"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::SetPasscode) },
+        { m_iface->GetMember("SetPasscode"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::NotImplemented) },
         { m_iface->GetMember("UpdateConfigurations"), static_cast<MessageReceiver::MethodHandler>(&VirtualConfigBusObject::UpdateConfigurations) },
     };
     AddMethodHandlers(methodEntries, sizeof(methodEntries) / sizeof(methodEntries[0]));
@@ -325,22 +325,6 @@ error:
     delete context;
 }
 
-void VirtualConfigBusObject::ResetConfigurations(const ajn::InterfaceDescription::Member *member,
-        ajn::Message &msg)
-{
-    (void) msg;
-    LOG(LOG_INFO, "[%p] member=%p", this, member);
-    MethodReply(msg, ER_NOT_IMPLEMENTED);
-}
-
-void VirtualConfigBusObject::SetPasscode(const ajn::InterfaceDescription::Member *member,
-        ajn::Message &msg)
-{
-    (void) msg;
-    LOG(LOG_INFO, "[%p] member=%p", this, member);
-    MethodReply(msg, ER_NOT_IMPLEMENTED);
-}
-
 void VirtualConfigBusObject::FactoryReset(const ajn::InterfaceDescription::Member *member,
         ajn::Message &msg)
 {
@@ -429,4 +413,12 @@ void VirtualConfigBusObject::RestartCB(ajn::Message &msg, OCRepPayload *payload,
     {
         LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
     }
+}
+
+void VirtualConfigBusObject::NotImplemented(const ajn::InterfaceDescription::Member *member,
+        ajn::Message &msg)
+{
+    (void) msg;
+    LOG(LOG_INFO, "[%p] member=%p", this, member);
+    MethodReply(msg, ER_NOT_IMPLEMENTED);
 }
