@@ -31,8 +31,6 @@
 
 class Bridge;
 
-
-
 class VirtualResource : public ajn::ProxyBusObject
     , protected ajn::ProxyBusObject::Listener
     , private ajn::BusAttachment::AddMatchAsyncCB

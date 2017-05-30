@@ -77,18 +77,17 @@ OCStackResult VirtualResource::Create()
     std::lock_guard<std::mutex> lock(m_mutex);
 
     const ajn::InterfaceDescription *iface = m_bus->GetInterface(
-        ::ajn::org::allseen::Introspectable::InterfaceName);
+        ::ajn::org::freedesktop::DBus::Introspectable::InterfaceName);
     assert(iface);
     AddInterface(*iface);
-    const ajn::InterfaceDescription::Member *member = iface->GetMember("IntrospectWithDescription");
+    const ajn::InterfaceDescription::Member *member = iface->GetMember("Introspect");
     assert(member);
-    ajn::MsgArg arg("s", "");
     QStatus status = MethodCallAsync(*member, this,
-            static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::IntrospectCB), &arg,
-            1, NULL);
+            static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::IntrospectCB), NULL, 0,
+            NULL);
     if (status != ER_OK)
     {
-        LOG(LOG_ERR, "IntrospectWithDescription - %s", QCC_StatusText(status));
+        LOG(LOG_ERR, "Introspect - %s", QCC_StatusText(status));
         return OC_STACK_ERROR;
     }
     return OC_STACK_OK;
@@ -106,6 +105,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
         {
             case ajn::MESSAGE_METHOD_RET:
                 {
+                    LOG(LOG_INFO, "[%p] %s", this, msg->GetArg(0)->ToString().c_str());
                     QStatus status = ParseXml(msg->GetArg(0)->v_string.str);
                     if (status != ER_OK)
                     {
@@ -163,7 +163,7 @@ OCStackResult VirtualResource::CreateResource(std::string path, uint8_t props)
     OCStackResult result = ::CreateResource(&handle, path.c_str(), rt->first.c_str(),
             (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
             VirtualResource::EntityHandlerCB, this, props);
-    for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
+    for (++rt; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
     {
         if (rt->second.m_props != props)
         {
@@ -196,7 +196,6 @@ OCStackResult VirtualResource::CreateResources()
     for (size_t i = 0; i < numIfaces; ++i)
     {
         const char *ifaceName = ifaces[i]->GetName();
-        LOG(LOG_INFO, "%s ifaceName=%s", GetPath().c_str(), ifaceName);
         if (!TranslateInterface(ifaceName))
         {
             continue;
@@ -1278,8 +1277,6 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
             }
         }
         /* Common properties */
-        const char **rts = NULL;
-        const char **ifs = NULL;
         if (context->m_response->ehResult == OC_EH_OK)
         {
             if (!SetResourceTypes(context->m_payload, context->m_response->resourceHandle) ||
@@ -1299,8 +1296,6 @@ exit:
         {
             LOG(LOG_ERR, "OCDoResponse - %d", doResult);
         }
-        OICFree(ifs);
-        OICFree(rts);
         delete context;
     }
     return ER_OK;

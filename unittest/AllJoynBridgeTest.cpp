@@ -39,12 +39,13 @@
 #include "ocrandom.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
+#include "oic_string.h"
 #include <alljoyn/AboutData.h>
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/Init.h>
 
 #include "gtest_helper.h"
-/* TODO fold addition of context to Callback back into gtest_helper.h */
+/* TODO fold addition of context to Callback and change in Wait units back into gtest_helper.h */
 class Callback
 {
 public:
@@ -54,14 +55,14 @@ public:
         m_cbData.cd = NULL;
         m_cbData.context = this;
     }
-    OCStackResult Wait(long waitTime)
+    OCStackResult Wait(long waitMs)
     {
         uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
         while (!m_called)
         {
             uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
-            long elapsed = (long)((currTime - startTime) / MS_PER_SEC);
-            if (elapsed > waitTime)
+            long elapsed = (long)(currTime - startTime);
+            if (elapsed > waitMs)
             {
                 break;
             }
@@ -88,18 +89,120 @@ private:
     }
 };
 
-class CreateCallback
+class ResourceCallback
 {
 public:
-    CreateCallback() : m_called(false) { }
-    OCStackResult Wait(long waitTime)
+    OCClientResponse *m_response;
+    ResourceCallback() : m_response(NULL), m_called(false)
+    {
+        m_cbData.cb = &ResourceCallback::handler;
+        m_cbData.cd = NULL;
+        m_cbData.context = this;
+    }
+    virtual ~ResourceCallback()
+    {
+        if (m_response)
+        {
+            OICFree((void *) m_response->resourceUri);
+            OCPayloadDestroy(m_response->payload);
+        }
+    }
+    OCStackResult Wait(long waitMs)
     {
         uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
         while (!m_called)
         {
             uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
-            long elapsed = (long)((currTime - startTime) / MS_PER_SEC);
-            if (elapsed > waitTime)
+            long elapsed = (long)(currTime - startTime);
+            if (elapsed > waitMs)
+            {
+                break;
+            }
+            OCProcess();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return m_called ? OC_STACK_OK : OC_STACK_TIMEOUT;
+    }
+    operator OCCallbackData *()
+    {
+        return &m_cbData;
+    }
+protected:
+    bool m_called;
+    virtual OCStackApplicationResult Handler(OCDoHandle handle, OCClientResponse *response)
+    {
+        (void) handle;
+        m_response = (OCClientResponse *) OICCalloc(1, sizeof(OCClientResponse));
+        EXPECT_TRUE(m_response != NULL);
+        memcpy(m_response, response, sizeof(OCClientResponse));
+        m_response->addr = &m_response->devAddr;
+        m_response->resourceUri = OICStrdup(response->resourceUri);
+        if (response->payload)
+        {
+            switch (response->payload->type)
+            {
+                case PAYLOAD_TYPE_REPRESENTATION:
+                    m_response->payload = (OCPayload *) OCRepPayloadClone((OCRepPayload *) response->payload);
+                    break;
+                case PAYLOAD_TYPE_DIAGNOSTIC:
+                    m_response->payload = (OCPayload *) OCDiagnosticPayloadCreate(((OCDiagnosticPayload *) response->payload)->message);
+                    break;
+                default:
+                    m_response->payload = NULL;
+                    break;
+            }
+        }
+        m_called = true;
+        return OC_STACK_DELETE_TRANSACTION;
+    }
+private:
+    OCCallbackData m_cbData;
+    static OCStackApplicationResult handler(void *ctx, OCDoHandle handle, OCClientResponse *response)
+    {
+        ResourceCallback *callback = (ResourceCallback *) ctx;
+        return callback->Handler(handle, response);
+    }
+};
+
+class ObserveCallback : public ResourceCallback
+{
+public:
+    virtual ~ObserveCallback() { }
+    void Reset()
+    {
+        m_called = false;
+    }
+protected:
+    virtual OCStackApplicationResult Handler(OCDoHandle handle, OCClientResponse *response)
+    {
+        (void) handle;
+        m_response = (OCClientResponse *) OICCalloc(1, sizeof(OCClientResponse));
+        EXPECT_TRUE(m_response != NULL);
+        memcpy(m_response, response, sizeof(OCClientResponse));
+        m_response->addr = &m_response->devAddr;
+        m_response->resourceUri = OICStrdup(response->resourceUri);
+        if (response->payload)
+        {
+            EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, response->payload->type);
+            m_response->payload = (OCPayload *) OCRepPayloadClone((OCRepPayload *) response->payload);
+        }
+        m_called = true;
+        return OC_STACK_KEEP_TRANSACTION;
+    }
+};
+
+class CreateCallback
+{
+public:
+    CreateCallback() : m_called(false) { }
+    OCStackResult Wait(long waitMs)
+    {
+        uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
+        while (!m_called)
+        {
+            uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
+            long elapsed = (long)(currTime - startTime);
+            if (elapsed > waitMs)
             {
                 break;
             }
@@ -132,14 +235,14 @@ public:
                 static_cast<MessageReceiver::ReplyHandler>(&MethodCall::ReplyHandler), args,
                 numArgs);
     }
-    OCStackResult Wait(long waitTime)
+    OCStackResult Wait(long waitMs)
     {
         uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
         while (!m_called)
         {
             uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
-            long elapsed = (long)((currTime - startTime) / MS_PER_SEC);
-            if (elapsed > waitTime)
+            long elapsed = (long)(currTime - startTime);
+            if (elapsed > waitMs)
             {
                 break;
             }
@@ -183,6 +286,36 @@ static void Wait(long waitMs)
         OCProcess();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+}
+
+struct DiscoverContext
+{
+    const char *m_uri;
+    Resource *m_resource;
+    DiscoverContext(const char *uri) : m_uri(uri), m_resource(NULL) { }
+    ~DiscoverContext() { delete m_resource; }
+};
+
+static OCStackApplicationResult Discover(void *ctx, OCDoHandle handle, OCClientResponse *response)
+{
+    DiscoverContext *context = (DiscoverContext *) ctx;
+    (void) handle;
+    EXPECT_EQ(OC_STACK_OK, response->result);
+    EXPECT_TRUE(response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
+    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
+         payload = payload->next)
+    {
+        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
+             resource = resource->next)
+        {
+            if (!strcmp(resource->uri, context->m_uri))
+            {
+                context->m_resource = new Resource(response->devAddr, payload->sid, resource);
+            }
+        }
+    }
+    return OC_STACK_DELETE_TRANSACTION;
 }
 
 class NameTranslationTest : public ::testing::TestWithParam<const char *> { };
@@ -1212,21 +1345,131 @@ TEST_F(PlatformConfigurationProperties, SetFromAboutData)
     }
 }
 
-class VirtualServer : public AJOCSetUp
+const char *TestInterfaceName = "org.iotivity.Interface";
+
+class TestBusObject : public ajn::BusObject
+{
+public:
+    TestBusObject(ajn::BusAttachment *bus, const char *xml) : ajn::BusObject("/Test")
+    {
+        EXPECT_EQ(ER_OK, bus->CreateInterfacesFromXml(xml));
+        const ajn::InterfaceDescription *iface = bus->GetInterface(TestInterfaceName);
+        AddInterface(*iface);
+        size_t numMembers = iface->GetMembers();
+        const ajn::InterfaceDescription::Member *members[numMembers];
+        iface->GetMembers(members, numMembers);
+        for (size_t i = 0; i < numMembers; ++i)
+        {
+            if (members[i]->memberType == ajn::MESSAGE_METHOD_CALL)
+            {
+                EXPECT_EQ(ER_OK, AddMethodHandler(members[i], static_cast<MessageReceiver::MethodHandler>(&TestBusObject::Method)));
+            }
+        }
+    }
+    virtual ~TestBusObject() { }
+    QStatus Get(const char* iface, const char* prop, ajn::MsgArg& val)
+    {
+        if (!strcmp(iface, TestInterfaceName))
+        {
+            if (!strcmp(prop, "Version"))
+            {
+                return val.Set("q", 1);
+            }
+            else if (!strcmp(prop, "Const") || !strcmp(prop, "False") || !strcmp(prop, "True") || !strcmp(prop, "Invalidates"))
+            {
+                return val.Set("q", 1);
+            }
+            else
+            {
+                return ER_BUS_NO_SUCH_PROPERTY;
+            }
+        }
+        else
+        {
+            return ER_BUS_NO_SUCH_INTERFACE;
+        }
+    }
+    void Method(const ajn::InterfaceDescription::Member *member, ajn::Message &msg)
+    {
+        if (member->name == "Error")
+        {
+            EXPECT_EQ(ER_OK, MethodReply(msg, ER_FAIL));
+        }
+        else if (member->name == "ErrorName")
+        {
+            EXPECT_EQ(ER_OK, MethodReply(msg, "org.openconnectivity.Error.Name", "Message"));
+        }
+        else if (member->name == "ErrorCode")
+        {
+            EXPECT_EQ(ER_OK, MethodReply(msg, "org.openconnectivity.Error.404", "Message"));
+        }
+        else
+        {
+            EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
+        }
+    }
+    void Signal()
+    {
+        const ajn::InterfaceDescription::Member *member = bus->GetInterface(TestInterfaceName)->GetSignal("Signal");
+        EXPECT_TRUE(member != NULL);
+        EXPECT_EQ(ER_OK, ajn::BusObject::Signal(NULL, ajn::SESSION_ID_ALL_HOSTED, *member));
+    }
+};
+
+class VirtualServer
+    : public ajn::SessionPortListener, public AJOCSetUp
 {
 protected:
-    ajn::BusAttachment *bus;
+    ajn::BusAttachment *m_bus;
+    ajn::SessionPort m_port;
+    ajn::SessionOpts m_opts;
+    ajn::SessionId m_sid;
+    TestBusObject *m_obj;
+    VirtualResource *m_resource;
     virtual void SetUp()
     {
         AJOCSetUp::SetUp();
-        bus = new ajn::BusAttachment("Producer");
-        EXPECT_EQ(ER_OK, bus->Start());
-        EXPECT_EQ(ER_OK, bus->Connect());
+        m_bus = new ajn::BusAttachment("Producer");
+        EXPECT_EQ(ER_OK, m_bus->Start());
+        EXPECT_EQ(ER_OK, m_bus->Connect());
+        m_port = ajn::SESSION_PORT_ANY;
+        EXPECT_EQ(ER_OK, m_bus->BindSessionPort(m_port, m_opts, *this));
+        ajn::SessionOpts opts;
+        EXPECT_EQ(ER_OK, m_bus->JoinSession(m_bus->GetUniqueName().c_str(), m_port, NULL, m_sid, opts));
+        m_obj = NULL;
+        m_resource = NULL;
     }
     virtual void TearDown()
     {
-        delete bus;
+        delete m_obj;
+        delete m_resource;
+        delete m_bus;
         AJOCSetUp::TearDown();
+    }
+    virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
+            const ajn::SessionOpts& opts)
+    {
+        (void) port;
+        (void) name;
+        (void) opts;
+        return true;
+    }
+    DiscoverContext *CreateAndDiscoverVirtualResource(const char *xml)
+    {
+        m_obj = new TestBusObject(m_bus, xml);
+        EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*m_obj));
+
+        CreateCallback createCB;
+        m_resource = VirtualResource::Create(m_bus, m_bus->GetUniqueName().c_str(), m_sid, m_obj->GetPath(),
+                "v16.10.00", createCB, &createCB);
+        EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+
+        DiscoverContext *context = new DiscoverContext(m_obj->GetPath());
+        Callback discoverCB(Discover, context);
+        EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "/oic/res", NULL, 0,
+                CT_DEFAULT, OC_HIGH_QOS, discoverCB, NULL, 0));
+        EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(100));
+        return context;
     }
 };
 
@@ -1519,7 +1762,7 @@ TEST_F(VirtualServer, DeviceResource)
     };
     for (size_t i = 0; i < sizeof(ifs) / sizeof(ifs[0]); ++i)
     {
-        EXPECT_EQ(ER_OK, bus->CreateInterfacesFromXml(ifs[i]));
+        EXPECT_EQ(ER_OK, m_bus->CreateInterfacesFromXml(ifs[i]));
     }
     const char *ifsOne[] = { "org.iotivity.A", "org.iotivity.B" };
     const char *ifsTwo[] = { "org.iotivity.B", "org.iotivity.C", "org.iotivity.D" };
@@ -1583,28 +1826,27 @@ TEST_F(VirtualServer, DeviceResource)
     };
     properties.mnpn = deviceNames;
     properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
-    ConfigBusObject configObj(bus, &properties);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(configObj));
+    ConfigBusObject configObj(m_bus, &properties);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
 
-    VirtualDevice *device = new VirtualDevice(bus, bus->GetUniqueName().c_str(), 0);
+    VirtualDevice *device = new VirtualDevice(m_bus, m_bus->GetUniqueName().c_str(), 0);
     device->SetProperties(&objectDescription, &aboutData);
     CreateCallback createCB;
-    VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus,
-            bus->GetUniqueName().c_str(), 0, "/Config", "v16.10.00", createCB, &createCB);
-    resource->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1));
+    m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0, "/Config",
+            "v16.10.00", createCB, &createCB);
+    ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
 
     Callback getDeviceCB(&DeviceResourceVerify, &properties);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "127.0.0.1/oic/d", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, getDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getDeviceCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getDeviceCB.Wait(100));
 
     Callback getDeviceConfigurationCB(&DeviceConfigurationResourceVerify, &properties);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "127.0.0.1/con", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, getDeviceConfigurationCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getDeviceConfigurationCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getDeviceConfigurationCB.Wait(100));
 
-    delete resource;
     delete device;
 }
 
@@ -1676,13 +1918,13 @@ TEST_F(VirtualServer, UpdateDeviceResource)
     {
         EXPECT_EQ(ER_OK, aboutData.SetAppName(before.ln[i].value, before.ln[i].language));
     }
-    ConfigBusObject configObj(bus, &before);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(configObj));
+    ConfigBusObject configObj(m_bus, &before);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
-    VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus,
-            bus->GetUniqueName().c_str(), 0, "/Config", "v16.10.00", createCB, &createCB);
-    resource->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1));
+    m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0, "/Config",
+            "v16.10.00", createCB, &createCB);
+    ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
 
     ExpectedProperties after;
     memset(&after, 0, sizeof(after));
@@ -1724,9 +1966,7 @@ TEST_F(VirtualServer, UpdateDeviceResource)
     Callback postDeviceCB(&UpdateDeviceResourceVerify, &after);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "127.0.0.1/con", NULL,
             (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, postDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postDeviceCB.Wait(1));
-
-    delete resource;
+    EXPECT_EQ(OC_STACK_OK, postDeviceCB.Wait(100));
 }
 
 static OCStackApplicationResult PlatformResourceVerify(void *ctx, OCDoHandle handle,
@@ -1862,27 +2102,26 @@ TEST_F(VirtualServer, PlatformResource)
     properties.mnpn = deviceNames;
     properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
 
-    VirtualDevice *device = new VirtualDevice(bus, "VirtualDevice", 0);
+    VirtualDevice *device = new VirtualDevice(m_bus, "VirtualDevice", 0);
     device->SetProperties(NULL, &aboutData);
-    ConfigBusObject configObj(bus, &properties);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(configObj));
+    ConfigBusObject configObj(m_bus, &properties);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
-    VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus,
-            bus->GetUniqueName().c_str(), 0, "/Config", "v16.10.00", createCB, &createCB);
-    resource->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1));
+    m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0, "/Config",
+            "v16.10.00", createCB, &createCB);
+    ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
 
     Callback getPlatformCB(&PlatformResourceVerify, &properties);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "127.0.0.1/oic/p", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, getPlatformCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getPlatformCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getPlatformCB.Wait(100));
 
     Callback getPlatformConfigurationCB(&PlatformConfigurationResourceVerify, &properties);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "127.0.0.1/con/p", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, getPlatformConfigurationCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getPlatformConfigurationCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getPlatformConfigurationCB.Wait(100));
 
-    delete resource;
     delete device;
 }
 
@@ -1935,54 +2174,565 @@ static OCStackApplicationResult RebootVerify(void *ctx, OCDoHandle handle,
 
 TEST_F(VirtualServer, MaintenanceResource)
 {
-    ConfigBusObject configObj(bus, NULL);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(configObj));
+    ConfigBusObject configObj(m_bus, NULL);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
-    VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus,
-            bus->GetUniqueName().c_str(), 0, "/Config", "v16.10.00", createCB, &createCB);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1));
+    m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0, "/Config",
+            "v16.10.00", createCB, &createCB);
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
 
     Callback getCB(&MaintenanceResourceVerify);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "127.0.0.1/oic/mnt", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
 
     OCRepPayload *payload = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "fr", true));
     Callback setFactoryResetCB(&FactoryResetVerify);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "127.0.0.1/oic/mnt", NULL,
             (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, setFactoryResetCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, setFactoryResetCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, setFactoryResetCB.Wait(100));
 
     payload = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "rb", true));
     Callback setRebootCB(&RebootVerify);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "127.0.0.1/oic/mnt", NULL,
             (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS, setRebootCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, setRebootCB.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, setRebootCB.Wait(100));
+}
 
-    delete resource;
+TEST_F(VirtualServer, AllJoynPropertiesWithTheSameEmitsChangedSignalValueAreMappedToTheSameResourceType)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='false'/>"
+            "  </property>"
+            "  <property name='True' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    struct {
+        const char *path;
+        const char *value;
+    } emitsChangedSignal[] = {
+        { "/Test/1", "const" },
+        { "/Test/1", "false" },
+        { "/Test/3", "true", },
+        { "/Test/3", "invalidates" }
+    };
+    for (size_t i = 0; i < sizeof(emitsChangedSignal) / sizeof(emitsChangedSignal[0]); ++i)
+    {
+        std::string rt = std::string("x.org.iotivity.-interface.") + emitsChangedSignal[i].value;
+        std::string uri = std::string(emitsChangedSignal[i].path) + "?rt=" + rt;
+        ResourceCallback getCB;
+        EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+                &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+        EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+        EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+        EXPECT_TRUE(getCB.m_response->payload != NULL);
+        EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+        OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+        for (OCRepPayloadValue *value = payload->values; value; value = value->next)
+        {
+            EXPECT_TRUE(strstr(value->name, emitsChangedSignal[i].value));
+        }
+    }
+
+    delete context;
+}
+
+TEST_F(VirtualServer, AllJoynPropertiesWithEmitsChangedSignalValuesOfConstOrFalseAreMappedToResourcesThatAreNotObservable)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='false'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_FALSE(context->m_resource->m_isObservable);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, AllJoynPropertiesWithEmitsChangedSignalValuesOfTrueOrInvalidatesAreMappedToResourcesThatAreObservable)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='True' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_TRUE(context->m_resource->m_isObservable);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, VersionPropertyIsAlwaysConsideredConst)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Version' type='q' access='read'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string rt = "x.org.iotivity.-interface.const";
+    std::string uri = std::string(m_obj->GetPath()) + "?rt=" + rt;
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    int64_t i;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-version", &i));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, ResourceTypesMappingAllJoynPropertiesWithAccessReadWriteShallSupportTheRWInterface)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='False' type='q' access='readwrite'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_EQ(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.r"));
+    EXPECT_NE(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.rw"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, ResourceTypesMappingAllJoynPropertiesWithAccessReadShallSupportTheRInterface)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='True' type='q' access='read'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_NE(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.r"));
+    EXPECT_EQ(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.rw"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, ResourceTypesSupportingBothTheRWAndRInterfacesShallChooseRAsTheDefaultInterface)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='False' type='q' access='readwrite'/>"
+            "  <property name='True' type='q' access='read'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_NE(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.r"));
+    EXPECT_NE(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.rw"));
+    /* TODO IoTivity always inserts oic.if.baseline as the first interface, so check below will fail: */
+    EXPECT_EQ("oic.if.rw", context->m_resource->m_ifs[0]);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, EachAllJoynMethodIsMappedToASeparateResourceType)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='MethodA'/>"
+            "  <method name='MethodB'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_NE(context->m_resource->m_rts.end(),
+            std::find(context->m_resource->m_rts.begin(), context->m_resource->m_rts.end(), "x.org.iotivity.-interface.-method-a"));
+    EXPECT_NE(context->m_resource->m_rts.end(),
+            std::find(context->m_resource->m_rts.begin(), context->m_resource->m_rts.end(), "x.org.iotivity.-interface.-method-b"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, EachAllJoynMethodResourceTypeShallSupportTheRWInterface)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='Method'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_EQ(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.r"));
+    EXPECT_NE(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.rw"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, EachArgumentOfTheAllJoynMethodIsMappedToASeparatePropertyOnTheResourceType)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='Method'>"
+            "    <arg name='InArg' type='q' direction='in'/>"
+            "    <arg name='OutArg' type='q' direction='out'/>"
+            "  </method>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodInArg"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodOutArg"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, WhenTheAllJoynMethodArgumentNameIsNotSpecified)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='Method'>"
+            "    <arg type='q' direction='in'/>"
+            "    <arg type='q' direction='out'/>"
+            "  </method>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodarg0"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodarg1"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, TheAllJoynMethodResourceTypeHasAnExtraValidityProperty)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='Method'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    bool b;
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-methodvalidity", &b));
+    EXPECT_FALSE(b);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, InAnUpdateRequestAValidityValueOfFalseShallResultInAnErrorResponse)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='Method'>"
+            "    <arg type='q' direction='in'/>"
+            "    <arg type='q' direction='out'/>"
+            "  </method>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    OCRepPayload *request = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropBool(request, "x.org.iotivity.-interface.-methodvalidity", false));
+    ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], (OCPayload *) request, CT_DEFAULT, OC_HIGH_QOS, postCB,
+            NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+
+    EXPECT_NE(OC_STACK_OK, postCB.m_response->result);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, EachAllJoynSignalIsMappedToASeparateResourceTypeOnAnObservableResource)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <signal name='Sessionless' sessionless='true'/>"
+            "  <signal name='Sessioncast' sessioncast='true'/>"
+            "  <signal name='Unicast' unicast='true'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_NE(context->m_resource->m_rts.end(),
+            std::find(context->m_resource->m_rts.begin(), context->m_resource->m_rts.end(), "x.org.iotivity.-interface.-sessionless"));
+    EXPECT_NE(context->m_resource->m_rts.end(),
+            std::find(context->m_resource->m_rts.begin(), context->m_resource->m_rts.end(), "x.org.iotivity.-interface.-sessioncast"));
+    EXPECT_NE(context->m_resource->m_rts.end(),
+            std::find(context->m_resource->m_rts.begin(), context->m_resource->m_rts.end(), "x.org.iotivity.-interface.-unicast"));
+    EXPECT_TRUE(context->m_resource->m_isObservable);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, EachAllJoynSignalResourceTypeShallSupportTheRInterface)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <signal name='Signal'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    EXPECT_NE(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.r"));
+    EXPECT_EQ(context->m_resource->m_ifs.end(),
+            std::find(context->m_resource->m_ifs.begin(), context->m_resource->m_ifs.end(), "oic.if.rw"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, EachArgumentOfTheAllJoynSignalIsMappedToASeparatePropertyOnTheResourceType)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <signal name='Signal'>"
+            "    <arg name='ArgA' type='q'/>"
+            "    <arg name='ArgB' type='q'/>"
+            "  </signal>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalArgA"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalArgB"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, WhenTheAllJoynSignalArgumentNameIsNotSpecified)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <signal name='Signal'>"
+            "    <arg type='q'/>"
+            "    <arg type='q'/>"
+            "  </signal>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalarg0"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalarg1"));
+
+    delete context;
+}
+
+TEST_F(VirtualServer, TheAllJoynSignalResourceTypeHasAnExtraValidityProperty)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <signal name='Signal'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    bool b;
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-signalvalidity", &b));
+    EXPECT_FALSE(b);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, WhenTheValuesAreSentAsPartOfANotifyResponseTheValidityPropertyIsTrue)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <signal name='Signal'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ObserveCallback observeCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(100));
+
+    observeCB.Reset();
+    m_obj->Signal();
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) observeCB.m_response->payload;
+    bool b = false;
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-signalvalidity", &b));
+    EXPECT_TRUE(b);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, WhenAnAllJoynOperationFailsTheTranslatorShallSendAnOCFErrorResponse)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='Error'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+
+    EXPECT_GT(postCB.m_response->result, OC_STACK_RESOURCE_CHANGED);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, WhenTheAllJoynErrorNameIsAvailableTheTranslatorShallConstructAnOCFErrorMessage)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='ErrorName'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+
+    EXPECT_GT(postCB.m_response->result, OC_STACK_RESOURCE_CHANGED);
+    EXPECT_TRUE(postCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DIAGNOSTIC, postCB.m_response->payload->type);
+    OCDiagnosticPayload *payload = (OCDiagnosticPayload *) postCB.m_response->payload;
+    EXPECT_STREQ("Name: Message", payload->message);
+
+    delete context;
+}
+
+TEST_F(VirtualServer, WhenTheAllJoynErrorNameIsAnErrorCodeWithoutADecimalTheErrorCodeShallBeIndicatedByTheErrorName)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <method name='ErrorCode'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath());
+    ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+
+    EXPECT_EQ(OC_STACK_NO_RESOURCE, postCB.m_response->result);
+    EXPECT_TRUE(postCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DIAGNOSTIC, postCB.m_response->payload->type);
+    OCDiagnosticPayload *payload = (OCDiagnosticPayload *) postCB.m_response->payload;
+    EXPECT_STREQ("404: Message", payload->message);
+
+    delete context;
 }
 
 class VirtualProducer
     : public ajn::SessionPortListener, public AJOCSetUp
 {
 protected:
-    ajn::BusAttachment *bus;
+    ajn::BusAttachment *m_bus;
     ajn::SessionPort m_port;
     ajn::SessionOpts m_opts;
     virtual void SetUp()
     {
         AJOCSetUp::SetUp();
-        bus = new ajn::BusAttachment("Consumer");
-        EXPECT_EQ(ER_OK, bus->Start());
-        EXPECT_EQ(ER_OK, bus->Connect());
+        m_bus = new ajn::BusAttachment("Consumer");
+        EXPECT_EQ(ER_OK, m_bus->Start());
+        EXPECT_EQ(ER_OK, m_bus->Connect());
         m_port = ajn::SESSION_PORT_ANY;
-        EXPECT_EQ(ER_OK, bus->BindSessionPort(m_port, m_opts, *this));
+        EXPECT_EQ(ER_OK, m_bus->BindSessionPort(m_port, m_opts, *this));
     }
     virtual void TearDown()
     {
-        delete bus;
+        delete m_bus;
         AJOCSetUp::TearDown();
     }
     virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
@@ -2291,65 +3041,19 @@ public:
     }
 };
 
-static OCStackApplicationResult DiscoverConfigurationResource(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
-{
-    Resource **r = (Resource **) ctx;
-    (void) handle;
-    EXPECT_EQ(OC_STACK_OK, response->result);
-    EXPECT_TRUE(response->payload != NULL);
-    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
-    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
-         payload = payload->next)
-    {
-        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-             resource = resource->next)
-        {
-            if (!strcmp(resource->uri, "/con"))
-            {
-                *r = new Resource(response->devAddr, payload->sid, resource);
-            }
-        }
-    }
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
-static OCStackApplicationResult DiscoverPlatformConfigurationResource(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
-{
-    Resource **r = (Resource **) ctx;
-    (void) handle;
-    EXPECT_EQ(OC_STACK_OK, response->result);
-    EXPECT_TRUE(response->payload != NULL);
-    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
-    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
-         payload = payload->next)
-    {
-        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-             resource = resource->next)
-        {
-            if (!strcmp(resource->uri, "/con/p"))
-            {
-                *r = new Resource(response->devAddr, payload->sid, resource);
-            }
-        }
-    }
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
 TEST_F(VirtualProducer, DeviceConfigurationProperties)
 {
     DeviceConfigurationResource deviceConfiguration;
 
-    Resource *resource = NULL;
-    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    DiscoverContext context("/con");
+    Callback discoverDeviceCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
     /* org.freedesktop.DBus.Properties */
@@ -2371,9 +3075,9 @@ TEST_F(VirtualProducer, DeviceConfigurationProperties)
     /* Mandatory properties */
     deviceConfiguration.SetMandatoryProperties();
     ajn::MsgArg arg("s", "");
-    MethodCall get(bus, proxyObj);
+    MethodCall get(m_bus, proxyObj);
     EXPECT_EQ(ER_OK, get.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
-    EXPECT_EQ(OC_STACK_OK, get.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, get.Wait(100));
     size_t numArgs;
     const ajn::MsgArg *args;
     get.Reply()->GetArgs(numArgs, args);
@@ -2382,9 +3086,9 @@ TEST_F(VirtualProducer, DeviceConfigurationProperties)
 
     /* All properties */
     deviceConfiguration.SetAllProperties();
-    MethodCall getAll(bus, proxyObj);
+    MethodCall getAll(m_bus, proxyObj);
     EXPECT_EQ(ER_OK, getAll.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
-    EXPECT_EQ(OC_STACK_OK, getAll.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getAll.Wait(100));
     getAll.Reply()->GetArgs(numArgs, args);
     EXPECT_EQ(1u, numArgs);
     EXPECT_EQ(8u, args[0].v_array.GetNumElements());
@@ -2414,15 +3118,15 @@ TEST_F(VirtualProducer, PlatformConfigurationProperties)
 {
     PlatformConfigurationResource platformConfiguration;
 
-    Resource *resource = NULL;
-    Callback discoverPlatformCB(&DiscoverPlatformConfigurationResource, &resource);
+    DiscoverContext context("/con/p");
+    Callback discoverPlatformCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverPlatformCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverPlatformCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    EXPECT_EQ(OC_STACK_OK, discoverPlatformCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
     /* org.alljoyn.Config.GetConfigurations */
@@ -2430,9 +3134,9 @@ TEST_F(VirtualProducer, PlatformConfigurationProperties)
     /* All properties (there are no mandatory properties) */
     platformConfiguration.SetAllProperties();
     ajn::MsgArg lang("s", "");
-    MethodCall getAll(bus, proxyObj);
+    MethodCall getAll(m_bus, proxyObj);
     EXPECT_EQ(ER_OK, getAll.Call("org.alljoyn.Config", "GetConfigurations", &lang, 1));
-    EXPECT_EQ(OC_STACK_OK, getAll.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getAll.Wait(100));
     size_t numArgs;
     const ajn::MsgArg *args;
     getAll.Reply()->GetArgs(numArgs, args);
@@ -2456,7 +3160,7 @@ static void ConfigurationPropertiesVerify(ConfigurationResource *configuration,
     ajn::MsgArg arg("s", "");
     MethodCall get(bus, proxyObj);
     EXPECT_EQ(ER_OK, get.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
-    EXPECT_EQ(OC_STACK_OK, get.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, get.Wait(100));
     size_t numArgs;
     const ajn::MsgArg *args;
     get.Reply()->GetArgs(numArgs, args);
@@ -2467,7 +3171,7 @@ static void ConfigurationPropertiesVerify(ConfigurationResource *configuration,
     configuration->SetAllProperties();
     MethodCall getAll(bus, proxyObj);
     EXPECT_EQ(ER_OK, getAll.Call("org.alljoyn.Config", "GetConfigurations", &arg, 1));
-    EXPECT_EQ(OC_STACK_OK, getAll.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, getAll.Wait(100));
     getAll.Reply()->GetArgs(numArgs, args);
     EXPECT_EQ(1u, numArgs);
     EXPECT_EQ(9u, args[0].v_array.GetNumElements());
@@ -2496,27 +3200,27 @@ TEST_F(VirtualProducer, ConfigurationPropertiesSameResource)
 {
     ConfigurationResource configuration;
 
-    Resource *resource = NULL;
-    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    DiscoverContext context("/con");
+    Callback discoverDeviceCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
 
-    resource->m_uri = "/oic/mnt";
-    resource->m_ifs.clear();
-    resource->m_ifs.push_back("oic.if.rw");
-    resource->m_ifs.push_back("oic.if.r");
-    resource->m_ifs.push_back("oic.if.baseline");
-    resource->m_rts.clear();
-    resource->m_rts.push_back("oic.wk.mnt");
-    obj->AddResource(*resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    context.m_resource->m_uri = "/oic/mnt";
+    context.m_resource->m_ifs.clear();
+    context.m_resource->m_ifs.push_back("oic.if.rw");
+    context.m_resource->m_ifs.push_back("oic.if.r");
+    context.m_resource->m_ifs.push_back("oic.if.baseline");
+    context.m_resource->m_rts.clear();
+    context.m_resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
-    ConfigurationPropertiesVerify(&configuration, bus, proxyObj);
+    ConfigurationPropertiesVerify(&configuration, m_bus, proxyObj);
 
     delete proxyObj;
     delete obj;
@@ -2526,36 +3230,36 @@ TEST_F(VirtualProducer, ConfigurationPropertiesDifferentResources)
 {
     ConfigurationResource configuration(true, true);
 
-    Resource *resource = NULL;
-    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    DiscoverContext context("/con");
+    Callback discoverDeviceCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
 
-    resource->m_uri = "/con/p";
-    resource->m_ifs.clear();
-    resource->m_ifs.push_back("oic.if.rw");
-    resource->m_ifs.push_back("oic.if.baseline");
-    resource->m_rts.clear();
-    resource->m_rts.push_back("oic.wk.con.p");
-    obj->AddResource(*resource);
+    context.m_resource->m_uri = "/con/p";
+    context.m_resource->m_ifs.clear();
+    context.m_resource->m_ifs.push_back("oic.if.rw");
+    context.m_resource->m_ifs.push_back("oic.if.baseline");
+    context.m_resource->m_rts.clear();
+    context.m_resource->m_rts.push_back("oic.wk.con.p");
+    obj->AddResource(*context.m_resource);
 
-    resource->m_uri = "/oic/mnt";
-    resource->m_ifs.clear();
-    resource->m_ifs.push_back("oic.if.rw");
-    resource->m_ifs.push_back("oic.if.r");
-    resource->m_ifs.push_back("oic.if.baseline");
-    resource->m_rts.clear();
-    resource->m_rts.push_back("oic.wk.mnt");
-    obj->AddResource(*resource);
+    context.m_resource->m_uri = "/oic/mnt";
+    context.m_resource->m_ifs.clear();
+    context.m_resource->m_ifs.push_back("oic.if.rw");
+    context.m_resource->m_ifs.push_back("oic.if.r");
+    context.m_resource->m_ifs.push_back("oic.if.baseline");
+    context.m_resource->m_rts.clear();
+    context.m_resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*context.m_resource);
 
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
-    ConfigurationPropertiesVerify(&configuration, bus, proxyObj);
+    ConfigurationPropertiesVerify(&configuration, m_bus, proxyObj);
 
     delete proxyObj;
     delete obj;
@@ -2575,19 +3279,19 @@ TEST_F(VirtualProducer, UpdateDeviceConfigurationProperties)
     properties.vendorValue = "value";
     DeviceConfigurationResource deviceConfiguration(&properties);
 
-    Resource *resource = NULL;
-    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    DiscoverContext context("/con");
+    Callback discoverDeviceCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
     /* org.alljoyn.Config.UpdateConfigurations */
-    MethodCall update(bus, proxyObj);
+    MethodCall update(m_bus, proxyObj);
     ajn::MsgArg elems[8];
     ajn::MsgArg *elem = elems;
     elem->Set("{sv}", "DefaultLanguage", new ajn::MsgArg("s", properties.dl));
@@ -2606,7 +3310,7 @@ TEST_F(VirtualProducer, UpdateDeviceConfigurationProperties)
     args[0].Set("s", "");
     args[1].Set("a{sv}", elem - elems, elems);
     EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
-    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(100));
 
     delete proxyObj;
     delete obj;
@@ -2623,19 +3327,19 @@ TEST_F(VirtualProducer, UpdatePlatformConfigurationProperties)
     properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
     PlatformConfigurationResource platformConfiguration(&properties);
 
-    Resource *resource = NULL;
-    Callback discoverPlatformCB(&DiscoverPlatformConfigurationResource, &resource);
+    DiscoverContext context("/con/p");
+    Callback discoverPlatformCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverPlatformCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverPlatformCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    EXPECT_EQ(OC_STACK_OK, discoverPlatformCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
     /* org.alljoyn.Config.UpdateConfigurations */
-    MethodCall update(bus, proxyObj);
+    MethodCall update(m_bus, proxyObj);
     ajn::MsgArg elems[1];
     ajn::MsgArg *elem = elems;
     elem->Set("{sv}", "DeviceName", new ajn::MsgArg("s", deviceNames[0].value));
@@ -2644,7 +3348,7 @@ TEST_F(VirtualProducer, UpdatePlatformConfigurationProperties)
     args[0].Set("s", deviceNames[0].language);
     args[1].Set("a{sv}", elem - elems, elems);
     EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
-    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(100));
 
     delete proxyObj;
     delete obj;
@@ -2669,28 +3373,28 @@ TEST_F(VirtualProducer, UpdateConfigurationPropertiesSameResource)
     properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
     ConfigurationResource configuration(true, false, &properties);
 
-    Resource *resource = NULL;
-    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    DiscoverContext context("/con");
+    Callback discoverDeviceCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
 
-    resource->m_uri = "/oic/mnt";
-    resource->m_ifs.clear();
-    resource->m_ifs.push_back("oic.if.rw");
-    resource->m_ifs.push_back("oic.if.r");
-    resource->m_ifs.push_back("oic.if.baseline");
-    resource->m_rts.clear();
-    resource->m_rts.push_back("oic.wk.mnt");
-    obj->AddResource(*resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    context.m_resource->m_uri = "/oic/mnt";
+    context.m_resource->m_ifs.clear();
+    context.m_resource->m_ifs.push_back("oic.if.rw");
+    context.m_resource->m_ifs.push_back("oic.if.r");
+    context.m_resource->m_ifs.push_back("oic.if.baseline");
+    context.m_resource->m_rts.clear();
+    context.m_resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
     /* org.alljoyn.Config.UpdateConfigurations */
-    MethodCall update(bus, proxyObj);
+    MethodCall update(m_bus, proxyObj);
     ajn::MsgArg elems[9];
     ajn::MsgArg *elem = elems;
     elem->Set("{sv}", "DefaultLanguage", new ajn::MsgArg("s", properties.dl));
@@ -2711,7 +3415,7 @@ TEST_F(VirtualProducer, UpdateConfigurationPropertiesSameResource)
     args[0].Set("s", deviceNames[0].language);
     args[1].Set("a{sv}", elem - elems, elems);
     EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
-    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(100));
 
     delete proxyObj;
     delete obj;
@@ -2736,36 +3440,36 @@ TEST_F(VirtualProducer, UpdateConfigurationPropertiesDifferentResource)
     properties.nmnpn = sizeof(deviceNames) / sizeof(deviceNames[0]);
     ConfigurationResource configuration(true, true, &properties);
 
-    Resource *resource = NULL;
-    Callback discoverDeviceCB(&DiscoverConfigurationResource, &resource);
+    DiscoverContext context("/con");
+    Callback discoverDeviceCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(1));
-    VirtualConfigBusObject *obj = new VirtualConfigBusObject(bus, *resource);
+    EXPECT_EQ(OC_STACK_OK, discoverDeviceCB.Wait(100));
+    VirtualConfigBusObject *obj = new VirtualConfigBusObject(m_bus, *context.m_resource);
 
-    resource->m_uri = "/con/p";
-    resource->m_ifs.clear();
-    resource->m_ifs.push_back("oic.if.rw");
-    resource->m_ifs.push_back("oic.if.baseline");
-    resource->m_rts.clear();
-    resource->m_rts.push_back("oic.wk.con.p");
-    obj->AddResource(*resource);
+    context.m_resource->m_uri = "/con/p";
+    context.m_resource->m_ifs.clear();
+    context.m_resource->m_ifs.push_back("oic.if.rw");
+    context.m_resource->m_ifs.push_back("oic.if.baseline");
+    context.m_resource->m_rts.clear();
+    context.m_resource->m_rts.push_back("oic.wk.con.p");
+    obj->AddResource(*context.m_resource);
 
-    resource->m_uri = "/oic/mnt";
-    resource->m_ifs.clear();
-    resource->m_ifs.push_back("oic.if.rw");
-    resource->m_ifs.push_back("oic.if.r");
-    resource->m_ifs.push_back("oic.if.baseline");
-    resource->m_rts.clear();
-    resource->m_rts.push_back("oic.wk.mnt");
-    obj->AddResource(*resource);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    context.m_resource->m_uri = "/oic/mnt";
+    context.m_resource->m_ifs.clear();
+    context.m_resource->m_ifs.push_back("oic.if.rw");
+    context.m_resource->m_ifs.push_back("oic.if.r");
+    context.m_resource->m_ifs.push_back("oic.if.baseline");
+    context.m_resource->m_rts.clear();
+    context.m_resource->m_rts.push_back("oic.wk.mnt");
+    obj->AddResource(*context.m_resource);
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/Config", 0);
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/Config", 0);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
 
     /* org.alljoyn.Config.UpdateConfigurations */
-    MethodCall update(bus, proxyObj);
+    MethodCall update(m_bus, proxyObj);
     ajn::MsgArg elems[9];
     ajn::MsgArg *elem = elems;
     elem->Set("{sv}", "DefaultLanguage", new ajn::MsgArg("s", properties.dl));
@@ -2786,7 +3490,7 @@ TEST_F(VirtualProducer, UpdateConfigurationPropertiesDifferentResource)
     args[0].Set("s", deviceNames[0].language);
     args[1].Set("a{sv}", elem - elems, elems);
     EXPECT_EQ(ER_OK, update.Call("org.alljoyn.Config", "UpdateConfigurations", args, 2));
-    EXPECT_EQ(OC_STACK_OK, update.Wait(1));
+    EXPECT_EQ(OC_STACK_OK, update.Wait(100));
 
     delete proxyObj;
     delete obj;
@@ -2836,29 +3540,6 @@ public:
     bool m_value;
 };
 
-static OCStackApplicationResult DiscoverBinarySwitchResource(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
-{
-    Resource **r = (Resource **) ctx;
-    (void) handle;
-    EXPECT_EQ(OC_STACK_OK, response->result);
-    EXPECT_TRUE(response->payload != NULL);
-    EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
-    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
-         payload = payload->next)
-    {
-        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-             resource = resource->next)
-        {
-            if (!strcmp(resource->uri, "/r0"))
-            {
-                *r = new Resource(response->devAddr, payload->sid, resource);
-            }
-        }
-    }
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
 class PropertiesChangedListener : public ajn::ProxyBusObject::PropertiesChangedListener
 {
 public:
@@ -2882,33 +3563,33 @@ TEST_F(VirtualProducer, Observe)
     BinarySwitchResource r0("/r0", OC_DISCOVERABLE | OC_OBSERVABLE);
     BinarySwitchResource r1("/r1", OC_OBSERVABLE);
 
-    Resource *resource = NULL;
-    Callback discoverCB(&DiscoverBinarySwitchResource, &resource);
+    DiscoverContext context("/r0");
+    Callback discoverCB(Discover, &context);
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "127.0.0.1/oic/res", NULL, 0,
             CT_DEFAULT, OC_HIGH_QOS, discoverCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(1));
-    VirtualBusObject *obj = new VirtualBusObject(bus, *resource);
-    resource->m_uri = "/r1";
-    obj->AddResource(*resource);
+    EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(100));
+    VirtualBusObject *obj = new VirtualBusObject(m_bus, *context.m_resource);
+    context.m_resource->m_uri = "/r1";
+    obj->AddResource(*context.m_resource);
     OCRepPayload *payload = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropBool(payload, "value", false));
     OCRepPayload *definitions = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropObject(definitions, "oic.r.switch.binary",
-            IntrospectDefinition(payload, resource->m_rts[0], resource->m_ifs)));
+            IntrospectDefinition(payload, context.m_resource->m_rts[0], context.m_resource->m_ifs)));
     std::map<std::string, Annotations> annotations;
     ParseAnnotations(definitions, annotations);
     std::map<std::string, bool> isObservable;
     isObservable["oic.r.switch.binary"] = true;
     std::map<std::string, std::string> ajNames;
-    ParseInterfaces(definitions, annotations, isObservable, bus, ajNames);
-    OCRepPayload *path = IntrospectPath(resource->m_rts, resource->m_ifs);
+    ParseInterfaces(definitions, annotations, isObservable, m_bus, ajNames);
+    OCRepPayload *path = IntrospectPath(context.m_resource->m_rts, context.m_resource->m_ifs);
     ParsePath(path, ajNames, obj);
-    EXPECT_EQ(ER_OK, bus->RegisterBusObject(*obj));
+    EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*obj));
 
     ajn::SessionId id;
     ajn::SessionOpts opts;
-    EXPECT_EQ(ER_OK, bus->JoinSession(bus->GetUniqueName().c_str(), m_port, NULL, id, opts));
-    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*bus, bus->GetUniqueName().c_str(), "/r0", id);
+    EXPECT_EQ(ER_OK, m_bus->JoinSession(m_bus->GetUniqueName().c_str(), m_port, NULL, id, opts));
+    ajn::ProxyBusObject *proxyObj = new ajn::ProxyBusObject(*m_bus, m_bus->GetUniqueName().c_str(), "/r0", id);
     EXPECT_EQ(ER_OK, proxyObj->IntrospectRemoteObject());
     PropertiesChangedListener listener;
     EXPECT_EQ(ER_OK, proxyObj->RegisterPropertiesChangedListener("oic.r.switch.binary", NULL, 0, listener, NULL));
