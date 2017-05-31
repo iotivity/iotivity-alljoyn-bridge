@@ -163,7 +163,12 @@ OCStackResult VirtualResource::CreateResource(std::string path, uint8_t props)
     OCStackResult result = ::CreateResource(&handle, path.c_str(), rt->first.c_str(),
             (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
             VirtualResource::EntityHandlerCB, this, props);
-    for (++rt; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
+    /*
+     * Note that rt is not incremented before calling OCBindResourceTypeToResource.  This is to
+     * enable binding new resource types to existing resources (such as binding "oic.d.foo" to
+     * "/oic/d").
+     */
+    for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
     {
         if (rt->second.m_props != props)
         {

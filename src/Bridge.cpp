@@ -630,7 +630,9 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
     AnnouncedContext *context;
     ajn::SessionOpts opts;
 
-    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u", this, name, version, port);
+    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,objectDescriptionArg=%s,aboutDataArg=%s", this,
+            name, version, port, objectDescriptionArg.ToString().c_str(),
+            aboutDataArg.ToString().c_str());
 
     m_mutex.lock();
     /* Ignore Announce from self */
