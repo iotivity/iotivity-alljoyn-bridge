@@ -21,9 +21,10 @@
 #ifndef _PAYLOAD_H
 #define _PAYLOAD_H
 
+#include "cacommon.h"
+#include "octypes.h"
 #include <inttypes.h>
 #include <alljoyn/MsgArg.h>
-#include "octypes.h"
 #include <map>
 #include <vector>
 

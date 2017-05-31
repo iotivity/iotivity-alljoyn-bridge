@@ -21,6 +21,8 @@
 #ifndef _PLUGIN_H
 #define _PLUGIN_H
 
+#include <inttypes.h>
+#include "cacommon.h"
 #include "octypes.h"
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>

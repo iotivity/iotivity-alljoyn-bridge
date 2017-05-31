@@ -25,6 +25,7 @@
 #include "ocpayload.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
+#include <assert.h>
 
 OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData *aboutData)
 {
@@ -36,7 +37,7 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData 
     const char **langs = new const char *[numLangs];
     aboutData->GetSupportedLanguages(langs, numLangs);
     size_t nf = aboutData->GetFields();
-    const char *fs[nf] = { 0 };
+    const char **fs = new const char *[nf];
     aboutData->GetFields(fs, nf);
 
     char *s = NULL;
@@ -141,5 +142,7 @@ exit:
             OICFree(lns);
         }
     }
+    delete[] fs;
+    delete[] langs;
     return result;
 }

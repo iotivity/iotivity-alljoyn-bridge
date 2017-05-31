@@ -21,9 +21,10 @@
 #ifndef _ABOUTDATA_H
 #define _ABOUTDATA_H
 
-#include <alljoyn/AboutData.h>
+#include "cacommon.h"
 #include "ocpayload.h"
 #include "ocrandom.h"
+#include <alljoyn/AboutData.h>
 
 class AboutData : public ajn::AboutData
 {

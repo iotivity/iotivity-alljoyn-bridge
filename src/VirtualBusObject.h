@@ -22,9 +22,9 @@
 #define _VIRTUALBUSOBJECT_H
 
 #include "Resource.h"
+#include "octypes.h"
 #include <inttypes.h>
 #include <alljoyn/BusObject.h>
-#include "octypes.h"
 #include <condition_variable>
 #include <mutex>
 #include <set>

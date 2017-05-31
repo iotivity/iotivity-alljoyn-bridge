@@ -180,13 +180,14 @@ struct VirtualConfigurationResource::MethodCallContext
     void SetLanguages(ajn::AboutData *aboutData)
     {
         size_t numLangs = aboutData->GetSupportedLanguages();
-        const char *langs[numLangs];
+        const char **langs = new const char *[numLangs];
         aboutData->GetSupportedLanguages(langs, numLangs);
         for (size_t i = 0; i < numLangs; ++i)
         {
             m_langs.push_back(langs[i]);
         }
         m_lang = m_langs.begin();
+        delete[] langs;
     }
 };
 

@@ -177,9 +177,9 @@ QStatus AboutData::GetConfigData(ajn::MsgArg* arg, const char* language)
     }
 
     size_t numFields = GetFields();
-    const char *fieldNames[numFields];
+    const char **fieldNames = new const char *[numFields];
     GetFields(fieldNames, numFields);
-    ajn::MsgArg fields[numFields];
+    ajn::MsgArg *fields = new ajn::MsgArg[numFields];
     ajn::MsgArg *field = fields;
     QStatus status = ER_OK;
     for (size_t i = 0; (status == ER_OK) && (i < numFields); ++i)
@@ -220,6 +220,8 @@ QStatus AboutData::GetConfigData(ajn::MsgArg* arg, const char* language)
             arg->Stabilize();
         }
     }
+    delete[] fields;
+    delete[] fieldNames;
     return status;
 }
 
@@ -548,7 +550,7 @@ bool AboutData::IsValid()
      * only want to add a default entry if one is not already present.
      */
     size_t numFields = GetFields();
-    const char *fields[numFields];
+    const char **fields = new const char *[numFields];
     GetFields(fields, numFields);
     /*
      * Set default mandatory values necessary for Announce to succeed when /oic/d or /oic/p not
@@ -601,6 +603,7 @@ bool AboutData::IsValid()
         uint8_t appId[16] = { 0 };
         SetAppId(appId, 16);
     }
+    delete[] fields;
     return ajn::AboutData::IsValid();
 }
 

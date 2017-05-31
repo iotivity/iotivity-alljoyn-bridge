@@ -21,6 +21,8 @@
 #ifndef _PLATFORMRESOURCE_H
 #define _PLATFORMRESOURCE_H
 
+#include <inttypes.h>
+#include "cacommon.h"
 #include "octypes.h"
 #include <alljoyn/AboutData.h>
 
