@@ -23,6 +23,7 @@
 #include "AboutData.h"
 #include "ocrandom.h"
 #include "ocstack.h"
+#include <assert.h>
 
 OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
         ajn::AboutObjectDescription *objectDescription, ajn::AboutData *aboutData,
@@ -114,7 +115,7 @@ OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
     aboutData->GetModelNumber(&s);
     OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_MODEL_NUM, s);
     size_t nf = aboutData->GetFields();
-    const char *fs[nf] = { 0 };
+    const char **fs = new const char *[nf];
     aboutData->GetFields(fs, nf);
     for (size_t i = 0; i < nf; ++i)
     {
@@ -131,6 +132,7 @@ OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
         }
     }
 
+    delete[] fs;
     delete[] langs;
     return OC_STACK_OK;
 }

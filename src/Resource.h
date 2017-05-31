@@ -21,6 +21,7 @@
 #ifndef _RESOURCE_H
 #define _RESOURCE_H
 
+#include "cacommon.h"
 #include "octypes.h"
 #include <algorithm>
 #include <map>

@@ -22,6 +22,7 @@
 
 #include "ocpayload.h"
 #include "oic_malloc.h"
+#include <assert.h>
 
 OCStackResult SetPlatformConfigurationProperties(OCRepPayload *payload, AboutData *aboutData)
 {

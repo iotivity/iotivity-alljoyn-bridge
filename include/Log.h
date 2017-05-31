@@ -21,7 +21,7 @@
 #ifndef _LOG_H
 #define _LOG_H
 
-#include <inttypes.h>
+#include "cacommon.h"
 
 #define LOG_ERR         3
 #define LOG_INFO        6

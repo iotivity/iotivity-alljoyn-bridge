@@ -24,7 +24,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 void LogWriteln(
     const char *file,

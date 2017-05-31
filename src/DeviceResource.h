@@ -21,6 +21,8 @@
 #ifndef _DEVICERESOURCE_H
 #define _DEVICERESOURCE_H
 
+#include <inttypes.h>
+#include "cacommon.h"
 #include "octypes.h"
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
