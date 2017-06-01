@@ -20,6 +20,7 @@
 
 #include "Introspection.h"
 
+#include "Interfaces.h"
 #include "Log.h"
 #include "Name.h"
 #include "Payload.h"

@@ -467,25 +467,26 @@ QStatus AboutData::Set(OCRepPayload *payload)
         arr = NULL;
     }
     double *loc = NULL;
-    if (OCRepPayloadGetDoubleArray(payload, "loc", &loc, dim) && (calcDimTotal(dim) == 2))
+    if (OCRepPayloadGetDoubleArray(payload, OC_RSRVD_LOCATION, &loc, dim) &&
+            (calcDimTotal(dim) == 2))
     {
         SetLocation(loc[0], loc[1]);
         OICFree(loc);
         loc = NULL;
     }
-    if (OCRepPayloadGetPropString(payload, "locn", &value))
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_LOCATION_NAME, &value))
     {
         SetLocationName(value);
         OICFree(value);
         value = NULL;
     }
-    if (OCRepPayloadGetPropString(payload, "c", &value))
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_CURRENCY, &value))
     {
         SetCurrency(value);
         OICFree(value);
         value = NULL;
     }
-    if (OCRepPayloadGetPropString(payload, "r", &value))
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_REGION, &value))
     {
         SetRegion(value);
         OICFree(value);

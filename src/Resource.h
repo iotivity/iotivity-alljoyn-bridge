@@ -38,6 +38,7 @@ public:
     std::vector<OCDevAddr> m_addrs;
     std::vector<Resource> m_resources;
     Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource);
+    Resource(OCRepPayload *payload);
     bool IsSecure();
 };
 
@@ -69,6 +70,5 @@ std::map<std::string, std::string> ParseQuery(const char *query);
 OCRepPayload *CreatePayload(OCResourceHandle resource, const char *query);
 bool SetResourceTypes(OCRepPayload *payload, OCResourceHandle resource);
 bool SetInterfaces(OCRepPayload *payload, OCResourceHandle resource);
-bool SetLinks(OCRepPayload *payload, OCResourceHandle *resources, uint8_t numResources);
 
 #endif

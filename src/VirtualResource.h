@@ -75,13 +75,13 @@ class VirtualResource : public ajn::ProxyBusObject
         };
         std::map<Observation, std::vector<OCObservationId>> m_observers;
         std::map<OCObservationId, std::string> m_matchRules;
-        std::vector<OCResourceHandle> m_handles;
+        OCResourceHandle m_handle;
 
         OCStackResult Create();
         uint8_t GetMethodCallFlags(const char *ifaceName);
         void IntrospectCB(ajn::Message &msg, void *ctx);
         OCStackResult CreateResources();
-        OCStackResult CreateResource(std::string path, uint8_t props);
+        OCStackResult CreateResource(OCResourceHandle *handle, std::string path, uint8_t props);
         void SignalCB(const ajn::InterfaceDescription::Member *member, const char *path,
                 ajn::Message &msg);
         void MethodReturnCB(ajn::Message &msg, void *context);
@@ -100,8 +100,6 @@ class VirtualResource : public ajn::ProxyBusObject
         OCStackResult SetMemberPayload(OCRepPayload *payload, const char *ifaceName,
                 const char *memberName);
         static OCEntityHandlerResult EntityHandlerCB(OCEntityHandlerFlag flag,
-                OCEntityHandlerRequest *request, void *context);
-        static OCEntityHandlerResult CollectionHandlerCB(OCEntityHandlerFlag flag,
                 OCEntityHandlerRequest *request, void *context);
 };
 

@@ -60,25 +60,25 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData 
     if (arg && (arg->Get("ad", &nd, &d) == ER_OK))
     {
         size_t dim[MAX_REP_ARRAY_DEPTH] = { nd, 0, 0 };
-        OCRepPayloadSetDoubleArray(payload, "loc", d, dim);
+        OCRepPayloadSetDoubleArray(payload, OC_RSRVD_LOCATION, d, dim);
     }
     arg = NULL;
     aboutData->GetField("org.openconnectivity.locn", arg);
     if (arg && (arg->Get("s", &s) == ER_OK))
     {
-        OCRepPayloadSetPropString(payload, "locn", s);
+        OCRepPayloadSetPropString(payload, OC_RSRVD_LOCATION_NAME, s);
     }
     arg = NULL;
     aboutData->GetField("org.openconnectivity.c", arg);
     if (arg && (arg->Get("s", &s) == ER_OK))
     {
-        OCRepPayloadSetPropString(payload, "c", s);
+        OCRepPayloadSetPropString(payload, OC_RSRVD_CURRENCY, s);
     }
     arg = NULL;
     aboutData->GetField("org.openconnectivity.r", arg);
     if (arg && (arg->Get("s", &s) == ER_OK))
     {
-        OCRepPayloadSetPropString(payload, "r", s);
+        OCRepPayloadSetPropString(payload, OC_RSRVD_REGION, s);
     }
     size_t lnsDim[MAX_REP_ARRAY_DEPTH] = { numLangs, 0, 0 };
     OCRepPayload **lns = NULL;

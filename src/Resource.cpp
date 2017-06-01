@@ -85,6 +85,50 @@ Resource::Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource
     m_addrs = GetDevAddrs(origin, di, resource);
 }
 
+Resource::Resource(OCRepPayload *payload)
+    : m_isObservable(false)
+{
+    char *s;
+    if (OCRepPayloadGetPropString(payload, OC_RSRVD_HREF, &s))
+    {
+        m_uri = s;
+        OICFree(s);
+    }
+    OCRepPayload *o;
+    if (OCRepPayloadGetPropObject(payload, OC_RSRVD_POLICY, &o))
+    {
+        int64_t n;
+        if (OCRepPayloadGetPropInt(o, OC_RSRVD_BITMAP, &n))
+        {
+            m_isObservable = n & OC_OBSERVABLE;
+        }
+        OCRepPayloadDestroy(o);
+    }
+    char **ss;
+    size_t dim[MAX_REP_ARRAY_DEPTH];
+    if (OCRepPayloadGetStringArray(payload, OC_RSRVD_INTERFACE, &ss, dim))
+    {
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            m_ifs.push_back(ss[i]);
+            OICFree(ss[i]);
+        }
+        OICFree(ss);
+    }
+    if (OCRepPayloadGetStringArray(payload, OC_RSRVD_RESOURCE_TYPE, &ss, dim))
+    {
+        size_t dimTotal = calcDimTotal(dim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            m_rts.push_back(ss[i]);
+            OICFree(ss[i]);
+        }
+        OICFree(ss);
+    }
+    // TODO m_addrs
+}
+
 bool Resource::IsSecure()
 {
     for (auto &addr : m_addrs)
@@ -341,51 +385,6 @@ error:
         for (uint8_t i = 0; i < n; ++i)
         {
             OICFree(array[i]);
-        }
-        OICFree(array);
-    }
-    return false;
-}
-
-bool SetLinks(OCRepPayload *payload, OCResourceHandle *resources, uint8_t numResources)
-{
-    OCRepPayload **array = NULL;
-    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0, 0, 0 };
-
-    array = (OCRepPayload **)OICCalloc(numResources, sizeof(OCRepPayload *));
-    if (!array)
-    {
-        goto error;
-    }
-    for (uint8_t i = 0; i < numResources; ++i)
-    {
-        array[i] = OCRepPayloadCreate();
-        if (!array[i])
-        {
-            goto error;
-        }
-        if (!OCRepPayloadSetPropString(array[i], OC_RSRVD_HREF, OCGetResourceUri(resources[i])) ||
-                !SetResourceTypes(array[i], resources[i]) ||
-                !SetInterfaces(array[i], resources[i]))
-        {
-            goto error;
-        }
-        // TODO eps?
-    }
-    dim[0] = numResources;
-    if (!OCRepPayloadSetPropObjectArrayAsOwner(payload, OC_RSRVD_LINKS, array, dim))
-    {
-        goto error;
-    }
-    array = NULL;
-    return true;
-
-error:
-    if (array)
-    {
-        for (uint8_t i = 0; i < numResources; ++i)
-        {
-            OCRepPayloadDestroy(array[i]);
         }
         OICFree(array);
     }

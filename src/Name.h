@@ -38,7 +38,6 @@ std::string GetMember(std::string rt);
 
 std::string NextArgName(const char *&argNames, size_t i);
 
-bool TranslateInterface(const char *ifaceName);
 bool IsValidErrorName(const char *np, const char **endp);
 
 #endif

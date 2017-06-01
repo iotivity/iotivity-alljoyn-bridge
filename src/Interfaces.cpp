@@ -18,8 +18,9 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef _INTERFACES_H
-#define _INTERFACES_H
+#include "Interfaces.h"
+
+#include <string.h>
 
 namespace ajn {
     namespace org {
@@ -57,4 +58,60 @@ namespace ajn {
     }
 }
 
-#endif /* _INTERFACES_H */
+bool IsInterfaceInWellDefinedSet(const char *name)
+{
+    const char *wellDefined[] = {
+        /* From spec */
+        "org.alljoyn.About", "org.alljoyn.Config",
+        /* OCF ASA Mapping */
+        "Environment.CurrentAirQuality", "Environment.CurrentAirQualityLevel",
+        "Environment.CurrentHumidity", "Environment.CurrentTemperature",
+        "Environment.TargetHumidity", "Environment.TargetTemperature",
+        "Environment.TargetTemperatureLevel", "Environment.WaterLevel", "Environment.WindDirection",
+        "Operation.AirRecirculationMode", "Operation.Alerts", "Operation.AudioVideoInput",
+        "Operation.AudioVolume", "Operation.BatteryStatus", "Operation.Channel",
+        "Operation.ClimateControlMode", "Operation.ClosedStatus", "Operation.CurrentPower",
+        "Operation.CycleControl", "Operation.DishWashingCyclePhase", "Operation.EnergyUsage",
+        "Operation.FanSpeedLevel", "Operation.FilterStatus", "Operation.HeatingZone",
+        "Operation.HvacFanMode", "Operation.LaundryCyclePhase", "Operation.MoistureOutputLevel",
+        "Operation.OffControl", "Operation.OnControl", "Operation.OnOffStatus",
+        "Operation.OvenCyclePhase", "Operation.PlugInUnits", "Operation.RapidMode",
+        "Operation.RemoteControllability", "Operation.RepeatMode", "Operation.ResourceSaving",
+        "Operation.RobotCleaningCyclePhase", "Operation.SoilLevel", "Operation.SpinSpeedLevel",
+        "Operation.Timer"
+    };
+    for (size_t i = 0; i < sizeof(wellDefined) / sizeof(wellDefined[0]); ++i)
+    {
+        if (!strcmp(wellDefined[i], name))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TranslateInterface(const char *name)
+{
+    const char *doNotTranslatePrefix[] = {
+        "org.alljoyn.Bus", "org.freedesktop.DBus"
+    };
+    for (size_t i = 0; i < sizeof(doNotTranslatePrefix) / sizeof(doNotTranslatePrefix[0]); ++i)
+    {
+        if (!strncmp(doNotTranslatePrefix[i], name, strlen(doNotTranslatePrefix[i])))
+        {
+            return false;
+        }
+    }
+    const char *doNotTranslate[] = {
+        "org.alljoyn.About", "org.alljoyn.Daemon", "org.alljoyn.Debug", "org.alljoyn.Icon",
+        "org.allseen.Introspectable"
+    };
+    for (size_t i = 0; i < sizeof(doNotTranslate) / sizeof(doNotTranslate[0]); ++i)
+    {
+        if (!strcmp(doNotTranslate[i], name))
+        {
+            return false;
+        }
+    }
+    return !IsInterfaceInWellDefinedSet(name);
+}

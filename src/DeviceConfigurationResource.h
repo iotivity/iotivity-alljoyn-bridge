@@ -27,6 +27,18 @@
 /** To represent device configuration resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION "oic.wk.con"
 
+/* Location */
+#define OC_RSRVD_LOCATION "loc"
+
+/* Location name */
+#define OC_RSRVD_LOCATION_NAME "locn"
+
+/* Currency */
+#define OC_RSRVD_CURRENCY "c"
+
+/* Region */
+#define OC_RSRVD_REGION "r"
+
 OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData *aboutData);
 
 #endif

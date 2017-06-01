@@ -155,17 +155,6 @@ std::string NextArgName(const char *&argNames, size_t i)
     return name.str();
 }
 
-bool TranslateInterface(const char *ifaceName)
-{
-    return !(strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.About") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Daemon") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Debug") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
-             strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
-}
-
 bool IsValidErrorName(const char *np, const char **endp)
 {
     size_t numElements = 0;

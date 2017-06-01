@@ -21,6 +21,7 @@
 #include "VirtualResource.h"
 
 #include "Bridge.h"
+#include "Interfaces.h"
 #include "Introspection.h"
 #include "Log.h"
 #include "Name.h"
@@ -66,8 +67,10 @@ VirtualResource::~VirtualResource()
 {
     LOG(LOG_INFO, "[%p] name=%s,path=%s", this, GetUniqueName().c_str(), GetPath().c_str());
 
-    for (auto &handle : m_handles)
+    OCResourceHandle handle;
+    while ((handle = OCGetResourceHandleFromCollection(m_handle, 0)))
     {
+        OCUnBindResource(m_handle, handle);
         OCDeleteResource(handle);
     }
 }
@@ -133,7 +136,8 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
     }
 }
 
-OCStackResult VirtualResource::CreateResource(std::string path, uint8_t props)
+OCStackResult VirtualResource::CreateResource(OCResourceHandle *handle, std::string path,
+        uint8_t props)
 {
     std::map<std::string, ResourceType>::iterator rt;
     /* Determine interfaces supported by matching resource types */
@@ -159,8 +163,7 @@ OCStackResult VirtualResource::CreateResource(std::string path, uint8_t props)
     {
         return OC_STACK_OK;
     }
-    OCResourceHandle handle;
-    OCStackResult result = ::CreateResource(&handle, path.c_str(), rt->first.c_str(),
+    OCStackResult result = ::CreateResource(handle, path.c_str(), rt->first.c_str(),
             (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
             VirtualResource::EntityHandlerCB, this, props);
     /*
@@ -174,16 +177,15 @@ OCStackResult VirtualResource::CreateResource(std::string path, uint8_t props)
         {
             continue;
         }
-        result = OCBindResourceTypeToResource(handle, rt->first.c_str());
+        result = OCBindResourceTypeToResource(*handle, rt->first.c_str());
     }
     if ((access & (READ | READWRITE)) == (READ | READWRITE))
     {
-        result = OCBindResourceInterfaceToResource(handle, OC_RSRVD_INTERFACE_READ_WRITE);
+        result = OCBindResourceInterfaceToResource(*handle, OC_RSRVD_INTERFACE_READ_WRITE);
     }
     if (result == OC_STACK_OK)
     {
         LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, path.c_str());
-        m_handles.push_back(handle);
     }
     else
     {
@@ -327,10 +329,16 @@ OCStackResult VirtualResource::CreateResources()
     /* Next create the resource(s) */
     if (rt == m_rts.end())
     {
-        result = CreateResource(GetPath(), OC_DISCOVERABLE | props);
+        result = CreateResource(&m_handle, GetPath(), OC_DISCOVERABLE | props);
     }
     else
     {
+        result = ::CreateResource(&m_handle, GetPath().c_str(), "oic.r.alljoynobject", OC_RSRVD_INTERFACE_LL,
+                NULL, this, OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result == OC_STACK_OK)
+        {
+            result = OCBindResourceTypeToResource(m_handle, OC_RSRVD_RESOURCE_TYPE_COLLECTION);
+        }
 #ifdef __WITH_DTLS__
         static const uint8_t ps[] = { OC_DISCOVERABLE,
                                       OC_DISCOVERABLE | OC_OBSERVABLE,
@@ -342,22 +350,19 @@ OCStackResult VirtualResource::CreateResources()
                                       OC_DISCOVERABLE | OC_OBSERVABLE,
                                     };
 #endif
-        for (size_t i = 0; i < (sizeof(ps) / sizeof(ps[0])); ++i)
+        for (size_t i = 0; (result == OC_STACK_OK) && (i < (sizeof(ps) / sizeof(ps[0]))); ++i)
         {
+            OCResourceHandle handle;
             std::string path = GetPath() + "/" + std::to_string(ps[i]);
-            result = CreateResource(path, ps[i]);
-        }
-        OCResourceHandle handle;
-        result = ::CreateResource(&handle, GetPath().c_str(), "oic.r.alljoynobject", OC_RSRVD_INTERFACE_LL,
-                VirtualResource::CollectionHandlerCB, this, OC_DISCOVERABLE | OC_OBSERVABLE);
-        if (result == OC_STACK_OK)
-        {
-            result = OCBindResourceTypeToResource(handle, OC_RSRVD_RESOURCE_TYPE_COLLECTION);
+            result = CreateResource(&handle, path, ps[i]);
+            if (result == OC_STACK_OK)
+            {
+                result = OCBindResource(m_handle, handle);
+            }
         }
         if (result == OC_STACK_OK)
         {
             LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, GetPath().c_str());
-            m_handles.push_back(handle);
         }
         else
         {
@@ -1393,96 +1398,4 @@ uint8_t VirtualResource::GetMethodCallFlags(const char *ifaceName)
         }
     }
     return flags;
-}
-
-OCEntityHandlerResult VirtualResource::CollectionHandlerCB(OCEntityHandlerFlag flag,
-        OCEntityHandlerRequest *request, void *ctx)
-{
-    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
-
-    VirtualResource *resource = reinterpret_cast<VirtualResource *>(ctx);
-    std::lock_guard<std::mutex> lock(resource->m_mutex);
-
-    OCEntityHandlerResult result = OC_EH_OK;
-    OCRepPayload *payload = NULL;
-    OCRepPayload **links = NULL;
-    size_t linksDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    OCRepPayload *link = NULL;
-    char **rtArray = NULL;
-    size_t rtDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    char **itfArray = NULL;
-    size_t itfDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    switch (request->method)
-    {
-        case OC_REST_GET:
-            {
-                OCEntityHandlerResponse response;
-                memset(&response, 0, sizeof(response));
-                response.requestHandle = request->requestHandle;
-                response.resourceHandle = request->resource;
-                payload = ::CreatePayload(request->resource, request->query);
-                if (!payload)
-                {
-                    result = OC_EH_ERROR;
-                    goto exit;
-                }
-                std::vector<OCResourceHandle> handles;
-                for (size_t i = 0; i < resource->m_handles.size(); ++i)
-                {
-                    if (resource->GetPath() == OCGetResourceUri(resource->m_handles[i]))
-                    {
-                        continue;
-                    }
-                    handles.push_back(resource->m_handles[i]);
-                }
-                if (!SetLinks(payload, &handles[0], handles.size()))
-                {
-                    result = OC_EH_ERROR;
-                    goto exit;
-                }
-                response.ehResult = result;
-                response.payload = reinterpret_cast<OCPayload *>(payload);
-                OCStackResult doResult = OCDoResponse(&response);
-                if (doResult != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
-                    result = OC_EH_ERROR;
-                    goto exit;
-                }
-                payload = NULL;
-                break;
-            }
-        default:
-            result = OC_EH_METHOD_NOT_ALLOWED;
-            break;
-    }
-
-exit:
-    if (itfArray)
-    {
-        for (size_t i = 0; i < itfDim[0]; ++i)
-        {
-            OICFree(itfArray[i]);
-        }
-        OICFree(itfArray);
-    }
-    if (rtArray)
-    {
-        for (size_t i = 0; i < rtDim[0]; ++i)
-        {
-            OICFree(rtArray[i]);
-        }
-        OICFree(rtArray);
-    }
-    OCRepPayloadDestroy(link);
-    if (links)
-    {
-        for (size_t i = 0; i < linksDim[0]; ++i)
-        {
-            OCRepPayloadDestroy(links[i]);
-        }
-        OICFree(links);
-    }
-    OCRepPayloadDestroy(payload);
-    return result;
 }

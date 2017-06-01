@@ -26,26 +26,28 @@ if env['TARGET_OS'] == 'linux':
     env_unittest = env.Clone();
     env_unittest.VariantDir('examples', '../examples')
     env_unittest.VariantDir('src', '../src')
+    common_cpp = ['examples/Log.cpp',
+                  'src/AboutData.cpp',
+                  'src/DeviceConfigurationResource.cpp',
+                  'src/DeviceResource.cpp',
+                  'src/Hash.cpp',
+                  'src/Interfaces.cpp',
+                  'src/Introspection.cpp',
+                  'src/IntrospectionParse.cpp',
+                  'src/Name.cpp',
+                  'src/Payload.cpp',
+                  'src/PlatformConfigurationResource.cpp',
+                  'src/PlatformResource.cpp',
+                  'src/Resource.cpp',
+                  'src/Signature.cpp',
+                  'src/VirtualBusObject.cpp',
+                  'src/VirtualConfigBusObject.cpp',
+                  'src/VirtualConfigurationResource.cpp',
+                  'src/VirtualDevice.cpp',
+                  'src/VirtualResource.cpp']
     unittest_cpp = ['AllJoynBridgeTest.cpp',
-                    'examples/Log.cpp',
-                    'src/AboutData.cpp',
-                    'src/DeviceConfigurationResource.cpp',
-                    'src/DeviceResource.cpp',
-                    'src/Hash.cpp',
-                    'src/Interfaces.cpp',
-                    'src/Introspection.cpp',
-                    'src/IntrospectionParse.cpp',
-                    'src/Name.cpp',
-                    'src/Payload.cpp',
-                    'src/PlatformConfigurationResource.cpp',
-                    'src/PlatformResource.cpp',
-                    'src/Resource.cpp',
-                    'src/Signature.cpp',
-                    'src/VirtualBusObject.cpp',
-                    'src/VirtualConfigBusObject.cpp',
-                    'src/VirtualConfigurationResource.cpp',
-                    'src/VirtualDevice.cpp',
-                    'src/VirtualResource.cpp',
+                    'AllJoynProducer.cpp',
+                    'UnitTest.cpp',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
     env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include',
@@ -62,5 +64,6 @@ if env['TARGET_OS'] == 'linux':
         'coap',
         'resource_directory',
         ])
-    unittest_bins = env_unittest.Program('AllJoynBridgeTest', unittest_cpp)
+    unittest_bins = [env_unittest.Program('AllJoynBridgeTest', [unittest_cpp, common_cpp]),
+                     env_unittest.Program('VirtualResourceTest', ['VirtualResourceTest.cpp', common_cpp])]
     env.Install('#/${BUILD_DIR}/bin', unittest_bins)
