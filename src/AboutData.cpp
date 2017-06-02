@@ -544,6 +544,35 @@ static bool HasField(const char **fields, size_t numFields, const char *field)
     return false;
 }
 
+const char *AboutData::GetDefaultLanguage()
+{
+    const char *lang = "";
+    size_t numFields = GetFields();
+    const char **fields = new const char *[numFields];
+    GetFields(fields, numFields);
+    if (HasField(fields, numFields, "DefaultLanguage"))
+    {
+        ajn::MsgArg *arg;
+        GetField("DefaultLanguage", arg);
+        lang = arg->v_string.str;
+    }
+    else
+    {
+        /* When DefaultLanguage has not been set use the first supported language if available. */
+        const char **langs = NULL;
+        size_t numLangs = GetSupportedLanguages();
+        langs = new const char *[numLangs];
+        GetSupportedLanguages(langs, numLangs);
+        if (numLangs > 0)
+        {
+            lang = langs[0];
+        }
+        delete[] langs;
+    }
+    delete[] fields;
+    return lang;
+}
+
 bool AboutData::IsValid()
 {
     /*
@@ -562,13 +591,16 @@ bool AboutData::IsValid()
         ajn::MsgArg arg("s", ajn::GetVersion());
         SetField("AJSoftwareVersion", arg);
     }
+    const char **langs = NULL;
+    size_t numLangs = GetSupportedLanguages();
+    langs = new const char *[numLangs];
+    GetSupportedLanguages(langs, numLangs);
     if (!HasField(fields, numFields, "DefaultLanguage"))
     {
         /* When DefaultLanguage has not been set use the first supported language if available. */
-        const char *lang;
-        if (GetSupportedLanguages(&lang, 1))
+        if (numLangs > 0)
         {
-            SetDefaultLanguage(lang);
+            SetDefaultLanguage(langs[0]);
         }
         else
         {
@@ -577,7 +609,18 @@ bool AboutData::IsValid()
     }
     if (!HasField(fields, numFields, "AppName"))
     {
-        SetAppName(m_n ? m_n : "");
+        /* AppName must be set for each supported language */
+        if (numLangs > 0)
+        {
+            for (size_t i = 0; i < numLangs; ++i)
+            {
+                SetAppName(m_n ? m_n : "", langs[i]);
+            }
+        }
+        else
+        {
+            SetAppName(m_n ? m_n : "");
+        }
     }
     if (!HasField(fields, numFields, "Description"))
     {
@@ -604,6 +647,7 @@ bool AboutData::IsValid()
         uint8_t appId[16] = { 0 };
         SetAppId(appId, 16);
     }
+    delete[] langs;
     delete[] fields;
     return ajn::AboutData::IsValid();
 }

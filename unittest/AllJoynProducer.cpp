@@ -40,6 +40,47 @@
 #include <alljoyn/BusAttachment.h>
 #include <alljoyn/SessionPortListener.h>
 
+struct ExpectedProperties
+{
+    /* oic.wk.d */
+    const char *n;
+    const char *piid;
+    const char *dmv;
+    LocalizedString *ld;
+    size_t nld;
+    const char *sv;
+    LocalizedString *dmn;
+    size_t ndmn;
+    const char *dmno;
+    /* oic.wk.con */
+    double loc[2];
+    const char *locn;
+    const char *c;
+    const char *r;
+    LocalizedString *ln;
+    size_t nln;
+    const char *dl;
+    /* oic.wk.p */
+    const char *pi;
+    const char *mnmn;
+    const char *mnml;
+    const char *mnmo;
+    const char *mndt;
+    const char *mnpv;
+    const char *mnos;
+    const char *mnhw;
+    const char *mnfv;
+    const char *mnsl;
+    const char *st;
+    const char *vid;
+    /* oic.wk.con.p */
+    LocalizedString *mnpn;
+    size_t nmnpn;
+    /* Vendor-specific */
+    const char *vendorProperty;
+    const char *vendorValue;
+};
+
 const char *TestInterfaceName = "org.iotivity.Interface";
 
 class TestBusObject : public ajn::BusObject
@@ -234,6 +275,7 @@ protected:
     ajn::SessionId m_sid;
     TestBusObject *m_obj;
     VirtualResource *m_resource;
+    virtual ~AllJoynProducer() { }
     virtual void SetUp()
     {
         AJOCSetUp::SetUp();
@@ -271,7 +313,7 @@ protected:
         CreateCallback createCB;
         m_resource = VirtualResource::Create(m_bus, m_bus->GetUniqueName().c_str(), m_sid,
                 m_obj->GetPath(), "v16.10.00", createCB, &createCB);
-        EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+        EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
         return DiscoverVirtualResource(m_obj->GetPath());
     }
@@ -281,7 +323,7 @@ protected:
         Callback discoverCB(Discover, context);
         EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "/oic/res", NULL, 0,
                 CT_DEFAULT, OC_HIGH_QOS, discoverCB, NULL, 0));
-        EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(100));
+        EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(1000));
         return context;
     }
 };
@@ -359,7 +401,7 @@ TEST_F(AllJoynProducer, WhenAllJoynInterfacesCannotBeTranslatedToResourceTypesOn
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -372,7 +414,8 @@ TEST_F(AllJoynProducer, WhenAllJoynInterfacesCannotBeTranslatedToResourceTypesOn
     EXPECT_EQ(2u, dimTotal);
     for (size_t i = 0; i < dimTotal; ++i)
     {
-        Resource resource(arr[i]);
+        OCResourcePayload *rp = ParseLink(arr[i]);
+        Resource resource(getCB.m_response->devAddr, context->m_device->m_di.c_str(), rp);
         if (resource.m_isObservable)
         {
             EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
@@ -519,7 +562,7 @@ TEST_F(AllJoynProducer, AllJoynPropertiesWithTheSameEmitsChangedSignalValueAreMa
         ResourceCallback getCB;
         EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
                 &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-        EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+        EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
         EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
         EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -583,7 +626,7 @@ TEST_F(AllJoynProducer, VersionPropertyIsAlwaysConsideredConst)
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -704,7 +747,7 @@ TEST_F(AllJoynProducer, EachArgumentOfTheAllJoynMethodIsMappedToASeparatePropert
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -732,7 +775,7 @@ TEST_F(AllJoynProducer, WhenTheAllJoynMethodArgumentNameIsNotSpecified)
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -757,7 +800,7 @@ TEST_F(AllJoynProducer, TheAllJoynMethodResourceTypeHasAnExtraValidityProperty)
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -789,7 +832,7 @@ TEST_F(AllJoynProducer, InAnUpdateRequestAValidityValueOfFalseShallResultInAnErr
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) request, CT_DEFAULT, OC_HIGH_QOS,
             postCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
 
     EXPECT_NE(OC_STACK_OK, postCB.m_response->result);
 
@@ -853,7 +896,7 @@ TEST_F(AllJoynProducer, EachArgumentOfTheAllJoynSignalIsMappedToASeparatePropert
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -881,7 +924,7 @@ TEST_F(AllJoynProducer, WhenTheAllJoynSignalArgumentNameIsNotSpecified)
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -906,7 +949,7 @@ TEST_F(AllJoynProducer, TheAllJoynSignalResourceTypeHasAnExtraValidityProperty)
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -931,7 +974,7 @@ TEST_F(AllJoynProducer, WhenTheValuesAreSentAsPartOfANotifyResponseTheValidityPr
     ObserveCallback observeCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
 
     observeCB.Reset();
     m_obj->Signal();
@@ -960,7 +1003,7 @@ TEST_F(AllJoynProducer, WhenAnAllJoynOperationFailsTheTranslatorShallSendAnOCFEr
     ResourceCallback postCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
 
     EXPECT_GT(postCB.m_response->result, OC_STACK_RESOURCE_CHANGED);
 
@@ -979,7 +1022,7 @@ TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAvailableTheTranslatorShallCons
     ResourceCallback postCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
 
     EXPECT_GT(postCB.m_response->result, OC_STACK_RESOURCE_CHANGED);
     EXPECT_TRUE(postCB.m_response->payload != NULL);
@@ -1002,7 +1045,7 @@ TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAnErrorCodeWithoutADecimalTheEr
     ResourceCallback postCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_NO_RESOURCE, postCB.m_response->result);
     EXPECT_TRUE(postCB.m_response->payload != NULL);
@@ -1109,7 +1152,7 @@ TEST_F(AllJoynProducer, OCFDeviceProperties)
     ResourceCallback getDeviceCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getDeviceCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getDeviceCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getDeviceCB.m_response->result);
     EXPECT_TRUE(getDeviceCB.m_response->payload != NULL);
@@ -1186,7 +1229,7 @@ TEST_F(AllJoynProducer, OCFDeviceConfigurationProperties)
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
             "/Config", "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
     /* Get /con */
     DiscoverContext *context = DiscoverVirtualResource("/con");
@@ -1195,7 +1238,7 @@ TEST_F(AllJoynProducer, OCFDeviceConfigurationProperties)
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getDeviceConfigurationCB,
             NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getDeviceConfigurationCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getDeviceConfigurationCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getDeviceConfigurationCB.m_response->result);
     EXPECT_TRUE(getDeviceConfigurationCB.m_response->payload != NULL);
@@ -1268,7 +1311,7 @@ TEST_F(AllJoynProducer, UpdateOCFDeviceConfigurationProperties)
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
             "/Config", "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
     ExpectedProperties after;
     memset(&after, 0, sizeof(after));
@@ -1316,7 +1359,7 @@ TEST_F(AllJoynProducer, UpdateOCFDeviceConfigurationProperties)
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
             postDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postDeviceCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, postDeviceCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postDeviceCB.m_response->result);
     EXPECT_TRUE(postDeviceCB.m_response->payload != NULL);
@@ -1415,7 +1458,7 @@ TEST_F(AllJoynProducer, OCFPlatformProperties)
     ResourceCallback getPlatformCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getPlatformCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getPlatformCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getPlatformCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getPlatformCB.m_response->result);
     EXPECT_TRUE(getPlatformCB.m_response->payload != NULL);
@@ -1478,7 +1521,7 @@ TEST_F(AllJoynProducer, OCFPlatformConfigurationProperties)
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
             "/Config", "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
     /* Get /con/p */
     DiscoverContext *context = DiscoverVirtualResource("/con/p");
@@ -1487,7 +1530,7 @@ TEST_F(AllJoynProducer, OCFPlatformConfigurationProperties)
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getPlatformConfigurationCB,
             NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getPlatformConfigurationCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getPlatformConfigurationCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getPlatformConfigurationCB.m_response->result);
     EXPECT_TRUE(getPlatformConfigurationCB.m_response->payload != NULL);
@@ -1536,7 +1579,7 @@ TEST_F(AllJoynProducer, UpdateOCFPlatformConfigurationProperties)
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
             "/Config", "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
     ExpectedProperties after;
     memset(&after, 0, sizeof(after));
@@ -1567,7 +1610,7 @@ TEST_F(AllJoynProducer, UpdateOCFPlatformConfigurationProperties)
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
             postDeviceCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, postDeviceCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, postDeviceCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postDeviceCB.m_response->result);
     EXPECT_TRUE(postDeviceCB.m_response->payload != NULL);
@@ -1596,7 +1639,7 @@ TEST_F(AllJoynProducer, MaintenanceResource)
     CreateCallback createCB;
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
             "/Config", "v16.10.00", createCB, &createCB);
-    EXPECT_EQ(OC_STACK_OK, createCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
     DiscoverContext *context = DiscoverVirtualResource("/oic/mnt");
 
@@ -1604,7 +1647,7 @@ TEST_F(AllJoynProducer, MaintenanceResource)
     ResourceCallback getCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, getCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     EXPECT_TRUE(getCB.m_response->payload != NULL);
@@ -1623,7 +1666,7 @@ TEST_F(AllJoynProducer, MaintenanceResource)
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
             setFactoryResetCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, setFactoryResetCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, setFactoryResetCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, setFactoryResetCB.m_response->result);
     EXPECT_TRUE(setFactoryResetCB.m_response->payload != NULL);
@@ -1639,7 +1682,7 @@ TEST_F(AllJoynProducer, MaintenanceResource)
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, context->m_resource->m_uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
             setRebootCB, NULL, 0));
-    EXPECT_EQ(OC_STACK_OK, setRebootCB.Wait(100));
+    EXPECT_EQ(OC_STACK_OK, setRebootCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, setRebootCB.m_response->result);
     EXPECT_TRUE(setRebootCB.m_response->payload != NULL);

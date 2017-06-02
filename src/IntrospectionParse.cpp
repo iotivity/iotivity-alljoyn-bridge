@@ -20,10 +20,16 @@
 
 #include "Introspection.h"
 
+#include "DeviceConfigurationResource.h"
+#include "Interfaces.h"
 #include "Log.h"
 #include "Name.h"
 #include "Payload.h"
+#include "PlatformConfigurationResource.h"
+#include "Resource.h"
+#include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
+#include "VirtualConfigBusObject.h"
 #include "ocpayload.h"
 #include "oic_malloc.h"
 #include <alljoyn/InterfaceDescription.h>
@@ -301,7 +307,11 @@ static void AddInterface(const char *refValue, std::map<std::string, std::string
     const char *def = GetRefDefinition(refValue);
     if (def && ajNames.find(def) != ajNames.end())
     {
-        obj->AddInterface(ajNames[def].c_str());
+        const char *rt = ajNames[def].c_str();
+        if (TranslateResourceType(rt))
+        {
+            obj->AddInterface(rt);
+        }
     }
     else
     {
@@ -338,7 +348,11 @@ static void AddInterface(OCRepPayload *schema, std::map<std::string, std::string
     }
 }
 
-void ParseAnnotations(const OCRepPayload *definitions,
+/*
+ * @param[in] definitions definitions of OC introspection data.
+ * @param[out] annotations map from definition name to AJ annotations
+ */
+static void ParseAnnotations(const OCRepPayload *definitions,
         std::map<std::string, Annotations> &annotations)
 {
     for (OCRepPayloadValue *definition = definitions->values; definition;
@@ -421,7 +435,14 @@ void ParseAnnotations(const OCRepPayload *definitions,
     }
 }
 
-void ParseInterfaces(const OCRepPayload *definitions,
+/*
+ * @param[in] definitions the definitions of the OC introspection data.
+ * @param[in] annotations a map from definition name to AJ annotations.
+ * @param[in] isObservable a map from rt name to observable flag.
+ * @param[in,out] bus the bus to create AJ interfaces on.
+ * @param[out] ajNames a map from definition name to interface name.
+ */
+static void ParseInterfaces(const OCRepPayload *definitions,
         std::map<std::string, Annotations> &annotations, std::map<std::string, bool> &isObservable,
         ajn::BusAttachment *bus, std::map<std::string, std::string> &ajNames)
 {
@@ -509,9 +530,13 @@ void ParseInterfaces(const OCRepPayload *definitions,
 }
 
 /*
- * Note: obj must be a VirtualBusObject (and not an ajn::BusObject) as AddInterface is protected.
+ * @param[in] path a path of the OC introspection data.
+ * @param[in] ajNames a map from definition name to interface name.
+ * @param[in,out] obj the AJ bus object to add interfaces to.
+ *
+ * @note obj must be a VirtualBusObject (and not an ajn::BusObject) as AddInterface is protected.
  */
-void ParsePath(OCRepPayload *path, std::map<std::string, std::string> &ajNames,
+static void ParsePath(OCRepPayload *path, std::map<std::string, std::string> &ajNames,
         VirtualBusObject *obj)
 {
     for (OCRepPayloadValue *method = path->values; method; method = method->next)
@@ -573,4 +598,142 @@ void ParsePath(OCRepPayload *path, std::map<std::string, std::string> &ajNames,
             }
         }
     }
+}
+
+bool ParseIntrospectionPayload(Device *device, VirtualBusAttachment *bus,
+        const OCRepPayload *payload)
+{
+    OCRepPayload *definitions = NULL;
+    OCRepPayload *paths = NULL;
+    Resource *resource;
+    std::map<std::string, bool> isObservable;
+    std::map<std::string, Annotations> annotations;
+    std::map<std::string, std::string> ajNames;
+    QStatus status;
+    bool success = false;
+
+    /*
+     * Figure out which resource types are observable so that the properties can be annotated with
+     * the correct EmitsChanged value.  On the OC side it is resources that are observable, not
+     * resource types.  So in the worst case where a resource type is used by two resources, one of
+     * which is observable and one which is not, we set EmitsChanged to false.
+     */
+    for (auto &r : device->m_resources)
+    {
+        for (auto &rt : r.m_rts)
+        {
+            if (isObservable.find(rt) == isObservable.end())
+            {
+                isObservable[rt] = r.m_isObservable;
+            }
+            else
+            {
+                isObservable[rt] = isObservable[rt] && r.m_isObservable;
+            }
+        }
+    }
+
+    /*
+     * Create AJ interfaces from OC definitions.  Look for annotations first since they will be
+     * needed by interface definitions.
+     */
+    if (!OCRepPayloadGetPropObject(payload, "definitions", &definitions))
+    {
+        goto exit;
+    }
+    ParseAnnotations(definitions, annotations);
+    ParseInterfaces(definitions, annotations, isObservable, bus, ajNames);
+    OCRepPayloadDestroy(definitions);
+    definitions = NULL;
+
+    /*
+     * Create virtual bus objects from OC paths.
+     */
+    if (!OCRepPayloadGetPropObject(payload, "paths", &paths))
+    {
+        goto exit;
+    }
+    for (std::vector<Resource>::iterator it = device->m_resources.begin();
+         it != device->m_resources.end(); ++it)
+    {
+        const char *uri = it->m_uri.c_str();
+        OCRepPayload *path = NULL;
+        if (!OCRepPayloadGetPropObject(paths, uri, &path))
+        {
+            continue;
+        }
+        if (!strcmp(uri, "/oic/d") || !strcmp(uri, "/oic/p"))
+        {
+            /* These resources are not translated on-the-fly */
+        }
+        else if (HasResourceType(it->m_rts, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION) ||
+                HasResourceType(it->m_rts, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION) ||
+                !strcmp(uri, "/oic/mnt"))
+        {
+            VirtualBusObject *obj = bus->GetBusObject("/Config");
+            if (!obj)
+            {
+                obj = new VirtualConfigBusObject(bus, *it);
+                status = bus->RegisterBusObject(obj);
+                if (status != ER_OK)
+                {
+                    delete obj;
+                }
+            }
+            else
+            {
+                obj->AddResource(*it);
+            }
+        }
+        else
+        {
+            VirtualBusObject *obj = new VirtualBusObject(bus, *it);
+            ParsePath(path, ajNames, obj);
+            for (std::vector<Resource>::iterator jt = it->m_resources.begin();
+                 jt != it->m_resources.end(); ++jt)
+            {
+                OCRepPayload *childPath = NULL;
+                if (!OCRepPayloadGetPropObject(paths, jt->m_uri.c_str(), &childPath))
+                {
+                    continue;
+                }
+                ParsePath(childPath, ajNames, obj);
+                OCRepPayloadDestroy(childPath);
+            }
+            status = bus->RegisterBusObject(obj);
+            if (status != ER_OK)
+            {
+                delete obj;
+            }
+        }
+        OCRepPayloadDestroy(path);
+    }
+    OCRepPayloadDestroy(paths);
+    paths = NULL;
+
+    /* Done */
+    resource = device->GetResourceUri(OC_RSRVD_DEVICE_URI);
+    if (resource)
+    {
+        VirtualBusObject *obj = new VirtualBusObject(bus, *resource);
+        for (auto &rt : resource->m_rts)
+        {
+            if (TranslateResourceType(rt.c_str()))
+            {
+                obj->AddInterface(ToAJName(rt).c_str(), true);
+            }
+        }
+        obj->AddInterface(ToAJName("oic.d.virtual").c_str(), true);
+        status = bus->RegisterBusObject(obj);
+        if (status != ER_OK)
+        {
+            delete obj;
+        }
+    }
+    success = true;
+
+exit:
+    OCRepPayloadDestroy(paths);
+    OCRepPayloadDestroy(definitions);
+    return success;
 }

@@ -22,6 +22,7 @@
 
 #include "Log.h"
 #include "Payload.h"
+#include "Plugin.h"
 #include "ocpayload.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
@@ -44,7 +45,7 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData 
     aboutData->GetDefaultLanguage(&s);
     if (s)
     {
-        OCRepPayloadSetPropString(payload, "dl", s);
+        OCRepPayloadSetPropString(payload, OC_RSRVD_DEFAULT_LANGUAGE, s);
     }
     char *name = NULL;
     aboutData->GetAppName(&name);
@@ -108,7 +109,7 @@ OCStackResult SetDeviceConfigurationProperties(OCRepPayload *payload, AboutData 
                 LOG(LOG_INFO, "Invalid AboutData - missing AppName in supported language");
             }
         }
-        if (!OCRepPayloadSetPropObjectArrayAsOwner(payload, "ln", lns, lnsDim))
+        if (!OCRepPayloadSetPropObjectArrayAsOwner(payload, OC_RSRVD_DEVICE_NAME_LOCALIZED, lns, lnsDim))
         {
             goto exit;
         }

@@ -35,7 +35,17 @@ public:
     AboutData(const ajn::MsgArg *arg, const char *language);
     QStatus CreateFromMsgArg(const ajn::MsgArg *arg, const char* language);
     QStatus GetConfigData(ajn::MsgArg* arg, const char* language);
+    /**
+     * Returns the value of the DefaultLanguage field.
+     */
     QStatus GetDefaultLanguage(char** defaultLanguage);
+    /**
+     * Returns the announced DefaultLanguage which may be one of:
+     * - the DefaultLanguage field, or
+     * - the first SupportedLanguages field when DefaultLanguage is not present, or
+     * - the empty string when neither DefaultLanguage nor SupportedLanguage is present.
+     */
+    const char *GetDefaultLanguage();
     QStatus Set(OCRepPayload *payload);
     QStatus SetSupportedLanguage(const char* language);
     QStatus SetProtocolIndependentId(const char* piid);

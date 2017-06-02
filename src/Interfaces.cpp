@@ -20,6 +20,9 @@
 
 #include "Interfaces.h"
 
+#include "DeviceConfigurationResource.h"
+#include "PlatformConfigurationResource.h"
+#include "octypes.h"
 #include <string.h>
 
 namespace ajn {
@@ -90,6 +93,30 @@ bool IsInterfaceInWellDefinedSet(const char *name)
     return false;
 }
 
+bool IsResourceTypeInWellDefinedSet(const char *name)
+{
+    const char *wellDefined[] = {
+        /* From spec */
+        OC_RSRVD_RESOURCE_TYPE_DEVICE, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION,
+        OC_RSRVD_RESOURCE_TYPE_MAINTENANCE, OC_RSRVD_RESOURCE_TYPE_PLATFORM,
+        OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION,
+        /* OCF ASA Mapping */
+        "oic.r.airflow", "oic.r.airqualitycollection", "oic.r.audio", "oic.r.door", "oic.r.ecomode",
+        "oic.r.energy.battery", "oic.r.energy.usage", "oic.r.heatingzonecollection",
+        "oic.r.humidity", "oic.r.humidity", "oic.r.icemaker", "oic.r.media.input", "oic.r.mode",
+        "oic.r.operational.state", "oic.r.operationalstate", "oic.r.refrigeration", "oic.r.scanner",
+        "oic.r.selectablelevels", "oic.r.switch.binary", "oic.r.temperature", "oic.r.time.period"
+    };
+    for (size_t i = 0; i < sizeof(wellDefined) / sizeof(wellDefined[0]); ++i)
+    {
+        if (!strcmp(wellDefined[i], name))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool TranslateInterface(const char *name)
 {
     const char *doNotTranslatePrefix[] = {
@@ -114,4 +141,23 @@ bool TranslateInterface(const char *name)
         }
     }
     return !IsInterfaceInWellDefinedSet(name);
+}
+
+bool TranslateResourceType(const char *name)
+{
+    const char *doNotTranslate[] = {
+        "oic.d.bridge",
+        OC_RSRVD_RESOURCE_TYPE_COLLECTION, OC_RSRVD_RESOURCE_TYPE_INTROSPECTION,
+        OC_RSRVD_RESOURCE_TYPE_RD, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH, OC_RSRVD_RESOURCE_TYPE_RES,
+        "oic.r.alljoynobject", "oic.r.acl", "oic.r.acl2", "oic.r.amacl", "oic.r.cred", "oic.r.doxm",
+        "oic.r.pstat", "oic.r.securemode"
+    };
+    for (size_t i = 0; i < sizeof(doNotTranslate) / sizeof(doNotTranslate[0]); ++i)
+    {
+        if (!strcmp(doNotTranslate[i], name))
+        {
+            return false;
+        }
+    }
+    return !IsResourceTypeInWellDefinedSet(name);
 }

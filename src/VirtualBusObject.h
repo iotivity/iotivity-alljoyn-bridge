@@ -30,11 +30,13 @@
 #include <set>
 #include <vector>
 
+class VirtualBusAttachment;
+
 class VirtualBusObject : public ajn::BusObject
 {
     public:
-        VirtualBusObject(ajn::BusAttachment *bus, Resource &resource);
-        VirtualBusObject(ajn::BusAttachment *bus, const char *path, Resource &resource);
+        VirtualBusObject(VirtualBusAttachment *bus, Resource &resource);
+        VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource);
         virtual ~VirtualBusObject();
         void AddResource(Resource &resource);
         QStatus AddInterface(const char *ifaceName, bool createEmptyInterface = false);
@@ -47,8 +49,10 @@ class VirtualBusObject : public ajn::BusObject
                 OCRepPayload *payload, void *context);
 
         std::mutex m_mutex;
+        VirtualBusAttachment *m_bus;
         std::vector<Resource> m_resources;
 
+        void Observe(Resource &resource);
         virtual void GetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
         virtual void SetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
         virtual void GetAllProps(const ajn::InterfaceDescription::Member *member,
@@ -62,7 +66,6 @@ class VirtualBusObject : public ajn::BusObject
         class ObserveContext;
 
         std::condition_variable m_cond;
-        ajn::BusAttachment *m_bus;
         std::set<ObserveContext *> m_observes;
         size_t m_pending;
 

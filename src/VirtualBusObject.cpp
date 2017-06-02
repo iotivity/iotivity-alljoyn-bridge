@@ -24,7 +24,7 @@
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
-#include <alljoyn/BusAttachment.h>
+#include "VirtualBusAttachment.h"
 #include "ocpayload.h"
 #include "ocstack.h"
 #include <algorithm>
@@ -65,14 +65,14 @@ public:
     OCDoHandle m_handle;
 };
 
-VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, Resource &resource)
+VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, Resource &resource)
     : ajn::BusObject(resource.m_uri.c_str()), m_bus(bus), m_pending(0)
 {
     LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, resource.m_uri.c_str());
     m_resources.push_back(resource);
 }
 
-VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, const char *path, Resource &resource)
+VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource)
     : ajn::BusObject(path), m_bus(bus), m_pending(0)
 {
     LOG(LOG_INFO, "[%p] bus=%p,path=%s", this, bus, path);
@@ -147,34 +147,45 @@ void VirtualBusObject::Observe()
     LOG(LOG_INFO, "[%p]", this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto &resource : m_resources)
+    for (auto &parent : m_resources)
     {
-        if (!resource.m_isObservable)
+        Observe(parent);
+        for (auto &child : parent.m_resources)
         {
-            continue;
+            Observe(child);
         }
-        for (auto &rt : resource.m_rts)
+    }
+}
+
+/* Called with m_mutex held. */
+void VirtualBusObject::Observe(Resource &resource)
+{
+    if (!resource.m_isObservable)
+    {
+        return;
+    }
+    for (auto &rt : resource.m_rts)
+    {
+        std::string uri = resource.m_uri;
+        if (resource.m_rts.size() > 1)
         {
-            std::string uri = resource.m_uri;
-            if (resource.m_rts.size() > 1)
-            {
-                uri += std::string("?rt=") + rt;
-            }
-            ObserveContext *context = new ObserveContext(this, ToAJName(rt));
-            OCCallbackData cbData;
-            cbData.cb = VirtualBusObject::ObserveCB;
-            cbData.context = context;
-            cbData.cd = ObserveContext::Deleter;
-            OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(),
-                    resource.m_addrs, NULL, &cbData, NULL, 0);
-            if (result == OC_STACK_OK)
-            {
-                m_observes.insert(context);
-            }
-            else
-            {
-                LOG(LOG_ERR, "DoResource - %d", result);
-            }
+            uri += std::string("?rt=") + rt;
+        }
+        ObserveContext *context = new ObserveContext(this, ToAJName(rt));
+        OCCallbackData cbData;
+        cbData.cb = VirtualBusObject::ObserveCB;
+        cbData.context = context;
+        cbData.cd = ObserveContext::Deleter;
+        LOG(LOG_INFO, "[%p] Observe uri=%s", this, uri.c_str());
+        OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(),
+                resource.m_addrs, NULL, &cbData, NULL, 0);
+        if (result == OC_STACK_OK)
+        {
+            m_observes.insert(context);
+        }
+        else
+        {
+            LOG(LOG_ERR, "DoResource - %d", result);
         }
     }
 }
@@ -236,6 +247,7 @@ void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, 
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<Resource>::iterator resource;
     std::string uri;
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
     if (m_resources.size() > 1)
     {
         goto error;
@@ -244,6 +256,14 @@ void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, 
     if (resource == m_resources.end())
     {
         goto error;
+    }
+    if (!resource->m_resources.empty())
+    {
+        resource = FindResourceFromType(resource->m_resources, ToOCName(ifaceName));
+        if (resource == resource->m_resources.end())
+        {
+            goto error;
+        }
     }
     uri = resource->m_uri;
     if (resource->m_rts.size() > 1)
@@ -291,8 +311,9 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     std::vector<Resource>::iterator resource;
     std::string uri;
     OCRepPayload *payload;
-    const char *name;
-    const ajn::MsgArg *arg;
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
+    const char *propName = msg->GetArg(1)->v_string.str;
+    const ajn::MsgArg *arg = msg->GetArg(2);
     if (m_resources.size() > 1)
     {
         goto error;
@@ -302,11 +323,17 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     {
         goto error;
     }
+    if (!resource->m_resources.empty())
+    {
+        resource = FindResourceFromType(resource->m_resources, ToOCName(ifaceName));
+        if (resource == resource->m_resources.end())
+        {
+            goto error;
+        }
+    }
     uri = resource->m_uri;
     payload = OCRepPayloadCreate();
-    name = msg->GetArg(1)->v_string.str;
-    arg = msg->GetArg(2);
-    ToOCPayload(payload, name, arg, arg->Signature().c_str());
+    ToOCPayload(payload, propName, arg, arg->Signature().c_str());
     DoResource(OC_REST_POST, uri, resource->m_addrs, payload, msg, &VirtualBusObject::SetPropCB);
     return;
 
@@ -340,6 +367,7 @@ void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *memb
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<Resource>::iterator resource;
     std::string uri;
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
     if (m_resources.size() > 1)
     {
         goto error;
@@ -348,6 +376,14 @@ void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *memb
     if (resource == m_resources.end())
     {
         goto error;
+    }
+    if (!resource->m_resources.empty())
+    {
+        resource = FindResourceFromType(resource->m_resources, ToOCName(ifaceName));
+        if (resource == resource->m_resources.end())
+        {
+            goto error;
+        }
     }
     uri = resource->m_uri;
     if (resource->m_rts.size() > 1)

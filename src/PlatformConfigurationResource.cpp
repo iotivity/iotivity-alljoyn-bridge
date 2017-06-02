@@ -75,5 +75,6 @@ exit:
             OICFree(mnpns);
         }
     }
+    delete[] langs;
     return result;
 }

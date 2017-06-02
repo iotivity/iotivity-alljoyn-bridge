@@ -38,8 +38,19 @@ public:
     std::vector<OCDevAddr> m_addrs;
     std::vector<Resource> m_resources;
     Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource);
-    Resource(OCRepPayload *payload);
     bool IsSecure();
+};
+
+class Device
+{
+public:
+    std::string m_di;
+    std::vector<Resource> m_resources;
+    Device(OCDevAddr origin, OCDiscoveryPayload *payload);
+    Resource *GetResourceUri(const char *uri);
+    Resource *GetResourceType(const char *rt);
+    bool IsVirtual();
+    bool SetCollectionLinks(std::string collectionUri, OCRepPayload *payload);
 };
 
 template <typename T>
@@ -66,6 +77,7 @@ OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
 
 bool IsValidRequest(OCEntityHandlerRequest *request);
 std::map<std::string, std::string> ParseQuery(const char *query);
+OCResourcePayload *ParseLink(OCRepPayload *payload);
 
 OCRepPayload *CreatePayload(OCResourceHandle resource, const char *query);
 bool SetResourceTypes(OCRepPayload *payload, OCResourceHandle resource);

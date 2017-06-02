@@ -77,8 +77,7 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, boo
     : ajn::BusAttachment(di), m_di(di), m_isVirtual(isVirtual), m_aboutData(NULL),
     m_port(ajn::SESSION_PORT_ANY), m_numSessions(0), m_aboutObj(NULL)
 {
-    LOG(LOG_INFO, "[%p] di=%s,piid=%s,isVirtual=%d",
-            this, di, piid, isVirtual);
+    LOG(LOG_INFO, "[%p] di=%s,piid=%s,isVirtual=%d", this, di, piid, isVirtual);
 
     if (piid)
     {
@@ -90,8 +89,7 @@ VirtualBusAttachment::VirtualBusAttachment(const char *di, const char *piid, boo
 
 VirtualBusAttachment::~VirtualBusAttachment()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     delete m_aboutObj;
@@ -125,10 +123,15 @@ void VirtualBusAttachment::SetAboutData(OCRepPayload *payload)
     m_aboutData.Set(payload);
 }
 
+const char *VirtualBusAttachment::GetDefaultLanguage()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_aboutData.GetDefaultLanguage();
+}
+
 QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject)
 {
-    LOG(LOG_INFO, "[%p] busObject=%p",
-        this, busObject);
+    LOG(LOG_INFO, "[%p] busObject=%p", this, busObject);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     QStatus status = ajn::BusAttachment::RegisterBusObject(*busObject);
@@ -157,8 +160,7 @@ VirtualBusObject *VirtualBusAttachment::GetBusObject(const char *path)
 
 QStatus VirtualBusAttachment::Announce()
 {
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_aboutData.IsValid())
@@ -173,8 +175,7 @@ bool VirtualBusAttachment::AcceptSessionJoiner(ajn::SessionPort port, const char
         const ajn::SessionOpts &opts)
 {
     (void) opts;
-    LOG(LOG_INFO, "[%p] port=%d,name=%s",
-        this, port, name);
+    LOG(LOG_INFO, "[%p] port=%d,name=%s", this, port, name);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     return true;
@@ -182,11 +183,10 @@ bool VirtualBusAttachment::AcceptSessionJoiner(ajn::SessionPort port, const char
 
 void VirtualBusAttachment::SessionJoined(ajn::SessionPort port, ajn::SessionId id, const char *name)
 {
-    LOG(LOG_INFO, "[%p] port=%d,id=%d,name=%s",
-        this, port, id, name);
+    LOG(LOG_INFO, "[%p] port=%d,id=%d,name=%s", this, port, id, name);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    QStatus status = SetSessionListener(id, this);
+    QStatus status = SetHostedSessionListener(id, this);
     if (status != ER_OK)
     {
         LOG(LOG_ERR, "SetSesssionListener - %s", QCC_StatusText(status));
@@ -203,8 +203,7 @@ void VirtualBusAttachment::SessionJoined(ajn::SessionPort port, ajn::SessionId i
 void VirtualBusAttachment::SessionLost(ajn::SessionId id,
                                        ajn::SessionListener::SessionLostReason reason)
 {
-    LOG(LOG_INFO, "[%p] id=%d,reason=%d",
-        this, id, reason);
+    LOG(LOG_INFO, "[%p] id=%d,reason=%d", this, id, reason);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     assert(m_numSessions > 0);

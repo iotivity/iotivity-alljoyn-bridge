@@ -26,7 +26,7 @@
 class VirtualConfigBusObject : public VirtualBusObject
 {
     public:
-        VirtualConfigBusObject(ajn::BusAttachment *bus, Resource &resource);
+        VirtualConfigBusObject(VirtualBusAttachment *bus, Resource &resource);
         virtual ~VirtualConfigBusObject();
 
     private:

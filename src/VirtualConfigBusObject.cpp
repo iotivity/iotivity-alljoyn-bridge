@@ -28,20 +28,20 @@
 #include "PlatformConfigurationResource.h"
 #include "Plugin.h"
 #include "Signature.h"
-#include <alljoyn/BusAttachment.h>
+#include "VirtualBusAttachment.h"
 #include "ocpayload.h"
 #include "oic_malloc.h"
 #include <assert.h>
 
-VirtualConfigBusObject::VirtualConfigBusObject(ajn::BusAttachment *bus, Resource &resource)
+VirtualConfigBusObject::VirtualConfigBusObject(VirtualBusAttachment *bus, Resource &resource)
     : VirtualBusObject(bus, "/Config", resource)
 {
     LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, resource.m_uri.c_str());
     QStatus status;
     (void)(status); /* Unused in release build */
-    status = bus->CreateInterfacesFromXml(ajn::org::alljoyn::Config::InterfaceXml);
+    status = m_bus->CreateInterfacesFromXml(ajn::org::alljoyn::Config::InterfaceXml);
     assert(status == ER_OK);
-    m_iface = bus->GetInterface("org.alljoyn.Config");
+    m_iface = m_bus->GetInterface("org.alljoyn.Config");
     assert(m_iface);
     ajn::BusObject::AddInterface(*m_iface, ajn::BusObject::ANNOUNCED);
     const MethodEntry methodEntries[] =
@@ -226,6 +226,7 @@ void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescriptio
 
     std::lock_guard<std::mutex> lock(m_mutex);
     OCStackResult result = OC_STACK_ERROR;
+    const char *lang;
     OCRepPayload *payload = NULL;
     std::vector<Resource>::iterator device;
     std::vector<Resource>::iterator platform;
@@ -234,7 +235,12 @@ void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescriptio
     {
         goto error;
     }
-    context->m_configData = new AboutData(msg->GetArg(1), msg->GetArg(0)->v_string.str);
+    lang = msg->GetArg(0)->v_string.str;
+    if (!strcmp(lang, ""))
+    {
+        lang = m_bus->GetDefaultLanguage();
+    }
+    context->m_configData = new AboutData(msg->GetArg(1), lang);
     payload = OCRepPayloadCreate();
     if (!payload)
     {
@@ -251,7 +257,8 @@ void VirtualConfigBusObject::UpdateConfigurations(const ajn::InterfaceDescriptio
         }
         context->m_resource = device;
     }
-    if (platform != m_resources.end() && (device == m_resources.end() || platform == device))
+    if (platform != m_resources.end() && (device == m_resources.end() || platform == device ||
+            !payload->values))
     {
         result = SetPlatformConfigurationProperties(payload, context->m_configData);
         if (result != OC_STACK_OK)

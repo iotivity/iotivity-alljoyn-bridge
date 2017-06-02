@@ -30,7 +30,6 @@
 #include "oic_string.h"
 #include "ocpayload.h"
 #include "ocstack.h"
-#include "cJSON.h"
 #include <assert.h>
 
 #define VERIFY_CBOR(err)                                            \

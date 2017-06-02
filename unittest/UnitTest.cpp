@@ -20,6 +20,7 @@
 
 #include "UnitTest.h"
 
+#include "cJSON.h"
 #include "ocpayload.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
@@ -190,14 +191,24 @@ void AJOCSetUp::SetUp()
 
 void AJOCSetUp::TearDown()
 {
-    /*
-     * TODO AllJoyn has a bug where AllJoynShutdown() does not clear all the state needed to
-     * call AllJoynInit() again (an assert fires: alljoyn_core/src/XmlRulesValidator.cc:98:
-     * static void ajn::XmlRulesValidator::MethodsValidator::Init(): Assertion `nullptr ==
-     * s_actionsMap' failed.)
-     */
-    //EXPECT_EQ(ER_OK, AllJoynShutdown());
+    EXPECT_EQ(ER_OK, AllJoynShutdown());
     EXPECT_EQ(OC_STACK_OK, OCStop());
+}
+
+void AJOCSetUp::Wait(long waitMs)
+{
+    uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
+    for (;;)
+    {
+        uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
+        long elapsed = (long)(currTime - startTime);
+        if (elapsed > waitMs)
+        {
+            break;
+        }
+        OCProcess();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 OCStackApplicationResult Discover(void *ctx, OCDoHandle handle, OCClientResponse *response)
@@ -207,17 +218,267 @@ OCStackApplicationResult Discover(void *ctx, OCDoHandle handle, OCClientResponse
     EXPECT_EQ(OC_STACK_OK, response->result);
     EXPECT_TRUE(response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_DISCOVERY, response->payload->type);
-    for (OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload; payload;
-         payload = payload->next)
-    {
-        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-             resource = resource->next)
-        {
-            if (!strcmp(resource->uri, context->m_uri))
-            {
-                context->m_resource = new Resource(response->devAddr, payload->sid, resource);
-            }
-        }
-    }
+    OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload;
+    context->m_device = new Device(response->devAddr, payload);
+    context->m_resource = context->m_uri ? context->m_device->GetResourceUri(context->m_uri) : NULL;
     return OC_STACK_DELETE_TRANSACTION;
+}
+
+/* Only single-dimension homogenous arrays are supported for now */
+static int JsonArrayType(cJSON *json, size_t dim[MAX_REP_ARRAY_DEPTH])
+{
+    dim[0] = 0;
+    cJSON *element = json->child;
+    if (!element)
+    {
+        return cJSON_NULL;
+    }
+    int type = element->type;
+    while (element)
+    {
+        if (element->type != type)
+        {
+            return 0;
+        }
+        ++dim[0];
+        element = element->next;
+    }
+    return type;
+}
+
+static OCStackResult ParseJsonItem(OCRepPayload *outPayload, cJSON *json)
+{
+    bool success = true;
+    while (success && json)
+    {
+        switch (json->type)
+        {
+            case cJSON_False:
+                success = OCRepPayloadSetPropBool(outPayload, json->string, false);
+                break;
+            case cJSON_True:
+                success = OCRepPayloadSetPropBool(outPayload, json->string, true);
+                break;
+            case cJSON_NULL:
+                success = false;
+                break;
+            case cJSON_Number:
+                success = OCRepPayloadSetPropDouble(outPayload, json->string, json->valuedouble);
+                break;
+            case cJSON_String:
+                success = OCRepPayloadSetPropString(outPayload, json->string, json->valuestring);
+                break;
+            case cJSON_Array:
+                {
+                    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
+                    int type = JsonArrayType(json, dim);
+                    size_t dimTotal = calcDimTotal(dim);
+                    switch (type)
+                    {
+                        case cJSON_Number:
+                            {
+                                double *array = (double *) OICCalloc(dimTotal, sizeof(double));
+                                if (!array)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                cJSON *element = json->child;
+                                for (size_t i = 0; i < dimTotal; ++i)
+                                {
+                                    array[i] = element->valuedouble;
+                                    element = element->next;
+                                }
+                                success = OCRepPayloadSetDoubleArrayAsOwner(outPayload,
+                                        json->string, array, dim);
+                                if (!success)
+                                {
+                                    OICFree(array);
+                                }
+                            }
+                            break;
+                        case cJSON_String:
+                            {
+                                char **array = (char **) OICCalloc(dimTotal, sizeof(char*));
+                                if (!array)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                cJSON *element = json->child;
+                                for (size_t i = 0; i < dimTotal; ++i)
+                                {
+                                    array[i] = OICStrdup(element->valuestring);
+                                    if (!array[i])
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    element = element->next;
+                                }
+                                if (success)
+                                {
+                                    success = OCRepPayloadSetStringArrayAsOwner(outPayload,
+                                            json->string, array, dim);
+                                }
+                                if (!success)
+                                {
+                                    for (size_t i = 0; i < dimTotal; ++i)
+                                    {
+                                        OICFree(array[i]);
+                                    }
+                                    OICFree(array);
+                                }
+                            }
+                            break;
+                        case cJSON_Object:
+                            {
+                                OCRepPayload **array = (OCRepPayload **) OICCalloc(dimTotal,
+                                        sizeof(OCRepPayload*));
+                                if (!array)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                cJSON *element = json->child;
+                                for (size_t i = 0; i < dimTotal; ++i)
+                                {
+                                    array[i] = OCRepPayloadCreate();
+                                    if (!array[i])
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    OCStackResult result = ParseJsonItem(array[i], element->child);
+                                    if (result != OC_STACK_OK)
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    element = element->next;
+                                }
+                                if (success)
+                                {
+                                    success = OCRepPayloadSetPropObjectArrayAsOwner(outPayload,
+                                            json->string, array, dim);
+                                }
+                                if (!success)
+                                {
+                                    for (size_t i = 0; i < dimTotal; ++i)
+                                    {
+                                        OCRepPayloadDestroy(array[i]);
+                                    }
+                                    OICFree(array);
+                                }
+                            }
+                            break;
+                        default:
+                            /* Only number, string, and object arrays are supported for now */
+                            assert(0);
+                            success = false;
+                            break;
+                    }
+                }
+                break;
+            case cJSON_Object:
+                {
+                    OCRepPayload *objPayload = OCRepPayloadCreate();
+                    if (!objPayload)
+                    {
+                        success = false;
+                        break;
+                    }
+                    cJSON *obj = json->child;
+                    OCStackResult result = ParseJsonItem(objPayload, obj);
+                    if (result != OC_STACK_OK)
+                    {
+                        success = false;
+                        break;
+                    }
+                    success = OCRepPayloadSetPropObjectAsOwner(outPayload, json->string, objPayload);
+                }
+                break;
+        }
+        json = json->next;
+    }
+    return success ? OC_STACK_OK : OC_STACK_ERROR;
+}
+
+OCStackResult ParseJsonPayload(OCRepPayload** outPayload, const char* payload)
+{
+    OCStackResult result = OC_STACK_INVALID_PARAM;
+    cJSON *json;
+
+    *outPayload = NULL;
+    json = cJSON_Parse(payload);
+    if (!json)
+    {
+        goto exit;
+    }
+    if (json->type != cJSON_Object)
+    {
+        goto exit;
+    }
+    *outPayload = OCRepPayloadCreate();
+    if (!*outPayload)
+    {
+        goto exit;
+    }
+    result = ParseJsonItem(*outPayload, json->child);
+exit:
+    if (json)
+    {
+        cJSON_Delete(json);
+    }
+    if (result != OC_STACK_OK)
+    {
+        OCRepPayloadDestroy(*outPayload);
+        *outPayload = NULL;
+    }
+    return result;
+}
+
+MethodCall::MethodCall(ajn::BusAttachment *bus, ajn::ProxyBusObject *proxyObj)
+    : m_proxyObj(proxyObj), m_reply(*bus), m_called(false)
+{
+}
+
+QStatus MethodCall::Call(const char *iface, const char *method, const ajn::MsgArg *args,
+        size_t numArgs)
+{
+    return m_proxyObj->MethodCallAsync(iface, method, this,
+            static_cast<MessageReceiver::ReplyHandler>(&MethodCall::ReplyHandler), args,
+            numArgs);
+}
+
+QStatus MethodCall::Wait(long waitMs)
+{
+    uint64_t startTime = OICGetCurrentTime(TIME_IN_MS);
+    while (!m_called)
+    {
+        uint64_t currTime = OICGetCurrentTime(TIME_IN_MS);
+        long elapsed = (long)(currTime - startTime);
+        if (elapsed > waitMs)
+        {
+            break;
+        }
+        OCProcess();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!m_called)
+    {
+        return ER_TIMEOUT;
+    }
+    if (m_reply->GetType() != ajn::MESSAGE_METHOD_RET)
+    {
+        return ER_BUS_REPLY_IS_ERROR_MESSAGE;
+    }
+    return ER_OK;
+}
+
+void MethodCall::ReplyHandler(ajn::Message &reply, void *context)
+{
+    (void) context;
+    m_reply = reply;
+    m_called = true;
 }

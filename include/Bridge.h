@@ -164,7 +164,11 @@ class Bridge : private ajn::AboutListener
                 OCClientResponse *response);
         static OCStackApplicationResult GetPlatformCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
+        static OCStackApplicationResult GetPlatformConfigurationCB(void *context, OCDoHandle handle,
+                OCClientResponse *response);
         static OCStackApplicationResult GetDeviceCB(void *context, OCDoHandle handle,
+                OCClientResponse *response);
+        static OCStackApplicationResult GetDeviceConfigurationCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
@@ -188,9 +192,9 @@ class Bridge : private ajn::AboutListener
         void GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *response,
                 DiscoverContext **context, OCRepPayload **payload);
         void ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload);
-        void ParseIntrospectionPayload(VirtualBusObject *obj, OCRepPayload *path,
-                std::map<std::string, std::string> &ajNames);
         OCStackResult GetIntrospection(DiscoverContext *context);
+        OCStackResult GetCollection(DiscoverContext *context);
+        OCStackResult GetPlatformConfiguration(DiscoverContext *context);
         OCStackResult ContinueDiscovery(DiscoverContext *context, const char *uri,
                 const std::vector<OCDevAddr> &addrs, OCClientResponseHandler cb);
         OCStackResult ContinueDiscovery(DiscoverContext *context, const char *uri, OCDevAddr *addr,

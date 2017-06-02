@@ -33,5 +33,6 @@ namespace ajn {
 
 bool IsInterfaceInWellDefinedSet(const char *name);
 bool TranslateInterface(const char *name);
+bool TranslateResourceType(const char *name);
 
 #endif /* _INTERFACES_H */

@@ -26,11 +26,28 @@
 #include "VirtualResource.h"
 #include <gtest/gtest.h>
 
+struct LocalizedString
+{
+    const char *language;
+    const char *value;
+};
+
+struct DiscoverContext
+{
+    const char *m_uri;
+    Device *m_device;
+    Resource *m_resource;
+    DiscoverContext(const char *uri = NULL) : m_uri(uri), m_device(NULL), m_resource(NULL) { }
+    ~DiscoverContext() { delete m_device; }
+};
+
 class AJOCSetUp : public testing::Test
 {
 protected:
+    virtual ~AJOCSetUp() { }
     virtual void SetUp();
     virtual void TearDown();
+    void Wait(long waitMs);
 };
 
 /* TODO fold addition of context to Callback and change in Wait units back into gtest_helper.h */
@@ -85,61 +102,22 @@ private:
     static void cb(void *ctx);
 };
 
-struct DiscoverContext
+class MethodCall : public ajn::MessageReceiver
 {
-    const char *m_uri;
-    Resource *m_resource;
-    DiscoverContext(const char *uri) : m_uri(uri), m_resource(NULL) { }
-    ~DiscoverContext() { delete m_resource; }
+public:
+    MethodCall(ajn::BusAttachment *bus, ajn::ProxyBusObject *proxyObj);
+    QStatus Call(const char *iface, const char *method, const ajn::MsgArg *args, size_t numArgs);
+    QStatus Wait(long waitMs);
+    ajn::Message &Reply() { return m_reply; }
+private:
+    ajn::ProxyBusObject *m_proxyObj;
+    ajn::Message m_reply;
+    bool m_called;
+    void ReplyHandler(ajn::Message &reply, void *context);
 };
 
 OCStackApplicationResult Discover(void *ctx, OCDoHandle handle, OCClientResponse *response);
 
-struct LocalizedString
-{
-    const char *language;
-    const char *value;
-};
-
-struct ExpectedProperties
-{
-    /* oic.wk.d */
-    const char *n;
-    const char *piid;
-    const char *dmv;
-    LocalizedString *ld;
-    size_t nld;
-    const char *sv;
-    LocalizedString *dmn;
-    size_t ndmn;
-    const char *dmno;
-    /* oic.wk.con */
-    double loc[2];
-    const char *locn;
-    const char *c;
-    const char *r;
-    LocalizedString *ln;
-    size_t nln;
-    const char *dl;
-    /* oic.wk.p */
-    const char *pi;
-    const char *mnmn;
-    const char *mnml;
-    const char *mnmo;
-    const char *mndt;
-    const char *mnpv;
-    const char *mnos;
-    const char *mnhw;
-    const char *mnfv;
-    const char *mnsl;
-    const char *st;
-    const char *vid;
-    /* oic.wk.con.p */
-    LocalizedString *mnpn;
-    size_t nmnpn;
-    /* Vendor-specific */
-    const char *vendorProperty;
-    const char *vendorValue;
-};
+OCStackResult ParseJsonPayload(OCRepPayload** outPayload, const char* payload);
 
 #endif /* _UNITTEST_H */
