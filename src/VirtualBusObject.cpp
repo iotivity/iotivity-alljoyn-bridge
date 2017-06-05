@@ -42,6 +42,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
             context->m_obj->m_observes.erase(context);
+            context->m_obj->m_cond.notify_one();
         }
         delete context;
     }
@@ -83,7 +84,7 @@ VirtualBusObject::~VirtualBusObject()
     LOG(LOG_INFO, "[%p]", this);
 
     std::unique_lock<std::mutex> lock(m_mutex);
-    while (m_pending > 0 && !m_observes.empty())
+    while (m_pending > 0 || !m_observes.empty())
     {
         m_cond.wait(lock);
     }

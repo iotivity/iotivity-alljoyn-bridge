@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <sstream>
 #include <stdlib.h>
+#include <thread>
 
 static volatile sig_atomic_t sQuitFlag = false;
 static const char *gPSPrefix = "AllJoynBridge_";
@@ -56,6 +57,77 @@ static const char routerConfig[] =
     "  <property name=\"router_availability\">3-6 hr</property>"
     "  <property name=\"router_node_connection\">Wireless</property>"
     "</busconfig>";
+
+class OC
+{
+public:
+    bool Start()
+    {
+        m_thread = std::thread(OC::Process);
+        return true;
+    }
+    void Stop()
+    {
+        if (sSender)
+        {
+            bool done = false;
+            OCCallbackData cbData;
+            cbData.cb = OC::RDDeleteCB;
+            cbData.context = &done;
+            cbData.cd = NULL;
+            OCStackResult result = OCRDDelete(NULL, gRD.c_str(), CT_DEFAULT, NULL, 0, &cbData,
+                    OC_HIGH_QOS);
+            while (!done)
+            {
+                result = OCProcess();
+                if (result != OC_STACK_OK)
+                {
+                    break;
+                }
+#ifdef _WIN32
+                Sleep(1);
+#else
+                usleep(1 * 1000);
+#endif
+            }
+        }
+        else
+        {
+            OCRDStop();
+        }
+        OCStop();
+        m_thread.join();
+    }
+private:
+    std::thread m_thread;
+    static void Process()
+    {
+        while (!sQuitFlag)
+        {
+            OCStackResult result = OCProcess();
+            if (result != OC_STACK_OK)
+            {
+                fprintf(stderr, "OCProcess - %d\n", result);
+                break;
+            }
+#ifdef _WIN32
+            Sleep(1);
+#else
+            usleep(1 * 1000);
+#endif
+        }
+    }
+    static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
+            OCClientResponse *response)
+    {
+        bool *done = (bool *) ctx;
+        (void) handle;
+        LOG(LOG_INFO, "response=%p,response->result=%d",
+                response, response ? response->result : 0);
+        *done = true;
+        return OC_STACK_DELETE_TRANSACTION;
+    }
+};
 
 static void SigIntCB(int sig)
 {
@@ -131,17 +203,6 @@ static OCStackApplicationResult DiscoverResourceDirectoryCB(void *ctx, OCDoHandl
     }
 }
 
-static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
-{
-    bool *done = (bool *) ctx;
-    (void) handle;
-    LOG(LOG_INFO, "response=%p,response->result=%d",
-        response, response ? response->result : 0);
-    *done = true;
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
 static void ExecCB(const char *uuid, const char *sender, bool isVirtual)
 {
     printf("exec --ps %s --uuid %s --sender %s --rd %s --secureMode %s %s\n", gPSPrefix, uuid,
@@ -187,6 +248,7 @@ int main(int argc, char **argv)
 {
     int ret = EXIT_FAILURE;
     Bridge *bridge = NULL;
+    OC *oc = NULL;
     std::string dbFilename;
     OCStackResult result;
     OCPersistentStorage ps = { PSOpenCB, fread, fwrite, fclose, unlink };
@@ -341,16 +403,15 @@ int main(int argc, char **argv)
     {
         goto exit;
     }
+    oc = new OC();
+    if (!oc->Start())
+    {
+        goto exit;
+    }
     while (!sQuitFlag)
     {
         if (!bridge->Process())
         {
-            goto exit;
-        }
-        OCStackResult result = OCProcess();
-        if (result != OC_STACK_OK)
-        {
-            fprintf(stderr, "OCProcess - %d\n", result);
             goto exit;
         }
 #ifdef _WIN32
@@ -367,34 +428,15 @@ exit:
         bridge->Stop();
         delete bridge;
     }
-    if (sSender)
+    if (oc)
     {
-        bool done = false;
-        OCCallbackData cbData;
-        cbData.cb = RDDeleteCB;
-        cbData.context = &done;
-        cbData.cd = NULL;
-        result = OCRDDelete(NULL, gRD.c_str(), CT_DEFAULT, NULL, 0, &cbData, OC_HIGH_QOS);
-        while (!done)
+        oc->Stop();
+        if (sSender)
         {
-            result = OCProcess();
-            if (result != OC_STACK_OK)
-            {
-                break;
-            }
-#ifdef _WIN32
-            Sleep(1);
-#else
-            usleep(1 * 1000);
-#endif
+            remove(seenPath.c_str());
         }
-        remove(seenPath.c_str());
+        delete oc;
     }
-    else
-    {
-        OCRDStop();
-    }
-    OCStop();
     AllJoynRouterShutdown();
     AllJoynShutdown();
     return ret;
