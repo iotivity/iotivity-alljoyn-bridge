@@ -193,6 +193,8 @@ void AJOCSetUp::TearDown()
 {
     EXPECT_EQ(ER_OK, AllJoynShutdown());
     EXPECT_EQ(OC_STACK_OK, OCStop());
+    /* This will fail if a test starts the stack and did not stop it */
+    EXPECT_EQ(OC_STACK_ERROR, OCProcess());
 }
 
 void AJOCSetUp::Wait(long waitMs)

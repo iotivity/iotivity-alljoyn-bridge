@@ -52,18 +52,24 @@ static const char *GetRefDefinition(const char *ref)
 /*
  * @param[in] schema a schema definition object.
  * @param[in] annotations map from definition name to AJ annotations
+ * @param[out] type the payload property type.  OCREP_PROP_NULL to use the natural type of the
+ *                  returned signature.
  *
  * @return a pair<D-Bus signature, org.alljoyn.Bus.Type.Name>
  */
 static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
-        std::map<std::string, Annotations> &annotations)
+        std::map<std::string, Annotations> &annotations, OCRepPayloadPropType *type = NULL)
 {
-    OCRepPayload **anyOf = NULL;
+    if (type)
+    {
+        *type = OCREP_PROP_NULL;
+    }
+    char **typeArr = NULL;
     size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
     char *str = NULL;
     const char *ref = NULL;
     std::pair<std::string, std::string> sig;
-    if (OCRepPayloadGetPropObjectArray(schema, "anyOf", &anyOf, dim))
+    if (OCRepPayloadGetStringArray(schema, "type", &typeArr, dim))
     {
         sig.first = "v";
     }
@@ -141,21 +147,34 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
         }
         else if (!strcmp(str, "string"))
         {
+            char *pattern = NULL;
             char *format = NULL;
             OCRepPayload *media = NULL;
             char *encoding = NULL;
+            OCRepPayloadGetPropString(schema, "pattern", &pattern);
             OCRepPayloadGetPropString(schema, "format", &format);
             OCRepPayloadGetPropObject(schema, "media", &media);
-            if (format && !strcmp(format, "uint64"))
+            if ((pattern && !strcmp(pattern, "^0([1-9][0-9]{0,19})$")) ||
+                    (format && !strcmp(format, "uint64")))
             {
                 sig.first = "t";
+                if (type)
+                {
+                    *type = OCREP_PROP_STRING;
+                }
             }
-            else if (format && !strcmp(format, "int64"))
+            else if ((pattern && !strcmp(pattern, "^0(-?[1-9][0-9]{0,18)}$")) ||
+                    (format && !strcmp(format, "int64")))
             {
                 sig.first = "x";
+                if (type)
+                {
+                    *type = OCREP_PROP_STRING;
+                }
             }
-            else if (media && OCRepPayloadGetPropString(media, "binaryEncoding", &encoding) &&
-                    !strcmp(encoding, "base64"))
+            else if ((pattern && !strcmp(pattern, "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$")) ||
+                    (media && OCRepPayloadGetPropString(media, "binaryEncoding", &encoding) &&
+                            !strcmp(encoding, "base64")))
             {
                 sig.first = "ay";
             }
@@ -170,10 +189,35 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
         else if (!strcmp(str, "object"))
         {
             sig.first = "a{sv}";
+            OCRepPayload *properties = NULL;
+            if (OCRepPayloadGetPropObject(schema, "properties", &properties))
+            {
+                std::string dictName = Types::GenerateAnonymousName();
+                for (OCRepPayloadValue *property = properties->values; property;
+                     property = property->next)
+                {
+                    if (property->type != OCREP_PROP_OBJECT)
+                    {
+                        LOG(LOG_INFO, "%s property unknown type %d, skipping", property->name,
+                                property->type);
+                        continue;
+                    }
+                    OCRepPayloadPropType propType;
+                    std::pair<std::string, std::string> propSig = GetSignature(property->obj,
+                            annotations, &propType);
+                    Types::m_dicts[dictName][property->name] =
+                            Types::Value(!propSig.second.empty() ? propSig.second : propSig.first,
+                                    propType);
+                }
+                sig.second = dictName;
+            }
+            OCRepPayloadDestroy(properties);
         }
         else if (!strcmp(str, "array"))
         {
             OCRepPayload *items = NULL;
+            OCRepPayload **itemsArr = NULL;
+            size_t itemsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
             if (OCRepPayloadGetPropObject(schema, "items", &items))
             {
                 std::pair<std::string, std::string> itemSig = GetSignature(items, annotations);
@@ -183,6 +227,44 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
                     sig.second = "a" + itemSig.second;
                 }
                 OCRepPayloadDestroy(items);
+            }
+            else if (OCRepPayloadGetPropObjectArray(schema, "items", &itemsArr, itemsDim))
+            {
+                /*
+                 * Potentially have a struct here, confirm first that there are a fixed number of
+                 * items.
+                  */
+                double minItems, maxItems;
+                size_t dimTotal = calcDimTotal(itemsDim);
+                if (OCRepPayloadGetPropDouble(schema, "minItems", &minItems) &&
+                        OCRepPayloadGetPropDouble(schema, "maxItems", &maxItems) &&
+                        ((minItems == maxItems) || (maxItems == dimTotal)))
+                {
+                    sig.first = "(";
+                    sig.second = "(";
+                    for (size_t i = 0; i < dimTotal; ++i)
+                    {
+                        std::pair<std::string, std::string> itemSig = GetSignature(itemsArr[i],
+                                annotations);
+                        sig.first += itemSig.first;
+                        sig.second += !itemSig.second.empty() ? itemSig.second : itemSig.first;
+                    }
+                    sig.first += ")";
+                    sig.second += ")";
+                    if (sig.second == sig.first)
+                    {
+                        sig.second.clear();
+                    }
+                }
+                else
+                {
+                    sig.first = "av";
+                }
+                for (size_t i = 0; i < dimTotal; ++i)
+                {
+                    OCRepPayloadDestroy(itemsArr[i]);
+                }
+                OICFree(itemsArr);
             }
             else
             {
@@ -196,14 +278,14 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
     }
     else
     {
-        LOG(LOG_INFO, "Missing \"anyOf\", \"$ref\", or \"type\" property");
+        LOG(LOG_INFO, "Missing \"$ref\" or \"type\" property");
     }
     size_t dimTotal = calcDimTotal(dim);
     for (size_t i = 0; i < dimTotal; ++i)
     {
-        OCRepPayloadDestroy(anyOf[i]);
+        OICFree(typeArr[i]);
     }
-    OICFree(anyOf);
+    OICFree(typeArr);
     OICFree(str);
     return sig;
 }
@@ -213,8 +295,8 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
  * @param[in] annotations map from definition name to AJ annotations.
  * @param[in,out] iface the AJ iface to add annotations to.
  */
-static void AddAnnotations(OCRepPayload *schema, std::map<std::string, Annotations> &annotations,
-        ajn::InterfaceDescription *iface)
+static void AddAnnotations(const char *name, OCRepPayload *schema,
+        std::map<std::string, Annotations> &annotations, ajn::InterfaceDescription *iface)
 {
     char *str = NULL;
     const char *ref = NULL;
@@ -233,8 +315,30 @@ static void AddAnnotations(OCRepPayload *schema, std::map<std::string, Annotatio
             OCRepPayload *items = NULL;
             if (OCRepPayloadGetPropObject(schema, "items", &items))
             {
-                AddAnnotations(items, annotations, iface);
+                AddAnnotations(name, items, annotations, iface);
                 OCRepPayloadDestroy(items);
+            }
+        }
+        else
+        {
+            double d;
+            if (OCRepPayloadGetPropDouble(schema, "default", &d) &&
+                    (floor(d) == d))
+            {
+                iface->AddPropertyAnnotation(name, "org.alljoyn.Bus.Type.Default",
+                        (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
+            }
+            if (OCRepPayloadGetPropDouble(schema, "maximum", &d) &&
+                    (floor(d) == d))
+            {
+                iface->AddPropertyAnnotation(name, "org.alljoyn.Bus.Type.Max",
+                        (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
+            }
+            if (OCRepPayloadGetPropDouble(schema, "minimum", &d) &&
+                    (floor(d) == d))
+            {
+                iface->AddPropertyAnnotation(name, "org.alljoyn.Bus.Type.Min",
+                        (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
             }
         }
     }
@@ -262,37 +366,23 @@ static void AddProperty(OCRepPayloadValue *property, bool isObservable,
     {
         access = ajn::PROP_ACCESS_READ;
     }
-    std::string ajPropName = ToAJName(property->name);
-    iface->AddProperty(ajPropName.c_str(), sig.first.c_str(), access);
-    if (!sig.second.empty())
+    iface->AddProperty(property->name, sig.first.c_str(), access);
+    std::string dictName = std::string("[") + iface->GetName() + ".Properties" + "]";
+    if (sig.second.empty())
     {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Name", sig.second);
+        Types::m_dicts[dictName][property->name] = Types::Value(sig.first);
     }
-    AddAnnotations(property->obj, annotations, iface);
-    double d;
-    if (OCRepPayloadGetPropDouble(property->obj, "default", &d) &&
-            (floor(d) == d))
+    else
     {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Default",
-                (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
+        iface->AddPropertyAnnotation(property->name, "org.alljoyn.Bus.Type.Name", sig.second);
+        Types::m_dicts[dictName][property->name] = Types::Value(sig.second);
     }
-    if (OCRepPayloadGetPropDouble(property->obj, "maximum", &d) &&
-            (floor(d) == d))
-    {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Max",
-                (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
-    }
-    if (OCRepPayloadGetPropDouble(property->obj, "minimum", &d) &&
-            (floor(d) == d))
-    {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Min",
-                (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
-    }
+    AddAnnotations(property->name, property->obj, annotations, iface);
     if (isObservable)
     {
         /* "false" is the default value */
-        iface->AddPropertyAnnotation(ajPropName, ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
-                "true");
+        iface->AddPropertyAnnotation(property->name,
+                ajn::org::freedesktop::DBus::AnnotateEmitsChanged, "true");
     }
 }
 
