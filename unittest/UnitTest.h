@@ -120,4 +120,30 @@ OCStackApplicationResult Discover(void *ctx, OCDoHandle handle, OCClientResponse
 
 OCStackResult ParseJsonPayload(OCRepPayload** outPayload, const char* payload);
 
+#define A_SIZEOF(a) ((size_t) (sizeof(a) / sizeof(a[0])))
+
+class Row
+{
+public:
+    Row(ajn::MsgArg arg, int64_t i);
+    Row(ajn::MsgArg arg, double d);
+    Row(ajn::MsgArg arg, bool b);
+    Row(ajn::MsgArg arg, const char *str);
+    Row(ajn::MsgArg arg, size_t len, const uint8_t *bytes);
+    Row(ajn::MsgArg arg, const OCRepPayload *payload);
+    Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const int64_t *iArray);
+    Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const double *dArray);
+    Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const bool *bArray);
+    Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const char **strArray);
+    Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const uint8_t *bytes);
+    Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const OCRepPayload *payload);
+    Row(ajn::MsgArg arg, uint8_t y);
+    Row(ajn::MsgArg arg, uint64_t t);
+    ajn::MsgArg m_arg;
+    OCRepPayloadValue m_value;
+};
+
+class FromDBus : public ::testing::TestWithParam<Row> { };
+class FromOC : public ::testing::TestWithParam<Row> { };
+
 #endif /* _UNITTEST_H */

@@ -144,11 +144,21 @@ class GetPropertyCall : public ajn::ProxyBusObject::Listener
 public:
     GetPropertyCall(ajn::ProxyBusObject *proxyObj)
         : m_proxyObj(proxyObj), m_status(ER_OK), m_called(false) { }
-    QStatus Call(const char *iface, const char *property)
+    QStatus Call(const char *iface, const char *property, bool withError = false)
     {
-        return m_proxyObj->GetPropertyAsync(iface, property, this,
-                static_cast<ajn::ProxyBusObject::Listener::GetPropertyAsyncCB>(&GetPropertyCall::GetPropertyCB),
-                NULL);
+        Reset();
+        if (withError)
+        {
+            return m_proxyObj->GetPropertyAsync(iface, property, this,
+                    static_cast<ajn::ProxyBusObject::Listener::GetPropertyAsyncCB>(&GetPropertyCall::GetPropertyAsyncCB),
+                    NULL);
+        }
+        else
+        {
+            return m_proxyObj->GetPropertyAsync(iface, property, this,
+                    static_cast<ajn::ProxyBusObject::Listener::GetPropertyCB>(&GetPropertyCall::GetPropertyCB),
+                    NULL);
+        }
     }
     void Reset() { m_called = false; }
     QStatus Wait(long waitMs)
@@ -181,7 +191,16 @@ private:
     std::string m_errorName;
     std::string m_errorDescription;
     bool m_called;
-    void GetPropertyCB(QStatus status, ajn::ProxyBusObject *obj, const ajn::MsgArg &value,
+    void GetPropertyCB(QStatus status, ajn::ProxyBusObject* obj, const ajn::MsgArg& value,
+            void* context)
+    {
+        (void) context;
+        (void) obj;
+        m_status = status;
+        m_value = value;
+        m_called = true;
+    }
+    void GetPropertyAsyncCB(QStatus status, ajn::ProxyBusObject *obj, const ajn::MsgArg &value,
             const qcc::String& errorName, const qcc::String& errorDescription, void* context)
     {
         (void) context;
@@ -199,11 +218,21 @@ class SetPropertyCall : public ajn::ProxyBusObject::Listener
 public:
     SetPropertyCall(ajn::ProxyBusObject *proxyObj)
         : m_proxyObj(proxyObj), m_status(ER_OK), m_called(false) { }
-    QStatus Call(const char *iface, const char *property, ajn::MsgArg &value)
+    QStatus Call(const char *iface, const char *property, ajn::MsgArg &value, bool withError = false)
     {
-        return m_proxyObj->SetPropertyAsync(iface, property, value, this,
-                static_cast<ajn::ProxyBusObject::Listener::SetPropertyAsyncCB>(&SetPropertyCall::SetPropertyCB),
-                NULL);
+        Reset();
+        if (withError)
+        {
+            return m_proxyObj->SetPropertyAsync(iface, property, value, this,
+                    static_cast<ajn::ProxyBusObject::Listener::SetPropertyAsyncCB>(&SetPropertyCall::SetPropertyAsyncCB),
+                    NULL);
+        }
+        else
+        {
+            return m_proxyObj->SetPropertyAsync(iface, property, value, this,
+                    static_cast<ajn::ProxyBusObject::Listener::SetPropertyCB>(&SetPropertyCall::SetPropertyCB),
+                    NULL);
+        }
     }
     void Reset() { m_called = false; }
     QStatus Wait(long waitMs)
@@ -234,7 +263,14 @@ private:
     std::string m_errorName;
     std::string m_errorDescription;
     bool m_called;
-    void SetPropertyCB(QStatus status, ajn::ProxyBusObject *obj, const qcc::String& errorName,
+    void SetPropertyCB(QStatus status, ajn::ProxyBusObject *obj, void* context)
+    {
+        (void) context;
+        (void) obj;
+        m_status = status;
+        m_called = true;
+    }
+    void SetPropertyAsyncCB(QStatus status, ajn::ProxyBusObject *obj, const qcc::String& errorName,
             const qcc::String& errorDescription, void* context)
     {
         (void) context;
@@ -253,6 +289,7 @@ public:
         : m_proxyObj(proxyObj), m_status(ER_OK), m_called(false) { }
     QStatus Call(const char *iface)
     {
+        Reset();
         return m_proxyObj->GetAllPropertiesAsync(iface, this,
                 static_cast<ajn::ProxyBusObject::Listener::GetAllPropertiesCB>(&GetAllPropertiesCall::GetAllPropertiesCB),
                 NULL);
@@ -1545,6 +1582,7 @@ TEST_F(OCFResource, TheEmitsChangedSignalValueForEachAllJoynPropertyShallBeSetTo
 
 TEST_F(OCFResource, TheEmitsChangedSignalValueForEachAllJoynPropertyShallBeSetToTrueIfTheResourceSupportsNotifyOrFalseIfItDoesNot)
 {
+    // TODO This test fails since the same interface is used by both the obervable and unobservable resource
     TestObservableAndUnobservableResources resources;
     SetUpResource(&resources);
     EXPECT_EQ(ER_OK, m_aboutListener->JoinSession());
@@ -1662,7 +1700,6 @@ TEST_F(OCFResource, IfAResourceHasAResourceTypeOicRAllJoynobjectThenAllResources
             "x.org.iotivity.rt.false"));
     EXPECT_EQ(ER_OK, get.Wait(1000));
     EXPECT_TRUE(variant == get.Value());
-    get.Reset();
     EXPECT_EQ(ER_OK, get.Call(ToAJName("x.org.iotivity.rt.true").c_str(),
             "x.org.iotivity.rt.true"));
     EXPECT_EQ(ER_OK, get.Wait(1000));
@@ -1677,7 +1714,6 @@ TEST_F(OCFResource, IfAResourceHasAResourceTypeOicRAllJoynobjectThenAllResources
     EXPECT_EQ(ER_OK, set.Wait(1000));
     EXPECT_TRUE(resource.False());
     EXPECT_FALSE(resource.True());
-    set.Reset();
     EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt.true").c_str(), "x.org.iotivity.rt.true",
             value));
     EXPECT_EQ(ER_OK, set.Wait(1000));
@@ -1691,7 +1727,6 @@ TEST_F(OCFResource, IfAResourceHasAResourceTypeOicRAllJoynobjectThenAllResources
     EXPECT_EQ(ER_OK, getAll.Wait(1000));
     EXPECT_TRUE(dict == getAll.Values());
     dictEntry.v_dictEntry.key->Set("s", "x.org.iotivity.rt.true");
-    getAll.Reset();
     EXPECT_EQ(ER_OK, getAll.Call(ToAJName("x.org.iotivity.rt.true").c_str()));
     EXPECT_EQ(ER_OK, getAll.Wait(1000));
     EXPECT_TRUE(dict == getAll.Values());
@@ -1710,7 +1745,7 @@ TEST_F(OCFResource, IfAnOCFOperationFailsTheErrorNameAndErrorMessageShallBeExtra
     EXPECT_TRUE(resource0 != NULL);
 
     GetPropertyCall get(resource0);
-    EXPECT_EQ(ER_OK, get.Call(ToAJName("x.org.iotivity.rt").c_str(), "value"));
+    EXPECT_EQ(ER_OK, get.Call(ToAJName("x.org.iotivity.rt").c_str(), "value", true));
     EXPECT_NE(ER_OK, get.Wait(1000));
     EXPECT_EQ("org.openconnectivity.Error.500", get.ErrorName());
     EXPECT_EQ("", get.ErrorDescription());
@@ -1730,7 +1765,7 @@ TEST_F(OCFResource, IfAnOCFOperationFailsTheErrorNameShallBeOrgOpenconnectivityE
 
     SetPropertyCall set(resource0);
     ajn::MsgArg value("b", true);
-    EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt").c_str(), "value", value));
+    EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt").c_str(), "value", value, true));
     EXPECT_NE(ER_OK, set.Wait(1000));
     EXPECT_EQ("org.freedesktop.DBus.Error.Failed", set.ErrorName());
     EXPECT_EQ("Not allowed", set.ErrorDescription());
@@ -1938,12 +1973,15 @@ public:
     size_t m_calls;
     PropertiesChangedListener() : m_calls(0) { }
     virtual ~PropertiesChangedListener() { }
+    const ajn::MsgArg &Changed() { return m_changed; }
+private:
+    ajn::MsgArg m_changed;
     void PropertiesChanged(ajn::ProxyBusObject& proxyObj, const char* ifaceName,
             const ajn::MsgArg& changed, const ajn::MsgArg& invalidated, void* context)
     {
         (void) proxyObj;
         (void) ifaceName;
-        (void) changed;
+        m_changed = changed;
         (void) invalidated;
         (void) context;
         ++m_calls;
@@ -2271,5 +2309,837 @@ TEST_F(OCFResource, UpdateConfigurationWithDefaultLanguageWhenNotPresentInResour
 
     EXPECT_EQ("new-en-mnpn", resources.Configuration().m_mnpn["en"]);
 
+    TearDownResource();
+}
+
+/*
+ * Additional tests
+ */
+
+struct NumericProperties
+{
+    int64_t m_byte;
+    int64_t m_int64small;
+    std::string m_int64large;
+    int64_t m_uint64small;
+    std::string m_uint64large;
+    NumericProperties()
+        : m_byte(1), m_int64small(-1), m_int64large("-1"), m_uint64small(1), m_uint64large("1") { }
+};
+
+static OCEntityHandlerResult NumericPropertiesEntityHandler(OCEntityHandlerFlag flag,
+        OCEntityHandlerRequest *request, void *ctx)
+{
+    (void) flag;
+    NumericProperties *properties = (NumericProperties *) ctx;
+    OCEntityHandlerResult result;
+    switch (request->method)
+    {
+        case OC_REST_GET:
+            {
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                if (!payload ||
+                        !OCRepPayloadSetPropInt(payload, "byte", properties->m_byte) ||
+                        !OCRepPayloadSetPropInt(payload, "int64small", properties->m_int64small) ||
+                        !OCRepPayloadSetPropString(payload, "int64large", properties->m_int64large.c_str()) ||
+                        !OCRepPayloadSetPropInt(payload, "uint64small", properties->m_uint64small) ||
+                        !OCRepPayloadSetPropString(payload, "uint64large", properties->m_uint64large.c_str()))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(payload);
+                OCStackResult doResult = OCDoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    OCRepPayloadDestroy(payload);
+                }
+                break;
+            }
+        case OC_REST_POST:
+            {
+                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayload *outPayload = CreatePayload(request->resource, request->query);
+                if (!outPayload)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                char *s;
+                if (OCRepPayloadGetPropInt((OCRepPayload *) request->payload, "byte",
+                        &properties->m_byte))
+                {
+                    OCRepPayloadSetPropInt(outPayload, "byte", properties->m_byte);
+                }
+                if (OCRepPayloadGetPropInt((OCRepPayload *) request->payload, "int64small",
+                        &properties->m_int64small))
+                {
+                    OCRepPayloadSetPropInt(outPayload, "int64small", properties->m_int64small);
+                }
+                if (OCRepPayloadGetPropString((OCRepPayload *) request->payload, "int64large", &s))
+                {
+                    properties->m_int64large = s;
+                    OCRepPayloadSetPropString(outPayload, "int64large", s);
+                }
+                OCRepPayloadGetPropInt((OCRepPayload *) request->payload, "uint64small",
+                        &properties->m_uint64small);
+                if (OCRepPayloadGetPropString((OCRepPayload *) request->payload, "uint64large", &s))
+                {
+                    properties->m_uint64large = s;
+                    OCRepPayloadSetPropString(outPayload, "uint64large", s);
+                }
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(outPayload);
+                OCStackResult doResult = OCDoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    OCRepPayloadDestroy(outPayload);
+                }
+                break;
+            }
+        default:
+            result = OC_EH_METHOD_NOT_ALLOWED;
+            break;
+    }
+    return result;
+}
+
+class TestNumericTypesResource : public TestResource
+{
+public:
+    virtual ~TestNumericTypesResource() { }
+    virtual void Create()
+    {
+        OCResourceHandle handle;
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt", NULL,
+                "/resource/0", NumericPropertiesEntityHandler, &m_properties,
+                OC_DISCOVERABLE | OC_OBSERVABLE));
+        m_handles.push_back(handle);
+    }
+    virtual const char *IntrospectionJson() { return m_introspectionJson; }
+    NumericProperties &Properties() { return m_properties; }
+private:
+    const char *m_introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": {"
+            "    \"/resource/0\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt\" } ] } } }"
+            "      }"
+            "    }"
+            "  },"
+            "  \"definitions\": {"
+            "    \"x.org.iotivity.rt\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"byte\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 255 },"
+            "        \"int64small\": { \"type\": \"integer\",\"minimum\": -9007199254740992, \"maximum\": 9007199254740992 },"
+            "        \"int64large\": { \"type\": \"string\", \"format\": \"int64\" },"
+            "        \"uint64small\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 9007199254740992 },"
+            "        \"uint64large\": { \"type\": \"string\", \"format\": \"uint64\" },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    }"
+            "  }"
+            "}";
+    NumericProperties m_properties;
+};
+
+TEST_F(OCFResource, NumericTypes)
+{
+    TestNumericTypesResource resource;
+    SetUpResource(&resource);
+
+    EXPECT_EQ(ER_OK, m_aboutListener->JoinSession());
+    ajn::ProxyBusObject *res = m_aboutListener->CreateProxyBusObject("/resource/0");
+    EXPECT_TRUE(res != NULL);
+
+    /* Get */
+    ajn::MsgArg value("y", 1);
+    ajn::MsgArg variant("v", &value);
+    GetPropertyCall get(res);
+    EXPECT_EQ(ER_OK, get.Call("org.iotivity.rt", "byte"));
+    EXPECT_EQ(ER_OK, get.Wait(1000));
+    EXPECT_TRUE(variant == get.Value());
+
+    /* GetAll */
+    ajn::MsgArg entries[5];
+    entries[0] = ajn::MsgArg("{sv}", "byte", new ajn::MsgArg("y", 1));
+    entries[1] = ajn::MsgArg("{sv}", "int64small", new ajn::MsgArg("x", (int64_t) -1));
+    entries[2] = ajn::MsgArg("{sv}", "int64large", new ajn::MsgArg("x", (int64_t) -1));
+    entries[3] = ajn::MsgArg("{sv}", "uint64small", new ajn::MsgArg("t", 1));
+    entries[4] = ajn::MsgArg("{sv}", "uint64large", new ajn::MsgArg("t", 1));
+    ajn::MsgArg dict("a{sv}", 5, entries);
+    GetAllPropertiesCall getAll(res);
+    EXPECT_EQ(ER_OK, getAll.Call("org.iotivity.rt"));
+    EXPECT_EQ(ER_OK, getAll.Wait(1000));
+    EXPECT_TRUE(dict == getAll.Values());
+
+    /* PropertiesChanged */
+    PropertiesChangedListener listener;
+    EXPECT_EQ(ER_OK, res->RegisterPropertiesChangedListener("org.iotivity.rt", NULL, 0, listener,
+            NULL));
+    Wait(1000); /* Must wait for observe request to be processed */
+    listener.m_calls = 0;
+    resource.Notify("/resource/0");
+    Wait(1000);
+    EXPECT_EQ(1u, listener.m_calls);
+    EXPECT_TRUE(dict == listener.Changed());
+
+    /* Set */
+    SetPropertyCall set(res);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "byte", *new ajn::MsgArg("y", 2)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_EQ(2, resource.Properties().m_byte);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "int64small", *new ajn::MsgArg("x", (int64_t) -2)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_EQ(-2, resource.Properties().m_int64small);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "int64large", *new ajn::MsgArg("x", (int64_t) -2)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_STREQ("-2", resource.Properties().m_int64large.c_str());
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "uint64small", *new ajn::MsgArg("t", 2)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_EQ(2, resource.Properties().m_uint64small);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "uint64large", *new ajn::MsgArg("t", 2)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_STREQ("2", resource.Properties().m_uint64large.c_str());
+
+    delete res;
+    TearDownResource();
+}
+
+class VariantProperties
+{
+public:
+    virtual ~VariantProperties() { }
+    virtual bool Get(OCRepPayload *payload) = 0;
+    virtual void Post(const OCRepPayload *payload, OCRepPayload *outPayload) = 0;
+};
+
+class VariantProperties0 : public VariantProperties
+{
+public:
+    int64_t m_byte;
+    int64_t m_uint16;
+    int64_t m_int16;
+    int64_t m_uint32;
+    int64_t m_int32;
+    int64_t m_uint64;
+    int64_t m_int64;
+    double m_double;
+    std::string m_uint64large;
+    std::string m_int64large;
+    std::string m_string;
+    OCByteString m_stringbase64;
+    OCByteString m_stringpattern;
+    int64_t m_variant;
+    VariantProperties0()
+        : m_byte(1), m_uint16(1), m_int16(1), m_uint32(1), m_int32(1), m_uint64(1), m_int64(1),
+          m_double(1.0), m_uint64large("1"), m_int64large("1"), m_string("one"),
+          m_stringbase64({ NULL, 0 }), m_stringpattern({ NULL, 0 }), m_variant(1)
+    {
+        uint8_t bs[] = { 0, 1 };
+        OCByteString byteString = { bs, 2 };
+        OCByteStringCopy(&m_stringbase64, &byteString);
+        OCByteStringCopy(&m_stringpattern, &byteString);
+    }
+    virtual bool Get(OCRepPayload *payload)
+    {
+        OCRepPayload *object = OCRepPayloadCreate();
+        return object &&
+                OCRepPayloadSetPropInt(object, "byte", m_byte) &&
+                OCRepPayloadSetPropInt(object, "uint16", m_uint16) &&
+                OCRepPayloadSetPropInt(object, "int16", m_int16) &&
+                OCRepPayloadSetPropInt(object, "uint32", m_uint32) &&
+                OCRepPayloadSetPropInt(object, "int32", m_int32) &&
+                OCRepPayloadSetPropInt(object, "uint64", m_uint64) &&
+                OCRepPayloadSetPropInt(object, "int64", m_int64) &&
+                OCRepPayloadSetPropDouble(object, "double", m_double) &&
+                OCRepPayloadSetPropString(object, "uint64large", m_uint64large.c_str()) &&
+                OCRepPayloadSetPropString(object, "int64large", m_int64large.c_str()) &&
+                OCRepPayloadSetPropString(object, "string", m_string.c_str()) &&
+                OCRepPayloadSetPropByteString(object, "stringbase64", m_stringbase64) &&
+                OCRepPayloadSetPropByteString(object, "stringpattern", m_stringpattern) &&
+                OCRepPayloadSetPropInt(object, "variant", m_variant) &&
+                OCRepPayloadSetPropObjectAsOwner(payload, "object", object);
+    }
+    virtual void Post(const OCRepPayload *payload, OCRepPayload *outPayload)
+    {
+        OCRepPayload *object;
+        OCRepPayloadGetPropObject(payload, "object", &object);
+        OCRepPayload *outObject = OCRepPayloadCreate();
+        if (OCRepPayloadGetPropInt(object, "byte", &m_byte))
+        {
+            OCRepPayloadSetPropInt(outObject, "byte", m_byte);
+        }
+        if (OCRepPayloadGetPropInt(object, "uint16", &m_uint16))
+        {
+            OCRepPayloadSetPropInt(outObject, "uint16", m_uint16);
+        }
+        if (OCRepPayloadGetPropInt(object, "int16", &m_int16))
+        {
+            OCRepPayloadSetPropInt(outObject, "int16", m_int16);
+        }
+        if (OCRepPayloadGetPropInt(object, "uint32", &m_uint32))
+        {
+            OCRepPayloadSetPropInt(outObject, "uint32", m_uint32);
+        }
+        if (OCRepPayloadGetPropInt(object, "int32", &m_int32))
+        {
+            OCRepPayloadSetPropInt(outObject, "int32", m_int32);
+        }
+        if (OCRepPayloadGetPropInt(object, "uint64", &m_uint64))
+        {
+            OCRepPayloadSetPropInt(outObject, "uint64", m_uint64);
+        }
+        if (OCRepPayloadGetPropInt(object, "int64", &m_int64))
+        {
+            OCRepPayloadSetPropInt(outObject, "int64", m_int64);
+        }
+        if (OCRepPayloadGetPropDouble(object, "double", &m_double))
+        {
+            OCRepPayloadSetPropDouble(outObject, "double", m_double);
+        }
+        char *s;
+        if (OCRepPayloadGetPropString(object, "uint64large", &s))
+        {
+            m_uint64large = s;
+            OCRepPayloadSetPropString(outObject, "uint64large", m_uint64large.c_str());
+        }
+        if (OCRepPayloadGetPropString(object, "int64large", &s))
+        {
+            m_int64large = s;
+            OCRepPayloadSetPropString(outObject, "int64large", m_int64large.c_str());
+        }
+        if (OCRepPayloadGetPropString(object, "string", &s))
+        {
+            m_string = s;
+            OCRepPayloadSetPropString(outObject, "string", m_string.c_str());
+        }
+        if (OCRepPayloadGetPropByteString(object, "stringbase64", &m_stringbase64))
+        {
+            OCRepPayloadSetPropByteString(outObject, "stringbase64", m_stringbase64);
+        }
+        if (OCRepPayloadGetPropByteString(object, "stringpattern", &m_stringpattern))
+        {
+            OCRepPayloadSetPropByteString(outObject, "stringpattern", m_stringpattern);
+        }
+        if (OCRepPayloadGetPropInt(object, "variant", &m_variant))
+        {
+            OCRepPayloadSetPropInt(outObject, "variant", m_variant);
+        }
+        OCRepPayloadSetPropObjectAsOwner(outPayload, "object", outObject);
+    }
+};
+
+class VariantProperties1 : public VariantProperties
+{
+public:
+    OCRepPayload* m_struct0;
+    VariantProperties1()
+        : m_struct0(NULL)
+    {
+        m_struct0 = OCRepPayloadCreate();
+        OCRepPayloadSetPropInt(m_struct0, "0", 1);
+        OCRepPayloadSetPropString(m_struct0, "1", "one");
+    }
+    virtual bool Get(OCRepPayload *payload)
+    {
+        OCRepPayload *object = OCRepPayloadCreate();
+        return object &&
+                OCRepPayloadSetPropObject(object, "struct0", m_struct0) &&
+                OCRepPayloadSetPropObjectAsOwner(payload, "object", object);
+    }
+    virtual void Post(const OCRepPayload *payload, OCRepPayload *outPayload)
+    {
+        OCRepPayload *object;
+        OCRepPayloadGetPropObject(payload, "object", &object);
+        OCRepPayload *outObject = OCRepPayloadCreate();
+        if (OCRepPayloadGetPropObject(object, "struct0", &m_struct0))
+        {
+            OCRepPayloadSetPropObject(outObject, "struct0", m_struct0);
+        }
+        OCRepPayloadSetPropObjectAsOwner(outPayload, "object", outObject);
+    }
+};
+
+class VariantProperties2 : public VariantProperties
+{
+public:
+    OCRepPayload* m_struct1;
+    VariantProperties2()
+        : m_struct1(NULL)
+    {
+        m_struct1 = OCRepPayloadCreate();
+        OCRepPayloadSetPropInt(m_struct1, "int", 1);
+        OCRepPayloadSetPropString(m_struct1, "string", "one");
+    }
+    virtual bool Get(OCRepPayload *payload)
+    {
+        OCRepPayload *object = OCRepPayloadCreate();
+        return object &&
+                OCRepPayloadSetPropObject(object, "struct1", m_struct1) &&
+                OCRepPayloadSetPropObjectAsOwner(payload, "object", object);
+    }
+    virtual void Post(const OCRepPayload *payload, OCRepPayload *outPayload)
+    {
+        OCRepPayload *object;
+        OCRepPayloadGetPropObject(payload, "object", &object);
+        OCRepPayload *outObject = OCRepPayloadCreate();
+        if (OCRepPayloadGetPropObject(object, "struct1", &m_struct1))
+        {
+            OCRepPayloadSetPropObject(outObject, "struct1", m_struct1);
+        }
+        OCRepPayloadSetPropObjectAsOwner(outPayload, "object", outObject);
+    }
+};
+
+class VariantProperties3 : public VariantProperties
+{
+public:
+    OCRepPayload* m_dict;
+    VariantProperties3()
+        : m_dict(NULL)
+    {
+        m_dict = OCRepPayloadCreate();
+        OCRepPayloadSetPropInt(m_dict, "int", 1);
+        OCRepPayloadSetPropString(m_dict, "string", "one");
+    }
+    virtual bool Get(OCRepPayload *payload)
+    {
+        OCRepPayload *object = OCRepPayloadCreate();
+        return object &&
+                OCRepPayloadSetPropObject(object, "dict", m_dict) &&
+                OCRepPayloadSetPropObjectAsOwner(payload, "object", object);
+    }
+    virtual void Post(const OCRepPayload *payload, OCRepPayload *outPayload)
+    {
+        OCRepPayload *object;
+        OCRepPayloadGetPropObject(payload, "object", &object);
+        OCRepPayload *outObject = OCRepPayloadCreate();
+        if (OCRepPayloadGetPropObject(object, "dict", &m_dict))
+        {
+            OCRepPayloadSetPropObject(outObject, "dict", m_dict);
+        }
+        OCRepPayloadSetPropObjectAsOwner(outPayload, "object", outObject);
+    }
+};
+
+static OCEntityHandlerResult VariantPropertiesEntityHandler(OCEntityHandlerFlag flag,
+        OCEntityHandlerRequest *request, void *ctx)
+{
+    (void) flag;
+    VariantProperties *properties = (VariantProperties *) ctx;
+    OCEntityHandlerResult result;
+    switch (request->method)
+    {
+        case OC_REST_GET:
+            {
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                if (!payload || !properties->Get(payload))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(payload);
+                OCStackResult doResult = OCDoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    OCRepPayloadDestroy(payload);
+                }
+                break;
+            }
+        case OC_REST_POST:
+            {
+                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayload *outPayload = CreatePayload(request->resource, request->query);
+                if (!outPayload)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                properties->Post((const OCRepPayload *) request->payload, outPayload);
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(outPayload);
+                OCStackResult doResult = OCDoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    OCRepPayloadDestroy(outPayload);
+                }
+                break;
+            }
+        default:
+            result = OC_EH_METHOD_NOT_ALLOWED;
+            break;
+    }
+    return result;
+}
+
+class TestVariantTypesResource : public TestResource
+{
+public:
+    virtual ~TestVariantTypesResource() { }
+    virtual void Create()
+    {
+        OCResourceHandle handle;
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt0", NULL,
+                "/resource/0", VariantPropertiesEntityHandler, &m_properties0,
+                OC_DISCOVERABLE | OC_OBSERVABLE));
+        m_handles.push_back(handle);
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt1", NULL,
+                "/resource/1", VariantPropertiesEntityHandler, &m_properties1,
+                OC_DISCOVERABLE | OC_OBSERVABLE));
+        m_handles.push_back(handle);
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt2", NULL,
+                "/resource/2", VariantPropertiesEntityHandler, &m_properties2,
+                OC_DISCOVERABLE | OC_OBSERVABLE));
+        m_handles.push_back(handle);
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt3", NULL,
+                "/resource/3", VariantPropertiesEntityHandler, &m_properties3,
+                OC_DISCOVERABLE | OC_OBSERVABLE));
+        m_handles.push_back(handle);
+    }
+    virtual const char *IntrospectionJson() { return m_introspectionJson; }
+    VariantProperties0 m_properties0;
+    VariantProperties1 m_properties1;
+    VariantProperties2 m_properties2;
+    VariantProperties3 m_properties3;
+private:
+    const char *m_introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": {"
+            "    \"/resource/0\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt0\" } ] } } }"
+            "      }"
+            "    },"
+            "    \"/resource/1\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt1\" } ] } } }"
+            "      }"
+            "    },"
+            "    \"/resource/2\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt2\" } ] } } }"
+            "      }"
+            "    },"
+            "    \"/resource/3\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt3\" } ] } } }"
+            "      }"
+            "    }"
+            "  },"
+            "  \"definitions\": {"
+            "    \"x.org.iotivity.rt0\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"object\": {"
+            "          \"type\": \"object\","
+            "          \"properties\": {"
+            "            \"byte\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 255 },"
+            "            \"uint16\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 65535 },"
+            "            \"int16\": { \"type\": \"integer\", \"minimum\": -32768, \"maximum\": 32767 },"
+            "            \"uint32\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 4294967295 },"
+            "            \"int32\": { \"type\": \"integer\", \"minimum\": -2147483648, \"maximum\": 2147483647 },"
+            "            \"uint64\": { \"type\": \"integer\", \"minimum\": 0 },"
+            "            \"int64\": { \"type\": \"integer\" },"
+            "            \"double\": { \"type\": \"number\" },"
+            "            \"uint64large\": { \"type\": \"string\", \"pattern\": \"^0([1-9][0-9]{0,19})$\" },"
+            "            \"int64large\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18)}$\" },"
+            "            \"string\": { \"type\": \"string\" },"
+            "            \"stringbase64\": { \"type\": \"string\", \"media\": { \"binaryEncoding\": \"base64\" } },"
+            "            \"stringpattern\": { \"type\": \"string\", \"pattern\": \"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$\" },"
+            "            \"variant\": { \"type\": [ \"integer\", \"string\" ] }"
+            "          }"
+            "        },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt0\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    },"
+            "    \"x.org.iotivity.rt1\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"object\": {"
+            "          \"type\": \"object\","
+            "          \"properties\": {"
+            "            \"struct0\": { \"type\": \"array\", \"items\": [ { \"type\": \"integer\", \"minimum\": -2147483648, \"maximum\": 2147483647 }, { \"type\": \"string\" } ], \"minItems\": 2, \"maxItems\": 2 }"
+            "          }"
+            "        },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt1\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    },"
+            "    \"x.org.iotivity.rt2\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"object\": {"
+            "          \"type\": \"object\","
+            "          \"properties\": {"
+            "            \"struct1\": { \"type\": \"object\", \"properties\": { \"int\": { \"type\": \"integer\", \"minimum\": -2147483648, \"maximum\": 2147483647 }, \"string\": { \"type\": \"string\" } } }"
+            "          }"
+            "        },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt2\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    },"
+            "    \"x.org.iotivity.rt3\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"object\": {"
+            "          \"type\": \"object\","
+            "          \"properties\": {"
+            "            \"dict\": { \"type\": \"object\" }"
+            "          }"
+            "        },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt3\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    }"
+            "  }"
+            "}";
+};
+
+TEST_F(OCFResource, VariantTypes)
+{
+    TestVariantTypesResource resource;
+    SetUpResource(&resource);
+
+    /* Need to use multiple resources to work around localhost blockwise transfer issue */
+    EXPECT_EQ(ER_OK, m_aboutListener->JoinSession());
+    ajn::ProxyBusObject *res0 = m_aboutListener->CreateProxyBusObject("/resource/0");
+    EXPECT_TRUE(res0 != NULL);
+    ajn::ProxyBusObject *res1 = m_aboutListener->CreateProxyBusObject("/resource/1");
+    EXPECT_TRUE(res1 != NULL);
+    ajn::ProxyBusObject *res2 = m_aboutListener->CreateProxyBusObject("/resource/2");
+    EXPECT_TRUE(res2 != NULL);
+    ajn::ProxyBusObject *res3 = m_aboutListener->CreateProxyBusObject("/resource/3");
+    EXPECT_TRUE(res2 != NULL);
+
+    ajn::MsgArg entries[16];
+    ajn::MsgArg *entry;
+    ajn::MsgArg value;
+    ajn::MsgArg values;
+    ajn::MsgArg elems[2];
+    elems[0].Set("{sv}", "int", new ajn::MsgArg("i", 1));
+    elems[1].Set("{sv}", "string", new ajn::MsgArg("s", "one"));
+
+    /* Get */
+    GetPropertyCall get0(res0);
+    EXPECT_EQ(ER_OK, get0.Call("org.iotivity.rt0", "object"));
+    EXPECT_EQ(ER_OK, get0.Wait(1000));
+    GetPropertyCall get1(res1);
+    EXPECT_EQ(ER_OK, get1.Call("org.iotivity.rt1", "object"));
+    EXPECT_EQ(ER_OK, get1.Wait(1000));
+    GetPropertyCall get2(res2);
+    EXPECT_EQ(ER_OK, get2.Call("org.iotivity.rt2", "object"));
+    EXPECT_EQ(ER_OK, get2.Wait(1000));
+    GetPropertyCall get3(res3);
+    EXPECT_EQ(ER_OK, get3.Call("org.iotivity.rt3", "object"));
+    EXPECT_EQ(ER_OK, get3.Wait(1000));
+
+    /* GetAll */
+    GetAllPropertiesCall getAll0(res0);
+    EXPECT_EQ(ER_OK, getAll0.Call("org.iotivity.rt0"));
+    EXPECT_EQ(ER_OK, getAll0.Wait(1000));
+    GetAllPropertiesCall getAll1(res1);
+    EXPECT_EQ(ER_OK, getAll1.Call("org.iotivity.rt1"));
+    EXPECT_EQ(ER_OK, getAll1.Wait(1000));
+    GetAllPropertiesCall getAll2(res2);
+    EXPECT_EQ(ER_OK, getAll2.Call("org.iotivity.rt2"));
+    EXPECT_EQ(ER_OK, getAll2.Wait(1000));
+    GetAllPropertiesCall getAll3(res3);
+    EXPECT_EQ(ER_OK, getAll3.Call("org.iotivity.rt3"));
+    EXPECT_EQ(ER_OK, getAll3.Wait(1000));
+
+    /* PropertiesChanged */
+    PropertiesChangedListener listener0;
+    EXPECT_EQ(ER_OK, res0->RegisterPropertiesChangedListener("org.iotivity.rt0", NULL, 0, listener0,
+            NULL));
+    PropertiesChangedListener listener1;
+    EXPECT_EQ(ER_OK, res1->RegisterPropertiesChangedListener("org.iotivity.rt1", NULL, 0, listener1,
+            NULL));
+    PropertiesChangedListener listener2;
+    EXPECT_EQ(ER_OK, res2->RegisterPropertiesChangedListener("org.iotivity.rt2", NULL, 0, listener2,
+            NULL));
+    PropertiesChangedListener listener3;
+    EXPECT_EQ(ER_OK, res3->RegisterPropertiesChangedListener("org.iotivity.rt3", NULL, 0, listener3,
+            NULL));
+    Wait(1000); /* Must wait for observe request to be processed */
+    listener0.m_calls = 0;
+    listener1.m_calls = 0;
+    listener2.m_calls = 0;
+    listener3.m_calls = 0;
+    resource.Notify("/resource/0");
+    resource.Notify("/resource/1");
+    resource.Notify("/resource/2");
+    resource.Notify("/resource/3");
+    Wait(1000);
+    EXPECT_EQ(1u, listener0.m_calls);
+    EXPECT_EQ(1u, listener1.m_calls);
+    EXPECT_EQ(1u, listener2.m_calls);
+    EXPECT_EQ(1u, listener3.m_calls);
+
+    /* Verify */
+    entry = entries;
+    (entry++)->Set("{sv}", "byte", new ajn::MsgArg("y", 1));
+    (entry++)->Set("{sv}", "uint16", new ajn::MsgArg("q", 1));
+    (entry++)->Set("{sv}", "int16", new ajn::MsgArg("n", 1));
+    (entry++)->Set("{sv}", "uint32", new ajn::MsgArg("u", 1));
+    (entry++)->Set("{sv}", "int32", new ajn::MsgArg("i", 1));
+    (entry++)->Set("{sv}", "uint64", new ajn::MsgArg("t", 1));
+    (entry++)->Set("{sv}", "int64", new ajn::MsgArg("x", 1));
+    (entry++)->Set("{sv}", "double", new ajn::MsgArg("d", 1.0));
+    (entry++)->Set("{sv}", "uint64large", new ajn::MsgArg("t", 1));
+    (entry++)->Set("{sv}", "int64large", new ajn::MsgArg("x", (int64_t) 1));
+    (entry++)->Set("{sv}", "string", new ajn::MsgArg("s", "one"));
+    uint8_t ay0[] = { 0, 1 };
+    (entry++)->Set("{sv}", "stringbase64", new ajn::MsgArg("ay", 2, ay0));
+    (entry++)->Set("{sv}", "stringpattern", new ajn::MsgArg("ay", 2, ay0));
+    (entry++)->Set("{sv}", "variant", new ajn::MsgArg("v", new ajn::MsgArg("i", 1)));
+    value.Set("v", new ajn::MsgArg("a{sv}", entry - entries, entries));
+    EXPECT_TRUE(value == get0.Value());
+    values.Set("a{sv}", 1, new ajn::MsgArg("{sv}", "object", new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_TRUE(values == getAll0.Values());
+    EXPECT_TRUE(values == listener0.Changed());
+
+    entry = entries;
+    (entry++)->Set("{sv}", "struct0", new ajn::MsgArg("(is)", 1, "one"));
+    value.Set("v", new ajn::MsgArg("a{sv}", entry - entries, entries));
+    EXPECT_TRUE(value == get1.Value());
+    values.Set("a{sv}", 1, new ajn::MsgArg("{sv}", "object", new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_TRUE(values == getAll1.Values());
+    EXPECT_TRUE(values == listener1.Changed());
+
+    entry = entries;
+    (entry++)->Set("{sv}", "struct1", new ajn::MsgArg("a{sv}", 2, elems));
+    value.Set("v", new ajn::MsgArg("a{sv}", entry - entries, entries));
+    EXPECT_TRUE(value == get2.Value());
+    values.Set("a{sv}", 1, new ajn::MsgArg("{sv}", "object", new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_TRUE(values == getAll2.Values());
+    EXPECT_TRUE(values == listener2.Changed());
+
+    entry = entries;
+    (entry++)->Set("{sv}", "dict", new ajn::MsgArg("a{sv}", 2, elems));
+    value.Set("v", new ajn::MsgArg("a{sv}", entry - entries, entries));
+    EXPECT_TRUE(value == get3.Value());
+    values.Set("a{sv}", 1, new ajn::MsgArg("{sv}", "object", new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_TRUE(values == getAll3.Values());
+    EXPECT_TRUE(values == listener3.Changed());
+
+    /* Set */
+    SetPropertyCall set0(res0);
+    entry = entries;
+    (entry++)->Set("{sv}", "byte", new ajn::MsgArg("y", 2));
+    (entry++)->Set("{sv}", "uint16", new ajn::MsgArg("q", 2));
+    (entry++)->Set("{sv}", "int16", new ajn::MsgArg("n", 2));
+    (entry++)->Set("{sv}", "uint32", new ajn::MsgArg("u", 2));
+    (entry++)->Set("{sv}", "int32", new ajn::MsgArg("i", 2));
+    (entry++)->Set("{sv}", "uint64", new ajn::MsgArg("t", 2));
+    (entry++)->Set("{sv}", "int64", new ajn::MsgArg("x", 2));
+    (entry++)->Set("{sv}", "double", new ajn::MsgArg("d", 2.0));
+    (entry++)->Set("{sv}", "uint64large", new ajn::MsgArg("t", 2));
+    (entry++)->Set("{sv}", "int64large", new ajn::MsgArg("x", (int64_t) 2));
+    (entry++)->Set("{sv}", "string", new ajn::MsgArg("s", "two"));
+    uint8_t ay2[] = { 2, 3 };
+    (entry++)->Set("{sv}", "stringbase64", new ajn::MsgArg("ay", 2, ay2));
+    (entry++)->Set("{sv}", "stringpattern", new ajn::MsgArg("ay", 2, ay2));
+    (entry++)->Set("{sv}", "variant", new ajn::MsgArg("v", new ajn::MsgArg("i", 2)));
+    EXPECT_EQ(ER_OK, set0.Call("org.iotivity.rt0", "object",
+            *new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_EQ(ER_OK, set0.Wait(1000));
+    /* Verify */
+    EXPECT_EQ(2, resource.m_properties0.m_byte);
+    EXPECT_EQ(2, resource.m_properties0.m_uint16);
+    EXPECT_EQ(2, resource.m_properties0.m_int16);
+    EXPECT_EQ(2, resource.m_properties0.m_uint32);
+    EXPECT_EQ(2, resource.m_properties0.m_int32);
+    EXPECT_EQ(2, resource.m_properties0.m_uint64);
+    EXPECT_EQ(2, resource.m_properties0.m_int64);
+    EXPECT_EQ(2.0, resource.m_properties0.m_double);
+    EXPECT_STREQ("2", resource.m_properties0.m_uint64large.c_str());
+    EXPECT_STREQ("2", resource.m_properties0.m_int64large.c_str());
+    EXPECT_STREQ("two", resource.m_properties0.m_string.c_str());
+    EXPECT_EQ(0, memcmp(ay2, resource.m_properties0.m_stringbase64.bytes, 2));
+    EXPECT_EQ(0, memcmp(ay2, resource.m_properties0.m_stringpattern.bytes, 2));
+    EXPECT_EQ(2, resource.m_properties0.m_variant);
+    SetPropertyCall set1(res1);
+    entry = entries;
+    (entry++)->Set("{sv}", "struct0", new ajn::MsgArg("(is)", 2, "two"));
+    EXPECT_EQ(ER_OK, set1.Call("org.iotivity.rt1", "object",
+            *new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_EQ(ER_OK, set1.Wait(1000));
+    int64_t i;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(resource.m_properties1.m_struct0, "0", &i));
+    EXPECT_EQ(2, i);
+    char *s;
+    EXPECT_TRUE(OCRepPayloadGetPropString(resource.m_properties1.m_struct0, "1", &s));
+    EXPECT_STREQ("two", s);
+    SetPropertyCall set2(res2);
+    entry = entries;
+    elems[0].Set("{sv}", "int", new ajn::MsgArg("i", 2));
+    elems[1].Set("{sv}", "string", new ajn::MsgArg("s", "two"));
+    (entry++)->Set("{sv}", "struct1", new ajn::MsgArg("a{sv}", 2, elems));
+    EXPECT_EQ(ER_OK, set2.Call("org.iotivity.rt2", "object",
+            *new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_EQ(ER_OK, set2.Wait(1000));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(resource.m_properties2.m_struct1, "int", &i));
+    EXPECT_EQ(2, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(resource.m_properties2.m_struct1, "string", &s));
+    EXPECT_STREQ("two", s);
+    SetPropertyCall set3(res3);
+    entry = entries;
+    (entry++)->Set("{sv}", "dict", new ajn::MsgArg("a{sv}", 2, elems));
+    EXPECT_EQ(ER_OK, set3.Call("org.iotivity.rt3", "object",
+            *new ajn::MsgArg("a{sv}", entry - entries, entries)));
+    EXPECT_EQ(ER_OK, set3.Wait(1000));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(resource.m_properties3.m_dict, "int", &i));
+    EXPECT_EQ(2, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(resource.m_properties3.m_dict, "string", &s));
+    EXPECT_STREQ("two", s);
+
+    delete res0;
+    delete res1;
+    delete res2;
+    delete res3;
     TearDownResource();
 }

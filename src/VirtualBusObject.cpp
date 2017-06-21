@@ -222,7 +222,8 @@ OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handl
         value.obj = (OCRepPayload *) response->payload;
         ajn::MsgArg args[3];
         args[0].Set("s", context->m_iface.c_str());
-        ToAJMsgArg(&args[1], "a{sv}", &value);
+        std::string valueType = std::string("[") + context->m_iface + ".Properties" + "]";
+        ToAJMsgArg(&args[1], "a{sv}", &value, valueType.c_str());
         args[2].Set("as", 0, NULL);
         const ajn::InterfaceDescription *iface = context->m_obj->m_bus->GetInterface(
                     ajn::org::freedesktop::DBus::Properties::InterfaceName);
@@ -287,12 +288,29 @@ void VirtualBusObject::GetPropCB(ajn::Message &msg, OCRepPayload *payload, void 
     (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
+    const char *propName = msg->GetArg(1)->v_string.str;
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (!iface)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_INTERFACE);
+        return;
+    }
+    const ajn::InterfaceDescription::Property *prop = iface->GetProperty(propName);
+    if (!prop)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_PROPERTY);
+        return;
+    }
+
     ajn::MsgArg arg;
     for (OCRepPayloadValue *value = payload->values; value; value = value->next)
     {
-        if (!strcmp(value->name, msg->GetArg(1)->v_string.str))
+        if (!strcmp(value->name, propName))
         {
-            ToAJMsgArg(&arg, "v", value);
+            qcc::String signature = prop->signature;
+            prop->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
+            ToAJMsgArg(&arg, "v", value, signature.c_str());
             break;
         }
     }
@@ -314,6 +332,19 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     const char *ifaceName = msg->GetArg(0)->v_string.str;
     const char *propName = msg->GetArg(1)->v_string.str;
     const ajn::MsgArg *arg = msg->GetArg(2);
+    qcc::String signature;
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (!iface)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_INTERFACE);
+        return;
+    }
+    const ajn::InterfaceDescription::Property *prop = iface->GetProperty(propName);
+    if (!prop)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_PROPERTY);
+        return;
+    }
     if (m_resources.size() > 1)
     {
         goto error;
@@ -333,7 +364,10 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     }
     uri = resource->m_uri;
     payload = OCRepPayloadCreate();
-    ToOCPayload(payload, propName, arg, arg->Signature().c_str());
+    signature = prop->signature;
+    prop->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
+    ToOCPayload(payload, propName, GetPropType(prop, arg->v_variant.val), arg->v_variant.val,
+            signature.c_str());
     DoResource(OC_REST_POST, uri, resource->m_addrs, payload, msg, &VirtualBusObject::SetPropCB);
     return;
 
@@ -407,12 +441,14 @@ void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload, v
     (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
     OCRepPayloadValue value;
     memset(&value, 0, sizeof(value));
     value.type = OCREP_PROP_OBJECT;
     value.obj = payload;
     ajn::MsgArg arg;
-    ToAJMsgArg(&arg, "a{sv}", &value);
+    std::string valueType = std::string("[") + ifaceName + ".Properties" + "]";
+    ToAJMsgArg(&arg, "a{sv}", &value, valueType.c_str());
     QStatus status = MethodReply(msg, &arg, 1);
     if (status != ER_OK)
     {

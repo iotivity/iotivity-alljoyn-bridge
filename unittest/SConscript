@@ -47,15 +47,19 @@ if env['TARGET_OS'] == 'linux':
                   'src/VirtualConfigurationResource.cpp',
                   'src/VirtualDevice.cpp',
                   'src/VirtualResource.cpp']
-    unittest_cpp = ['AboutData.cpp',
-                    'AllJoynProducer.cpp',
-                    'Name.cpp',
-                    'OCFResource.cpp',
+    unittest_cpp = ['AboutDataTest.cpp',
+                    'AllJoynProducerTest.cpp',
+                    'IntrospectionTest.cpp',
+                    'NameTest.cpp',
+                    'OCFResourceTest.cpp',
+                    'PayloadTest.cpp',
+                    'PayloadAdditionalTest.cpp',
                     'UnitTest.cpp',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
     env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include',
                                          '${IOTIVITY_BASE}/resource/c_common/oic_time/include',
+                                         '${IOTIVITY_BASE}/resource/csdk/stack/include/internal',
                                          '${IOTIVITY_BASE}/resource/csdk/stack/test',
                                          '#/src'])
     env_unittest.AppendUnique(LIBS = [

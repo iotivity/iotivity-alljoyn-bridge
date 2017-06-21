@@ -80,7 +80,7 @@ void AboutData::SetVendorFields(OCRepPayload *payload)
         if (!strncmp(value->name, "x.", 2))
         {
             const char *fieldName = value->name + 2; /* Skip the leading x. */
-            char fieldSig[] = "aaaa{sv}";
+            char fieldSig[256] = { 0 };
             CreateSignature(fieldSig, value); // TODO get this from introspection data when available
             ajn::MsgArg fieldValue;
             ToAJMsgArg(&fieldValue, fieldSig, value);

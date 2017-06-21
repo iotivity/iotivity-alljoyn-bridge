@@ -42,10 +42,15 @@ typedef enum
 typedef std::pair<std::string, std::string> Annotation;
 typedef std::vector<Annotation> Annotations;
 
+/*
+ * Creates CBOR-encoded introspection data from the supplied BusAttachment.
+ */
 CborError Introspect(ajn::BusAttachment *bus, const char *ajSoftwareVersion, const char *title,
         const char *version, uint8_t *out, size_t *outSize);
 
 /*
+ * Creates an introspection definition object from a GET request payload.
+ *
  * @param[in] payload a response payload to create the schema from
  * @param[in] resourceType the resource type of payload
  * @param[in] interfaces the interfaces implemented by the resource
@@ -56,6 +61,8 @@ OCRepPayload *IntrospectDefinition(OCRepPayload *payload, std::string resourceTy
         std::vector<std::string> &interfaces);
 
 /*
+ * Creates an introspection path object from the supplied resource types and interfaces.
+ *
  * @param[in] resourceTypes the resource types implemented by the resource
  * @param[in] interfaces the interfaces implemented by the resource
  *

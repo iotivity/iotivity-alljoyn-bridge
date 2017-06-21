@@ -20,6 +20,7 @@
 
 #include "Signature.h"
 
+#include "ocpayload.h"
 #include <alljoyn/MsgArg.h>
 #include <assert.h>
 
@@ -112,51 +113,128 @@ void CreateSignature(char *sig, OCRepPayloadValue *value)
             assert(0); /* Explicitly not supported */
             break;
         case OCREP_PROP_INT:
-            strcpy(sig, "i");
+            if (value->i < INT32_MIN || INT32_MAX < value->i)
+            {
+                strcat(sig, "x");
+            }
+            else
+            {
+                strcat(sig, "i");
+            }
             break;
         case OCREP_PROP_DOUBLE:
-            strcpy(sig, "d");
+            strcat(sig, "d");
             break;
         case OCREP_PROP_BOOL:
-            strcpy(sig, "b");
+            strcat(sig, "b");
             break;
         case OCREP_PROP_STRING:
-            strcpy(sig, "s");
+            strcat(sig, "s");
             break;
         case OCREP_PROP_BYTE_STRING:
-            strcpy(sig, "ay");
+            strcat(sig, "ay");
             break;
         case OCREP_PROP_OBJECT:
-            strcpy(sig, "a{sv}");
-            break;
+            {
+                /* The object is a struct when names are consecutive non-negative integers. */
+                if (!value->obj || !value->obj->values)
+                {
+                    strcat(sig, "a{sv}");
+                    break;
+                }
+                size_t n = 0;
+                OCRepPayloadValue *v;
+                for (v = value->obj->values; v; v = v->next)
+                {
+                    char *endp;
+                    long i = strtol(v->name, &endp, 0);
+                    if (*endp != '\0' || i < 0 || n != (size_t)i)
+                    {
+                        break;
+                    }
+                    ++n;
+                }
+                if (v)
+                {
+                    strcat(sig, "a{sv}");
+                }
+                else
+                {
+                    strcat(sig, "(");
+                    for (v = value->obj->values; v; v = v->next)
+                    {
+                        CreateSignature(sig, v);
+                    }
+                    strcat(sig, ")");
+                }
+                break;
+            }
         case OCREP_PROP_ARRAY:
             CreateSignature(sig, &value->arr);
             break;
     }
 }
 
-void CreateSignature(char *sig, OCRepPayloadValueArray *arr)
+void CreateSignature(char *sig, OCRepPayloadValueArray *arr, uint8_t di)
 {
-    for (size_t i = 0; i < MAX_REP_ARRAY_DEPTH; ++i)
+    for (size_t i = di; i < MAX_REP_ARRAY_DEPTH; ++i)
     {
         if (arr->dimensions[i])
         {
-            *sig++ = 'a';
+            strcat(sig, "a");
         }
     }
     switch (arr->type)
     {
         case OCREP_PROP_NULL:
-        case OCREP_PROP_INT:
         case OCREP_PROP_DOUBLE:
         case OCREP_PROP_BOOL:
         case OCREP_PROP_STRING:
         case OCREP_PROP_BYTE_STRING:
-        case OCREP_PROP_OBJECT:
             {
                 OCRepPayloadValue valueArr;
                 valueArr.type = arr->type;
                 CreateSignature(sig, &valueArr);
+                break;
+            }
+        case OCREP_PROP_OBJECT:
+            {
+                /* The signatures must be the same for all array elements */
+                char *sigp = sig + strlen(sig);
+                size_t dimTotal = calcDimTotal(arr->dimensions);
+                OCRepPayloadValue valueArr;
+                valueArr.type = arr->type;
+                valueArr.obj = dimTotal ? arr->objArray[0] : NULL;
+                CreateSignature(sig, &valueArr);
+                char s[256];
+                for (size_t i = 1; i < dimTotal; ++i)
+                {
+                    s[0] = 0;
+                    valueArr.type = arr->type;
+                    valueArr.obj = arr->objArray[i];
+                    CreateSignature(s, &valueArr);
+                    if (strcmp(sigp, s))
+                    {
+                        *sigp = 0;
+                        strcat(sig, "a{sv}");
+                        break;
+                    }
+                }
+                break;
+            }
+        case OCREP_PROP_INT:
+            {
+                const char *s = "i";
+                size_t dimTotal = calcDimTotal(arr->dimensions);
+                for (size_t i = 0; i < dimTotal; ++i)
+                {
+                    if (arr->iArray[i] < INT32_MIN || INT32_MAX < arr->iArray[i])
+                    {
+                        s = "x";
+                        break;
+                    }
+                }
+                strcat(sig, s);
                 break;
             }
         case OCREP_PROP_ARRAY:

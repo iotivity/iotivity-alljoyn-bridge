@@ -186,6 +186,12 @@ OCStackResult VirtualResource::CreateResource(OCResourceHandle *handle, std::str
     if (result == OC_STACK_OK)
     {
         LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, path.c_str());
+        uint8_t n = 0;
+        OCGetNumberOfResourceTypes(*handle, &n);
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            LOG(LOG_INFO, "[%p]     %s", this, OCGetResourceTypeName(*handle, i));
+        }
     }
     else
     {
@@ -454,8 +460,9 @@ static bool ToFilteredOCPayload(OCRepPayload *payload,
                 property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
             }
             qcc::String propName = GetPropName(iface, key);
-            success = ToOCPayload(payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val,
-                                  signature.c_str());
+            success = ToOCPayload(payload, propName.c_str(),
+                    GetPropType(property, entry->v_dictEntry.val->v_variant.val),
+                    entry->v_dictEntry.val->v_variant.val, signature.c_str());
         }
     }
     return success;
@@ -949,8 +956,9 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                                 "org.alljoyn.Bus.Type.Name", sig);
                     }
                     propName = GetPropName(context->m_member, argName);
-                    success = ToOCPayload((OCRepPayload *) payload, propName.c_str(), &outArgs[i],
-                            sig.c_str());
+                    success = ToOCPayload((OCRepPayload *) payload, propName.c_str(),
+                            GetPropType(context->m_member, argName.c_str(), &outArgs[i]),
+                            &outArgs[i], sig.c_str());
                 }
             }
             if (success)
@@ -984,8 +992,7 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
 /* Called with m_mutex held. */
 QStatus VirtualResource::Set(SetContext *context)
 {
-    LOG(LOG_INFO, "[%p] context=%p",
-        this, context);
+    LOG(LOG_INFO, "[%p] context=%p name=%s", this, context, context->m_value->name);
 
     std::string valueName = context->m_value->name;
     std::string propName = GetMember(valueName);
@@ -1017,8 +1024,7 @@ QStatus VirtualResource::Set(SetContext *context)
 
 void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] msg={type=%d},ctx=%p", this, msg->GetType(), ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     SetContext *context = reinterpret_cast<SetContext *>(ctx);
@@ -1043,6 +1049,7 @@ void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
                 QStatus status = Set(context);
                 if (status == ER_OK)
                 {
+                    result = OC_STACK_OK;
                     break;
                 }
                 /* FALLTHROUGH */
@@ -1162,7 +1169,8 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
                     member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                 }
                 propName = GetPropName(member, argName);
-                success = ToOCPayload(payload, propName.c_str(), &args[i], sig.c_str());
+                success = ToOCPayload(payload, propName.c_str(),
+                        GetPropType(member, argName.c_str(), &args[i]), &args[i], sig.c_str());
             }
             if (success)
             {
@@ -1229,8 +1237,7 @@ void VirtualResource::GetAllInvalidatedCB(ajn::Message &msg, void *ctx)
 /* Called with m_mutex held. */
 QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
 {
-    LOG(LOG_INFO, "[%p] context=%p",
-        this, context);
+    LOG(LOG_INFO, "[%p] context=%p", this, context);
 
     for (; (context->m_iface < context->m_numIfaces)
          && (context->m_response->ehResult == OC_EH_OK); ++context->m_iface)
@@ -1313,8 +1320,7 @@ exit:
 
 void VirtualResource::GetAllBaselineCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] ctx=%p", this, ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     GetAllBaselineContext *context = reinterpret_cast<GetAllBaselineContext *>(ctx);

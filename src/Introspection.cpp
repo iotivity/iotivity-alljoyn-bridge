@@ -476,10 +476,6 @@ static int64_t GetJsonType(CborEncoder *cbor, const char *ajType,
                     err |= cbor_encoder_close_container(cbor, &media);
                     VERIFY_CBOR(err);
                     break;
-                case ajn::ALLJOYN_VARIANT:
-                    err |= Pair(cbor, "type", "undefined");
-                    VERIFY_CBOR(err);
-                    break;
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
                     err |= Pair(cbor, "type", "object");
                     VERIFY_CBOR(err);
@@ -492,8 +488,7 @@ static int64_t GetJsonType(CborEncoder *cbor, const char *ajType,
                     VERIFY_CBOR(err);
                     err |= cbor_encoder_create_map(cbor, &items, CborIndefiniteLength);
                     VERIFY_CBOR(err);
-                    qcc::String min, max, def;
-                    err |= GetJsonType(&items, &ajType[1], min, max, def);
+                    err |= GetJsonType(&items, &ajType[1], typeMin, typeMax, typeDefault);
                     VERIFY_CBOR(err);
                     err |= cbor_encoder_close_container(cbor, &items);
                     VERIFY_CBOR(err);
@@ -501,53 +496,58 @@ static int64_t GetJsonType(CborEncoder *cbor, const char *ajType,
             }
             break;
         case ajn::ALLJOYN_STRUCT_OPEN:
-            err |= Pair(cbor, "type", "array");
-            VERIFY_CBOR(err);
+            {
+                err |= Pair(cbor, "type", "array");
+                VERIFY_CBOR(err);
+                CborEncoder items;
+                err |= cbor_encode_text_stringz(cbor, "items");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_array(cbor, &items, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                int64_t numItems = 0;
+                const char *signature = &ajType[1];
+                const char *argSignature = signature;
+                while (ParseCompleteType(signature) == ER_OK)
+                {
+                    std::string sig(argSignature, signature - argSignature);
+                    argSignature = signature;
+                    qcc::String min, max, def;
+                    CborEncoder item;
+                    err |= cbor_encoder_create_map(&items, &item, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= GetJsonType(&item, sig.c_str(), min, max, def);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&items, &item);
+                    VERIFY_CBOR(err);
+                    ++numItems;
+                }
+                err |= cbor_encoder_close_container(cbor, &items);
+                VERIFY_CBOR(err);
+                err |= Pair(cbor, "minItems", numItems);
+                VERIFY_CBOR(err);
+                err |= Pair(cbor, "maxItems", numItems);
+                VERIFY_CBOR(err);
+            }
             break;
         case ajn::ALLJOYN_VARIANT:
-            CborEncoder anyOf;
-            err |= cbor_encode_text_stringz(cbor, "anyOf");
+            CborEncoder types;
+            err |= cbor_encode_text_stringz(cbor, "type");
             VERIFY_CBOR(err);
-            err |= cbor_encoder_create_array(cbor, &anyOf, CborIndefiniteLength);
+            err |= cbor_encoder_create_array(cbor, &types, CborIndefiniteLength);
             VERIFY_CBOR(err);
-            CborEncoder type;
-            err |= cbor_encoder_create_map(&anyOf, &type, 1);
+            err |= cbor_encode_text_stringz(&types, "boolean");
             VERIFY_CBOR(err);
-            err |= Pair(&type, "type", "string");
+            err |= cbor_encode_text_stringz(&types, "object");
             VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&anyOf, &type);
+            err |= cbor_encode_text_stringz(&types, "array");
             VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&anyOf, &type, 1);
+            err |= cbor_encode_text_stringz(&types, "number");
             VERIFY_CBOR(err);
-            err |= Pair(&type, "type", "integer");
+            err |= cbor_encode_text_stringz(&types, "string");
             VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&anyOf, &type);
+            err |= cbor_encode_text_stringz(&types, "integer");
             VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&anyOf, &type, 1);
-            VERIFY_CBOR(err);
-            err |= Pair(&type, "type", "number");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&anyOf, &type);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&anyOf, &type, 1);
-            VERIFY_CBOR(err);
-            err |= Pair(&type, "type", "object");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&anyOf, &type);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&anyOf, &type, 1);
-            VERIFY_CBOR(err);
-            err |= Pair(&type, "type", "array");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&anyOf, &type);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&anyOf, &type, 1);
-            VERIFY_CBOR(err);
-            err |= Pair(&type, "type", "boolean");
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&anyOf, &type);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(cbor, &anyOf);
+            err |= cbor_encoder_close_container(cbor, &types);
             VERIFY_CBOR(err);
             break;
         case '[':
