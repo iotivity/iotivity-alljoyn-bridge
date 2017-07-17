@@ -1463,7 +1463,7 @@ TEST_F(OCFResource, EachOCFResourceShallBeMappedToASeparateAllJoynObject)
 TEST_F(OCFResource, EachOCFServerShallBeExposedAsASeparateAllJoynProducerApplicationWithItsOwnAboutData)
 {
     // TODO This can't be unit tested yet
-    EXPECT_TRUE(false);
+    FAIL();
 }
 
 TEST_F(OCFResource, TheAllJoynProducerApplicationShallImplementTheOicDVirtualAllJoynInterface)
@@ -1479,7 +1479,7 @@ TEST_F(OCFResource, TheAllJoynProducerApplicationShallImplementTheOicDVirtualAll
 TEST_F(OCFResource, TheAllJoynPeerIdShallBeTheOCFDeviceId)
 {
     // TODO No API to set peer ID in AllJoyn
-    EXPECT_TRUE(false);
+    FAIL();
 }
 
 TEST_F(OCFResource, TheTranslatorShallEitherNotTranslateTheResourceTypeOrAlgorithmicallyMapTheResourceType)
@@ -1640,19 +1640,19 @@ TEST_F(OCFResource, IfTheResourceSupportsDeleteADeleteMethodShallAppearInTheInte
 {
     // TODO Which interface to add delete method to? See example from oic.wk.d: no rt in
     // queryParameters and arguments provided as queryParameters, not in the body
-    EXPECT_TRUE(false);
+    FAIL();
 }
 
 TEST_F(OCFResource, IfTheResourceSupportsCreateACreateMethodShallAppearInTheInterfaceWithInputArgumentsOfEachPropertyOfTheResourceToCreate)
 {
     // TODO It cannot be determined yet if a resource supports create
-    EXPECT_TRUE(false);
+    FAIL();
 }
 
 TEST_F(OCFResource, IfTheInputArgumentsOfEachPropertyOfTheResourceToCreateIsNotAvailableACreateWithDefaultValuesMethodShallAppearWhichTakesNoInputArguments)
 {
     // TODO It cannot be determined yet if a resource supports create
-    EXPECT_TRUE(false);
+    FAIL();
 }
 
 TEST_F(OCFResource, IfTheResourceSupportsUpdateThenAnAllJoynPropertySetOperationShallBeMappedToAPartialUpdateWithTheCorrespondingOCFProperty)

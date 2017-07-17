@@ -466,6 +466,35 @@ TEST_F(AllJoynProducer, WhenAllJoynInterfacesCanBeTranslatedToResourceTypesOnThe
     delete context;
 }
 
+static void VerifyAllJoynObjectLinks(DiscoverContext *context, OCDevAddr addr,
+        OCRepPayload *payload)
+{
+    OCRepPayload **arr;
+    size_t dim[MAX_REP_ARRAY_DEPTH];
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "links", &arr, dim));
+    size_t dimTotal = calcDimTotal(dim);
+    EXPECT_EQ(2u, dimTotal);
+    for (size_t i = 0; i < dimTotal; ++i)
+    {
+        OCResourcePayload *rp = ParseLink(arr[i]);
+        Resource resource(addr, context->m_device->m_di.c_str(), rp);
+        if (resource.m_isObservable)
+        {
+            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
+                    "x.org.iotivity.-interface.true"));
+            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
+                    "x.org.iotivity.-interface.invalidates"));
+        }
+        else
+        {
+            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
+                    "x.org.iotivity.-interface.const"));
+            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
+                    "x.org.iotivity.-interface.false"));
+        }
+    }
+}
+
 TEST_F(AllJoynProducer, WhenAllJoynInterfacesCannotBeTranslatedToResourceTypesOnTheSameResourceThereShouldBeACollectionOfVirtualOCFResources)
 {
     const char *xml =
@@ -515,30 +544,7 @@ TEST_F(AllJoynProducer, WhenAllJoynInterfacesCannotBeTranslatedToResourceTypesOn
     EXPECT_TRUE(getCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
-    OCRepPayload **arr;
-    size_t dim[MAX_REP_ARRAY_DEPTH];
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "links", &arr, dim));
-    size_t dimTotal = calcDimTotal(dim);
-    EXPECT_EQ(2u, dimTotal);
-    for (size_t i = 0; i < dimTotal; ++i)
-    {
-        OCResourcePayload *rp = ParseLink(arr[i]);
-        Resource resource(getCB.m_response->devAddr, context->m_device->m_di.c_str(), rp);
-        if (resource.m_isObservable)
-        {
-            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
-                    "x.org.iotivity.-interface.true"));
-            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
-                    "x.org.iotivity.-interface.invalidates"));
-        }
-        else
-        {
-            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
-                    "x.org.iotivity.-interface.const"));
-            EXPECT_NE(resource.m_rts.end(), std::find(resource.m_rts.begin(), resource.m_rts.end(),
-                    "x.org.iotivity.-interface.false"));
-        }
-    }
+    VerifyAllJoynObjectLinks(context, getCB.m_response->devAddr, payload);
 
     delete context;
 }
@@ -942,7 +948,7 @@ TEST_F(AllJoynProducer, InAnUpdateRequestAValidityValueOfFalseShallResultInAnErr
             postCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
 
-    EXPECT_NE(OC_STACK_OK, postCB.m_response->result);
+    EXPECT_GT(postCB.m_response->result, OC_STACK_RESOURCE_CHANGED);
 
     delete context;
 }
@@ -2137,4 +2143,122 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, setCB.m_response->result);
 
     delete context;
+}
+
+/*
+ * 1.2 AllJoyn Object
+ */
+
+TEST_F(AllJoynProducer, GetAllJoynObjectBaseline)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='false'/>"
+            "  </property>"
+            "  <property name='True' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath()) + "?if=oic.if.baseline";
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_STREQ("oic.wk.col", payload->types->value);
+    EXPECT_STREQ("oic.r.alljoynobject", payload->types->next->value);
+    EXPECT_TRUE(payload->types->next->next == NULL);
+    EXPECT_STREQ("oic.if.baseline", payload->interfaces->value);
+    EXPECT_STREQ("oic.if.ll", payload->interfaces->next->value);
+    EXPECT_TRUE(payload->interfaces->next->next == NULL);
+    char **arr;
+    size_t dim[MAX_REP_ARRAY_DEPTH];
+    EXPECT_TRUE(OCRepPayloadGetStringArray(payload, "rts", &arr, dim));
+    size_t dimTotal = calcDimTotal(dim);
+    EXPECT_EQ(6u, dimTotal);
+    static const char *rts[] = {
+        "x.org.iotivity.-interface.const", "x.org.iotivity.-interface.false",
+        "x.org.iotivity.-interface.invalidates", "x.org.iotivity.-interface.true", "oic.wk.col",
+        "oic.r.alljoynobject" };
+    bool foundRt[] = {
+        false, false,
+        false, false, false,
+        false };
+    for (size_t i = 0; i < dimTotal; ++i)
+    {
+        for (size_t j = 0; j < dimTotal; ++j)
+        {
+            if (!strcmp(rts[j], arr[i]))
+            {
+                foundRt[j] = true;
+                break;
+            }
+        }
+    }
+    for (size_t j = 0; j < dimTotal; ++j)
+    {
+        EXPECT_TRUE(foundRt[j]);
+    }
+    VerifyAllJoynObjectLinks(context, getCB.m_response->devAddr, payload);
+
+    delete context;
+}
+
+TEST_F(AllJoynProducer, GetAllJoynObjectLL)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='false'/>"
+            "  </property>"
+            "  <property name='True' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath()) + "?if=oic.if.ll";
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_TRUE(payload->types == NULL);
+    EXPECT_TRUE(payload->interfaces == NULL);
+    VerifyAllJoynObjectLinks(context, getCB.m_response->devAddr, payload);
+
+    delete context;
+}
+
+TEST_F(AllJoynProducer, PostAllJoynObjectBaseline)
+{
+    FAIL();
+}
+
+TEST_F(AllJoynProducer, ObserveAllJoynObject)
+{
+    FAIL();
 }

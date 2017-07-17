@@ -39,6 +39,7 @@ if env['TARGET_OS'] == 'linux':
                   'src/PlatformConfigurationResource.cpp',
                   'src/PlatformResource.cpp',
                   'src/Resource.cpp',
+                  'src/SecureModeResource.cpp',
                   'src/Security.cpp',
                   'src/Signature.cpp',
                   'src/VirtualBusAttachment.cpp',
@@ -54,6 +55,7 @@ if env['TARGET_OS'] == 'linux':
                     'OCFResourceTest.cpp',
                     'PayloadTest.cpp',
                     'PayloadAdditionalTest.cpp',
+                    'SecureModeResourceTest.cpp',
                     'UnitTest.cpp',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
                     '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']

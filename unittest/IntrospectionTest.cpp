@@ -865,3 +865,13 @@ TEST_F(Introspection, Examples)
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("integer", s);
 }
+
+TEST_F(Introspection, SecureModeResource)
+{
+    FAIL();
+}
+
+TEST_F(Introspection, AllJoynObjectResource)
+{
+    FAIL();
+}

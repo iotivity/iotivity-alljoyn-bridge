@@ -31,6 +31,7 @@
 #include "Plugin.h"
 #include "Presence.h"
 #include "Resource.h"
+#include "SecureModeResource.h"
 #include "Security.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
@@ -109,7 +110,7 @@ struct Bridge::DiscoverContext
             m_r = m_context->m_device.m_resources.begin();
             while (m_r != m_context->m_device.m_resources.end())
             {
-                if (!m_context->m_bridge->m_secureMode || m_r->IsSecure())
+                if (!m_context->m_bridge->m_secureMode->GetSecureMode() || m_r->IsSecure())
                 {
                     m_rt = m_r->m_rts.begin();
                     while (m_rt != m_r->m_rts.end())
@@ -163,24 +164,26 @@ struct Bridge::DiscoverContext
 
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(protocols), m_sender(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(NULL),
       m_rdPublishTask(NULL), m_pending(0)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
     m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
     m_ocSecurity = new OCSecurity();
+    m_secureMode = new SecureModeResource(m_mutex, SECURE_MODE_DEFAULT);
 }
 
 Bridge::Bridge(const char *name, const char *sender)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(NULL),
       m_rdPublishTask(NULL), m_pending(0)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
     m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
     m_ocSecurity = new OCSecurity();
+    m_secureMode = new SecureModeResource(m_mutex, SECURE_MODE_DEFAULT);
 }
 
 Bridge::~Bridge()
@@ -223,6 +226,11 @@ Bridge::~Bridge()
     delete m_ocSecurity;
     delete m_ajSecurity;
     delete m_bus;
+}
+
+void Bridge::SetSecureMode(bool secureMode)
+{
+    m_secureMode->SetSecureMode(secureMode);
 }
 
 /* Called with m_mutex held. */
@@ -359,12 +367,10 @@ bool Bridge::Start()
             return false;
         }
 
-        result = CreateResource(&handle, "/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
-                OC_RSRVD_INTERFACE_READ_WRITE, Bridge::EntityHandlerCB, this,
-                OC_DISCOVERABLE | OC_OBSERVABLE);
+        result = m_secureMode->Create();
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "CreateResource() - %d", result);
+            LOG(LOG_ERR, "SecureModeResource::Create() - %d", result);
             return false;
         }
         SetIntrospectionData(NULL, NULL, "TITLE", "VERSION");
@@ -655,7 +661,7 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
 
     std::lock_guard<std::mutex> lock(m_mutex);
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
-    if (m_secureMode && (status != ER_OK))
+    if (m_secureMode->GetSecureMode() && (status != ER_OK))
     {
         LOG(LOG_ERR, "SecureConnectionCB - %s", QCC_StatusText(status));
     }
@@ -962,7 +968,7 @@ bool Bridge::HasTranslatableResource(OCDiscoveryPayload *payload)
 {
     for (OCResourcePayload *resource = payload->resources; resource; resource = resource->next)
     {
-        if (m_secureMode && !IsSecure(resource))
+        if (m_secureMode->GetSecureMode() && !IsSecure(resource))
         {
             continue;
         }
@@ -1643,108 +1649,6 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
     }
 exit:
     delete presence;
-}
-
-/* Called with m_mutex held. */
-OCRepPayload *Bridge::GetSecureMode(OCEntityHandlerRequest *request)
-{
-    OCRepPayload *payload = CreatePayload(request->resource, request->query);
-    if (!OCRepPayloadSetPropBool(payload, "secureMode", m_secureMode))
-    {
-        OCRepPayloadDestroy(payload);
-        payload = NULL;
-    }
-    return payload;
-}
-
-/* Called with m_mutex held. */
-bool Bridge::PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged)
-{
-    OCRepPayload *payload = (OCRepPayload *) request->payload;
-    bool secureMode;
-    if (!OCRepPayloadGetPropBool(payload, "secureMode", &secureMode))
-    {
-        return false;
-    }
-    hasChanged = (m_secureMode != secureMode);
-    m_secureMode = secureMode;
-    return true;
-}
-
-OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
-        OCEntityHandlerRequest *request,
-        void *ctx)
-{
-    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
-        ctx, flag, request, ctx);
-
-    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
-    thiz->m_mutex.lock();
-    bool hasChanged = false;
-    OCEntityHandlerResult result;
-    switch (request->method)
-    {
-        case OC_REST_GET:
-            {
-                OCEntityHandlerResponse response;
-                memset(&response, 0, sizeof(response));
-                response.requestHandle = request->requestHandle;
-                response.resourceHandle = request->resource;
-                OCRepPayload *payload = thiz->GetSecureMode(request);
-                if (!payload)
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                result = OC_EH_OK;
-                response.ehResult = result;
-                response.payload = reinterpret_cast<OCPayload *>(payload);
-                OCStackResult doResult = OCDoResponse(&response);
-                if (doResult != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
-                    OCRepPayloadDestroy(payload);
-                }
-                break;
-            }
-        case OC_REST_POST:
-            {
-                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                if (!thiz->PostSecureMode(request, hasChanged))
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                OCEntityHandlerResponse response;
-                memset(&response, 0, sizeof(response));
-                response.requestHandle = request->requestHandle;
-                response.resourceHandle = request->resource;
-                OCRepPayload *outPayload = thiz->GetSecureMode(request);
-                result = OC_EH_OK;
-                response.ehResult = result;
-                response.payload = reinterpret_cast<OCPayload *>(outPayload);
-                OCStackResult doResult = OCDoResponse(&response);
-                if (doResult != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "OCDoResponse - %d", doResult);
-                    OCRepPayloadDestroy(outPayload);
-                }
-                break;
-            }
-        default:
-            result = OC_EH_METHOD_NOT_ALLOWED;
-            break;
-    }
-    thiz->m_mutex.unlock();
-    if (hasChanged)
-    {
-        OCNotifyAllObservers(request->resource, OC_NA_QOS);
-    }
-    return result;
 }
 
 static const char *SeenStateText[] = { "NOT_SEEN", "SEEN_NATIVE", "SEEN_VIRTUAL" };

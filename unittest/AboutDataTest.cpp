@@ -360,7 +360,6 @@ TEST_F(ConfigDataTest, SetFieldsFromDeviceConfiguration)
     const char *vendorField = "org.iotivity.Field";
     const char *vendorValue = "value";
     EXPECT_TRUE(OCRepPayloadSetPropString(payload, vendorProperty, vendorValue));
-    // TODO other OC types
 
     AboutData aboutData(NULL);
     aboutData.Set(payload);
@@ -415,7 +414,6 @@ TEST_F(ConfigDataTest, SetFieldsFromPlatformConfiguration)
     const char *vendorField = "org.iotivity.Field";
     const char *vendorValue = "value";
     EXPECT_TRUE(OCRepPayloadSetPropString(payload, vendorProperty, vendorValue));
-    // TODO other OC types
 
     AboutData aboutData("en");
     aboutData.Set(payload);

@@ -38,9 +38,6 @@
 /* Platform name, localized */
 #define OC_RSRVD_PLATFORM_NAME "mnpn"
 
-/** To represent secure mode resource type.*/
-#define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
-
 extern std::string gRD;
 
 OCStackResult RDPublish();

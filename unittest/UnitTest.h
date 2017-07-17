@@ -50,7 +50,6 @@ protected:
     void Wait(long waitMs);
 };
 
-/* TODO fold addition of context to Callback and change in Wait units back into gtest_helper.h */
 class Callback
 {
 public:

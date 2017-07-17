@@ -36,6 +36,7 @@
 class AllJoynSecurity;
 class OCSecurity;
 class Presence;
+class SecureModeResource;
 class VirtualBusAttachment;
 class VirtualBusObject;
 class VirtualDevice;
@@ -67,7 +68,7 @@ class Bridge : private ajn::AboutListener
         typedef void (*SessionLostCB)();
         void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
         void SetManufacturerName(const char *manufacturerName) { m_manufacturerName = manufacturerName; }
-        void SetSecureMode(bool secureMode) { m_secureMode = secureMode; }
+        void SetSecureMode(bool secureMode);
 
         bool Start();
         bool Stop();
@@ -129,7 +130,7 @@ class Bridge : private ajn::AboutListener
         std::vector<VirtualResource *> m_virtualResources;
         std::vector<VirtualBusAttachment *> m_virtualBusAttachments;
         std::map<OCDoHandle, DiscoverContext *> m_discovered;
-        bool m_secureMode;
+        SecureModeResource *m_secureMode;
         std::list<Task*> m_tasks;
         RDPublishTask *m_rdPublishTask;
         size_t m_pending;
