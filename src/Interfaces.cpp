@@ -64,8 +64,6 @@ namespace ajn {
 bool IsInterfaceInWellDefinedSet(const char *name)
 {
     const char *wellDefined[] = {
-        /* From spec */
-        "org.alljoyn.About", "org.alljoyn.Config",
         /* OCF ASA Mapping */
         "Environment.CurrentAirQuality", "Environment.CurrentAirQualityLevel",
         "Environment.CurrentHumidity", "Environment.CurrentTemperature",
@@ -96,10 +94,6 @@ bool IsInterfaceInWellDefinedSet(const char *name)
 bool IsResourceTypeInWellDefinedSet(const char *name)
 {
     const char *wellDefined[] = {
-        /* From spec */
-        OC_RSRVD_RESOURCE_TYPE_DEVICE, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION,
-        OC_RSRVD_RESOURCE_TYPE_MAINTENANCE, OC_RSRVD_RESOURCE_TYPE_PLATFORM,
-        OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION,
         /* OCF ASA Mapping */
         "oic.r.airflow", "oic.r.airqualitycollection", "oic.r.audio", "oic.r.door", "oic.r.ecomode",
         "oic.r.energy.battery", "oic.r.energy.usage", "oic.r.heatingzonecollection",
@@ -140,6 +134,16 @@ bool TranslateInterface(const char *name)
             return false;
         }
     }
+    const char *doDeepTranslation[] = {
+        "org.alljoyn.Config"
+    };
+    for (size_t i = 0; i < sizeof(doDeepTranslation) / sizeof(doDeepTranslation[0]); ++i)
+    {
+        if (!strcmp(doDeepTranslation[i], name))
+        {
+            return true;
+        }
+    }
     return !IsInterfaceInWellDefinedSet(name);
 }
 
@@ -147,7 +151,8 @@ bool TranslateResourceType(const char *name)
 {
     const char *doNotTranslate[] = {
         "oic.d.bridge",
-        OC_RSRVD_RESOURCE_TYPE_COLLECTION, OC_RSRVD_RESOURCE_TYPE_INTROSPECTION,
+        OC_RSRVD_RESOURCE_TYPE_COLLECTION, OC_RSRVD_RESOURCE_TYPE_DEVICE,
+        OC_RSRVD_RESOURCE_TYPE_INTROSPECTION, OC_RSRVD_RESOURCE_TYPE_PLATFORM,
         OC_RSRVD_RESOURCE_TYPE_RD, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH, OC_RSRVD_RESOURCE_TYPE_RES,
         "oic.r.alljoynobject", "oic.r.acl", "oic.r.acl2", "oic.r.amacl", "oic.r.cred", "oic.r.doxm",
         "oic.r.pstat", "oic.r.securemode"
@@ -157,6 +162,17 @@ bool TranslateResourceType(const char *name)
         if (!strcmp(doNotTranslate[i], name))
         {
             return false;
+        }
+    }
+    const char *doDeepTranslation[] = {
+        OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
+        OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION
+    };
+    for (size_t i = 0; i < sizeof(doDeepTranslation) / sizeof(doDeepTranslation[0]); ++i)
+    {
+        if (!strcmp(doDeepTranslation[i], name))
+        {
+            return true;
         }
     }
     return !IsResourceTypeInWellDefinedSet(name);

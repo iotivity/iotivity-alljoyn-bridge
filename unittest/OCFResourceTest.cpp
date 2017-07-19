@@ -1485,8 +1485,8 @@ TEST_F(OCFResource, TheAllJoynPeerIdShallBeTheOCFDeviceId)
 TEST_F(OCFResource, TheTranslatorShallEitherNotTranslateTheResourceTypeOrAlgorithmicallyMapTheResourceType)
 {
     /* Resource type is in a well-defined set */
-    EXPECT_FALSE(TranslateResourceType("oic.wk.con"));
-    EXPECT_FALSE(TranslateResourceType("oic.r.switch.binary"));
+    EXPECT_TRUE(TranslateResourceType("oic.wk.con")); /* Deep translation */
+    EXPECT_FALSE(TranslateResourceType("oic.r.switch.binary")); /* Algorithmic translation */
 
     /* Resource type is not in a well-defined set */
     EXPECT_TRUE(TranslateResourceType("x.org.iotivity.rt"));
