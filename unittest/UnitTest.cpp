@@ -97,6 +97,11 @@ OCStackResult ResourceCallback::Wait(long waitMs)
     return m_called ? OC_STACK_OK : OC_STACK_TIMEOUT;
 }
 
+void ResourceCallback::Reset()
+{
+    m_called = false;
+}
+
 OCStackApplicationResult ResourceCallback::Handler(OCDoHandle handle, OCClientResponse *response)
 {
     (void) handle;
@@ -184,12 +189,22 @@ void CreateCallback::cb(void *ctx)
 
 void AJOCSetUp::SetUp()
 {
+    SetUpStack();
+}
+
+void AJOCSetUp::SetUpStack()
+{
     EXPECT_EQ(OC_STACK_OK, OCInit2(OC_SERVER, OC_DEFAULT_FLAGS, OC_DEFAULT_FLAGS, OC_ADAPTER_IP));
     EXPECT_EQ(ER_OK, AllJoynInit());
     EXPECT_EQ(ER_OK, AllJoynRouterInit());
 }
 
 void AJOCSetUp::TearDown()
+{
+    TearDownStack();
+}
+
+void AJOCSetUp::TearDownStack()
 {
     EXPECT_EQ(ER_OK, AllJoynShutdown());
     EXPECT_EQ(OC_STACK_OK, OCStop());

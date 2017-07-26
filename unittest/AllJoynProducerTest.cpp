@@ -227,12 +227,29 @@ public:
             EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
         }
     }
+    void PropertiesChanged()
+    {
+        const char *props[] = { "True", "Invalidates" };
+        EXPECT_EQ(ER_OK, EmitPropChanged(TestInterfaceName, props, A_SIZEOF(props),
+                ajn::SESSION_ID_ALL_HOSTED));
+    }
     void Signal()
     {
         const ajn::InterfaceDescription::Member *member =
                 bus->GetInterface(TestInterfaceName)->GetSignal("Signal");
         EXPECT_TRUE(member != NULL);
         EXPECT_EQ(ER_OK, ajn::BusObject::Signal(NULL, ajn::SESSION_ID_ALL_HOSTED, *member));
+    }
+    void Signal(uint16_t arg0, uint16_t arg1)
+    {
+        const ajn::InterfaceDescription::Member *member =
+                bus->GetInterface(TestInterfaceName)->GetSignal("Signal");
+        EXPECT_TRUE(member != NULL);
+        ajn::MsgArg args[2];
+        args[0].Set("q", arg0);
+        args[1].Set("q", arg1);
+        EXPECT_EQ(ER_OK, ajn::BusObject::Signal(NULL, 0, *member, args, 2, 0,
+                ajn::ALLJOYN_FLAG_SESSIONLESS));
     }
     void SignalWithIntrospection()
     {
@@ -373,8 +390,8 @@ private:
     ExpectedProperties *m_properties;
 };
 
-class AllJoynProducer
-    : public ajn::SessionPortListener, public AJOCSetUp
+template <class T>
+class AllJoynProducerBase : public ajn::SessionPortListener, public T
 {
 protected:
     ajn::BusAttachment *m_bus;
@@ -383,10 +400,10 @@ protected:
     ajn::SessionId m_sid;
     TestBusObject *m_obj;
     VirtualResource *m_resource;
-    virtual ~AllJoynProducer() { }
+    virtual ~AllJoynProducerBase() { }
     virtual void SetUp()
     {
-        AJOCSetUp::SetUp();
+        AJOCSetUp::SetUpStack();
         m_bus = new ajn::BusAttachment("Producer");
         EXPECT_EQ(ER_OK, m_bus->Start());
         EXPECT_EQ(ER_OK, m_bus->Connect());
@@ -403,7 +420,7 @@ protected:
         delete m_obj;
         delete m_resource;
         delete m_bus;
-        AJOCSetUp::TearDown();
+        AJOCSetUp::TearDownStack();
     }
     virtual bool AcceptSessionJoiner(ajn::SessionPort port, const char *name,
             const ajn::SessionOpts& opts)
@@ -434,6 +451,12 @@ protected:
         EXPECT_EQ(OC_STACK_OK, discoverCB.Wait(1000));
         return context;
     }
+};
+
+class AllJoynProducer : public AllJoynProducerBase<::testing::Test>
+{
+public:
+    virtual ~AllJoynProducer() { }
 };
 
 TEST_F(AllJoynProducer, WhenAllJoynInterfacesCanBeTranslatedToResourceTypesOnTheSameResourceThereShouldBeASingleVirtualOCFResource)
@@ -610,7 +633,7 @@ TEST_F(AllJoynProducer, ThePiidPropertyValueShallBeDerivedFromTheDeviceIdAndAppI
 TEST_F(AllJoynProducer, TheTranslatorShallEitherNotTranslateTheAllJoynInterfaceOrAlgorithmicallyMapTheAllJoynInterface)
 {
     /* Interface is in a well-defined set */
-    EXPECT_FALSE(TranslateInterface("org.alljoyn.Config"));
+    EXPECT_TRUE(TranslateInterface("org.alljoyn.Config"));
     EXPECT_FALSE(TranslateInterface("Operation.OffControl"));
 
     /* Interface is not in a well-defined set */
@@ -1907,7 +1930,7 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
 
     /* Method */
     ResourceCallback postCB;
-    uri = context->m_resource->m_uri + "/1";
+    uri = context->m_resource->m_uri + "/1?rt=x.org.iotivity.-interface.-method-with-introspection";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
@@ -2261,4 +2284,325 @@ TEST_F(AllJoynProducer, PostAllJoynObjectBaseline)
 TEST_F(AllJoynProducer, ObserveAllJoynObject)
 {
     FAIL();
+}
+
+/*
+ * Multi-value "rt" resource
+ */
+
+class MultiValueRtValue
+{
+public:
+    MultiValueRtValue(const char *uri, bool v, bool c, bool f, bool t, bool i)
+        : m_uri(uri), m_version(v), m_const(c), m_false(f), m_true(t), m_invalidates(i) { }
+    const char *m_uri;
+    bool m_version;
+    bool m_const;
+    bool m_false;
+    bool m_true;
+    bool m_invalidates;
+};
+
+static void PrintTo(const MultiValueRtValue& value, ::std::ostream* os)
+{
+    *os << "{ ";
+    if (value.m_version)
+    {
+        *os << "\"-version\": 1, ";
+    }
+    if (value.m_const)
+    {
+        *os << "\"-const\": 1, ";
+    }
+    if (value.m_false)
+    {
+        *os << "\"-false\": 1, ";
+    }
+    if (value.m_true)
+    {
+        *os << "\"-true\": 1, ";
+    }
+    if (value.m_invalidates)
+    {
+        *os << "\"-invalidates\": 1, ";
+    }
+    *os << "}";
+}
+
+class MultiValueRt : public AllJoynProducerBase<::testing::TestWithParam<MultiValueRtValue>>
+{
+public:
+    virtual ~MultiValueRt() { }
+};
+
+TEST_P(MultiValueRt, Get)
+{
+    MultiValueRtValue value = GetParam();
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Version' type='q' access='read'/>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='readwrite'/>"
+            "  <property name='True' type='q' access='readwrite'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, value.m_uri,
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+
+    int64_t i;
+    EXPECT_EQ(value.m_version, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-version", &i));
+    EXPECT_EQ(value.m_const, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-const", &i));
+    EXPECT_EQ(value.m_false, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-false", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-true", &i));
+
+    delete context;
+}
+
+TEST_P(MultiValueRt, Post)
+{
+    MultiValueRtValue value = GetParam();
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Version' type='q' access='read'/>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='readwrite'/>"
+            "  <property name='True' type='q' access='readwrite'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    OCRepPayload *request = OCRepPayloadCreate();
+    if (value.m_version)
+    {
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-version", 1));
+    }
+    if (value.m_const)
+    {
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-const", 1));
+    }
+    if (value.m_false)
+    {
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-false", 1));
+    }
+    if (value.m_true)
+    {
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-true", 1));
+    }
+
+    ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, value.m_uri,
+            &context->m_resource->m_addrs[0], (OCPayload *) request, CT_DEFAULT, OC_HIGH_QOS,
+            postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
+
+    bool ifDoesNotSupportUpdate = strstr(value.m_uri, "oic.if.r") && !strstr(value.m_uri, "oic.if.rw");
+    bool rtDoesNotSupportUpdate = strstr(value.m_uri, "x.org.iotivity.-interface.const");
+    bool updatedReadOnlyProperties = value.m_version || value.m_const;
+    bool updatedNoProperties = !value.m_false && !value.m_true;
+    if (ifDoesNotSupportUpdate || rtDoesNotSupportUpdate || updatedReadOnlyProperties ||
+            updatedNoProperties)
+    {
+        EXPECT_NE(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+    }
+    else
+    {
+        EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+    }
+
+    delete context;
+}
+
+INSTANTIATE_TEST_CASE_P(AllJoynProducer, MultiValueRt, ::testing::Values(\
+            MultiValueRtValue("/Test", true, true, true, true, true),
+            MultiValueRtValue("/Test?if=oic.if.baseline", true, true, true, true, true),
+            MultiValueRtValue("/Test?if=oic.if.r", true, true, true, true, true),
+            MultiValueRtValue("/Test?if=oic.if.rw", false, false, true, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.const", true, true, false, false, false),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.const&if=oic.if.baseline", true, true, false, false, false),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.const&if=oic.if.r", true, true, false, false, false),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.const&if=oic.if.rw", false, false, false, false, false),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.false", false, false, true, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.false&if=oic.if.baseline", false, false, true, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.false&if=oic.if.r", false, false, true, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.false&if=oic.if.rw", false, false, true, true, true)
+        ));
+
+class MultiValueRtObserve : public AllJoynProducerBase<::testing::TestWithParam<MultiValueRtValue>>
+{
+public:
+    virtual ~MultiValueRtObserve() { }
+};
+
+TEST_P(MultiValueRtObserve, Observe)
+{
+    MultiValueRtValue value = GetParam();
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Version' type='q' access='read'/>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='false'/>"
+            "  </property>"
+            "  <property name='True' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    ObserveCallback observeCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, value.m_uri,
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) observeCB.m_response->payload;
+    int64_t i;
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-true", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-invalidates", &i));
+
+    observeCB.Reset();
+    m_obj->PropertiesChanged();
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    payload = (OCRepPayload *) observeCB.m_response->payload;
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-true", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-invalidates", &i));
+
+    delete context;
+}
+
+INSTANTIATE_TEST_CASE_P(AllJoynProducer, MultiValueRtObserve, ::testing::Values(\
+            MultiValueRtValue("/Test/3", false, false, false, true, true),
+            MultiValueRtValue("/Test/3?if=oic.if.baseline", false, false, false, true, true),
+            MultiValueRtValue("/Test/3?if=oic.if.rw", false, false, false, true, true),
+            MultiValueRtValue("/Test/3?rt=x.org.iotivity.-interface.true", false, false, false, true, false),
+            MultiValueRtValue("/Test/3?rt=x.org.iotivity.-interface.true&if=oic.if.baseline", false, false, false, true, false),
+            MultiValueRtValue("/Test/3?rt=x.org.iotivity.-interface.true&if=oic.if.rw", false, false, false, true, false),
+            MultiValueRtValue("/Test/3?rt=x.org.iotivity.-interface.invalidates", false, false, false, false, true),
+            MultiValueRtValue("/Test/3?rt=x.org.iotivity.-interface.invalidates&if=oic.if.baseline", false, false, false, false, true),
+            MultiValueRtValue("/Test/3?rt=x.org.iotivity.-interface.invalidates&if=oic.if.rw", false, false, false, false, true)
+        ));
+
+class MultiValueRtObserveSessionlessSignal : public AllJoynProducerBase<::testing::TestWithParam<MultiValueRtValue>>
+{
+public:
+    virtual ~MultiValueRtObserveSessionlessSignal() { }
+};
+
+TEST_P(MultiValueRtObserveSessionlessSignal, Observe)
+{
+    MultiValueRtValue value = GetParam();
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='True' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "  <signal name='Signal' sessionless='true'>"
+            "    <arg type='q'/>"
+            "    <arg type='q'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    ObserveCallback observeCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, value.m_uri,
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+
+    observeCB.Reset();
+    m_obj->Signal(value.m_true, value.m_invalidates);
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) observeCB.m_response->payload;
+    int64_t i;
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signalarg0", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signalarg1", &i));
+
+    delete context;
+}
+
+INSTANTIATE_TEST_CASE_P(AllJoynProducer, MultiValueRtObserveSessionlessSignal, ::testing::Values(\
+            MultiValueRtValue("/Test", false, false, false, true, true),
+            MultiValueRtValue("/Test?if=oic.if.baseline", false, false, false, true, true),
+            MultiValueRtValue("/Test?if=oic.if.r", false, false, false, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.-signal", false, false, false, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.-signal&if=oic.if.baseline", false, false, false, true, true),
+            MultiValueRtValue("/Test?rt=x.org.iotivity.-interface.-signal&if=oic.if.r", false, false, false, true, true)
+        ));
+
+TEST_F(AllJoynProducer, MultiValueRtGetUnsupportedRt)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Version' type='q' access='read'/>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='readwrite'/>"
+            "  <property name='True' type='q' access='readwrite'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    std::string uri = std::string(m_obj->GetPath()) + "?rt=x.org.iotivity.-unsupported";
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_NE(OC_STACK_OK, getCB.m_response->result);
+
+    delete context;
+}
+
+TEST_F(AllJoynProducer, MultiValueRtPostSimultaneouslyToMultipleResourceTypes)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='True' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    OCRepPayload *request = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-true", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-invalidates", 1));
+
+    ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "/Test",
+            &context->m_resource->m_addrs[0], (OCPayload *) request, CT_DEFAULT, OC_HIGH_QOS,
+            postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
+
+    EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+
+    delete context;
 }

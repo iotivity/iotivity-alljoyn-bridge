@@ -43,6 +43,9 @@ struct DiscoverContext
 
 class AJOCSetUp : public testing::Test
 {
+public:
+    static void SetUpStack();
+    static void TearDownStack();
 protected:
     virtual ~AJOCSetUp() { }
     virtual void SetUp();
@@ -71,6 +74,7 @@ public:
     ResourceCallback();
     virtual ~ResourceCallback();
     OCStackResult Wait(long waitMs);
+    void Reset();
     operator OCCallbackData *() { return &m_cbData; }
 protected:
     bool m_called;

@@ -247,7 +247,7 @@ OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
             options, numOptions);
 }
 
-std::map<std::string, std::string> ParseQuery(const char *query)
+std::map<std::string, std::string> ParseQuery(OCResourceHandle resource, const char *query)
 {
     std::map<std::string, std::string> queryMap;
 
@@ -280,6 +280,15 @@ std::map<std::string, std::string> ParseQuery(const char *query)
                 }
             }
             queryMap[key] = value;
+        }
+    }
+    /* Default interface for multi-value rt resources is the baseline interface. */
+    if (queryMap.find(OC_RSRVD_INTERFACE) == queryMap.end())
+    {
+        uint8_t n = 0;
+        if ((OCGetNumberOfResourceTypes(resource, &n) == OC_STACK_OK) && n)
+        {
+            queryMap[OC_RSRVD_INTERFACE] = OC_RSRVD_INTERFACE_DEFAULT;
         }
     }
     return queryMap;
@@ -448,33 +457,30 @@ bool IsValidRequest(OCEntityHandlerRequest *request)
     OCStackResult result;
     uint8_t n;
 
-    auto queryMap = ParseQuery(request->query);
-    bool hasItf = false;
+    auto queryMap = ParseQuery(request->resource, request->query);
     auto itf = queryMap.find("if");
-    if (itf != queryMap.end())
+    bool hasItf = false;
+    result = OCGetNumberOfResourceInterfaces(request->resource, &n);
+    if (result != OC_STACK_OK)
     {
-        result = OCGetNumberOfResourceInterfaces(request->resource, &n);
-        if (result != OC_STACK_OK)
+        return false;
+    }
+    for (uint8_t i = 0; i < n; ++i)
+    {
+        const char *name = OCGetResourceInterfaceName(request->resource, i);
+        if (!name)
         {
             return false;
         }
-        for (uint8_t i = 0; i < n; ++i)
+        if (itf->second == name)
         {
-            const char *name = OCGetResourceInterfaceName(request->resource, i);
-            if (!name)
-            {
-                return false;
-            }
-            if (itf->second == name)
-            {
-                hasItf = true;
-                break;
-            }
+            hasItf = true;
+            break;
         }
-        if (!hasItf)
-        {
-            return false;
-        }
+    }
+    if (!hasItf)
+    {
+        return false;
     }
     bool hasRt = false;
     auto rt = queryMap.find("rt");
