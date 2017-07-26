@@ -196,6 +196,11 @@ OCEntityHandlerResult VirtualConfigurationResource::ConfigurationHandlerCB(OCEnt
         void *ctx)
 {
     LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
+    if (!IsValidRequest(request))
+    {
+        LOG(LOG_INFO, "Invalid request received");
+        return OC_EH_BAD_REQ;
+    }
 
     VirtualConfigurationResource *resource = reinterpret_cast<VirtualConfigurationResource *>(ctx);
     std::lock_guard<std::mutex> lock(resource->m_mutex);
@@ -451,6 +456,11 @@ OCEntityHandlerResult VirtualConfigurationResource::MaintenanceHandlerCB(OCEntit
         void *ctx)
 {
     LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
+    if (!IsValidRequest(request))
+    {
+        LOG(LOG_INFO, "Invalid request received");
+        return OC_EH_BAD_REQ;
+    }
 
     VirtualConfigurationResource *resource = reinterpret_cast<VirtualConfigurationResource *>(ctx);
     std::lock_guard<std::mutex> lock(resource->m_mutex);

@@ -76,7 +76,7 @@ OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
         OCHeaderOption *options, uint8_t numOptions);
 
 bool IsValidRequest(OCEntityHandlerRequest *request);
-std::map<std::string, std::string> ParseQuery(const char *query);
+std::map<std::string, std::string> ParseQuery(OCResourceHandle resource, const char *query);
 OCResourcePayload *ParseLink(OCRepPayload *payload);
 
 OCRepPayload *CreatePayload(OCResourceHandle resource, const char *query);

@@ -72,6 +72,11 @@ OCEntityHandlerResult SecureModeResource::EntityHandlerCB(OCEntityHandlerFlag fl
         OCEntityHandlerRequest *request, void *ctx)
 {
     LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
+    if (!IsValidRequest(request))
+    {
+        LOG(LOG_INFO, "Invalid request received");
+        return OC_EH_BAD_REQ;
+    }
 
     SecureModeResource *thiz = reinterpret_cast<SecureModeResource *>(ctx);
     thiz->m_mutex.lock();

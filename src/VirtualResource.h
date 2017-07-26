@@ -76,6 +76,7 @@ class VirtualResource : public ajn::ProxyBusObject
         std::map<Observation, std::vector<OCObservationId>> m_observers;
         std::map<OCObservationId, std::string> m_matchRules;
         OCResourceHandle m_handle;
+        bool m_hasSessionlessSignals;
 
         OCStackResult Create();
         uint8_t GetMethodCallFlags(const char *ifaceName);
@@ -90,9 +91,11 @@ class VirtualResource : public ajn::ProxyBusObject
         void SetCB(ajn::Message &msg, void *context);
         struct GetAllInvalidatedContext;
         void GetAllInvalidatedCB(ajn::Message &msg, void *ctx);
-        struct GetAllBaselineContext;
-        QStatus GetAllBaseline(GetAllBaselineContext *context);
-        void GetAllBaselineCB(ajn::Message &msg, void *ctx);
+        void NotifyPropertiesChangedObservers(const ajn::InterfaceDescription *iface,
+                const ajn::MsgArg *dict);
+        struct GetAllContext;
+        QStatus GetAll(GetAllContext *context);
+        void GetAllCB(ajn::Message &msg, void *ctx);
         virtual void AddMatchCB(QStatus status, void *ctx);
         virtual void RemoveMatchCB(QStatus status, void *ctx);
         OCDiagnosticPayload *CreatePayload(ajn::Message &msg, OCEntityHandlerResult *ehResult);
