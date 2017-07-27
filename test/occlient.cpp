@@ -199,7 +199,7 @@ static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle,
             LogResponse(OC_REST_DISCOVER, response, OC_FORMAT_CBOR);
             break;
     }
-    if (response)
+    if (response && response->payload && (response->payload->type == PAYLOAD_TYPE_DISCOVERY))
     {
         OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload;
         while (payload)
@@ -401,6 +401,7 @@ int main(int, char **)
         {
             uint16_t optionID = CA_OPTION_ACCEPT;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR;
+            std::string uri = "/oic/res";
             std::string query;
             while (token != tokens.end())
             {
@@ -413,6 +414,10 @@ int main(int, char **)
                         format = COAP_MEDIATYPE_APPLICATION_CBOR;
                     }
                 }
+                else if (str[0] == '/')
+                {
+                    uri = str;
+                }
                 else
                 {
                     if (!query.empty())
@@ -422,7 +427,6 @@ int main(int, char **)
                     query += str;
                 }
             }
-            std::string uri = "/oic/res";
             if (!query.empty())
             {
                 uri += "?" + query;
