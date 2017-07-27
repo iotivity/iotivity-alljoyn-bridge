@@ -23,6 +23,7 @@
 #include "Log.h"
 #include "Plugin.h"
 #include <alljoyn/BusAttachment.h>
+#include "ocprovisioningmanager.h"
 #include "pinoxmcommon.h"
 
 AllJoynSecurity::AllJoynSecurity(ajn::BusAttachment *bus, Role role)
@@ -154,6 +155,18 @@ bool OCSecurity::Init()
     }
 #endif
     return true;
+}
+
+void OCSecurity::Reset()
+{
+#if __WITH_DTLS__
+    LOG(LOG_INFO, "");
+    OCStackResult result = OCResetSVRDB();
+    if (result != OC_STACK_OK)
+    {
+        LOG(LOG_ERR, "OCResetSVRDB() - %d", result);
+    }
+#endif
 }
 
 void OCSecurity::DisplayPinCB(char *pin, size_t pinSize, void *context)

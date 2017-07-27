@@ -32,6 +32,7 @@
 #include <thread>
 
 static volatile sig_atomic_t sQuitFlag = false;
+static volatile sig_atomic_t sResetSecurityFlag = false;
 static const char *gPSPrefix = "AllJoynBridge_";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
@@ -133,6 +134,12 @@ static void SigIntCB(int sig)
 {
     (void) sig;
     sQuitFlag = true;
+}
+
+static void SigUsr1CB(int sig)
+{
+    (void) sig;
+    sResetSecurityFlag = true;
 }
 
 static std::string GetFilename(const char *uuid, const char *suffix)
@@ -315,6 +322,7 @@ int main(int argc, char **argv)
     }
 
     signal(SIGINT, SigIntCB);
+    signal(SIGUSR1, SigUsr1CB);
 
     QStatus status = AllJoynInit();
     if (status != ER_OK)
@@ -410,6 +418,11 @@ int main(int argc, char **argv)
     }
     while (!sQuitFlag)
     {
+        if (sResetSecurityFlag)
+        {
+            sResetSecurityFlag = false;
+            bridge->ResetSecurity();
+        }
         if (!bridge->Process())
         {
             goto exit;

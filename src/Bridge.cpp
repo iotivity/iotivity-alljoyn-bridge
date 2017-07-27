@@ -413,6 +413,16 @@ bool Bridge::Stop()
     return true;
 }
 
+void Bridge::ResetSecurity()
+{
+    LOG(LOG_INFO, "[%p]", this);
+
+    if (m_ocSecurity)
+    {
+        m_ocSecurity->Reset();
+    }
+}
+
 bool Bridge::Process()
 {
     std::lock_guard<std::mutex> lock(m_mutex);

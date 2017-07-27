@@ -74,6 +74,10 @@ if env['TARGET_OS'] == 'linux':
         'coap',
         'resource_directory',
         ])
+
+    if env['SECURED'] == '1':
+        env_unittest.AppendUnique(LIBS = ['ocpmapi'])
+
     unittest_bins = [env_unittest.Program('AllJoynBridgeTest', [unittest_cpp, common_cpp]),
                      env_unittest.Program('VirtualResourceTest', ['VirtualResourceTest.cpp', common_cpp])]
     env.Install('#/${BUILD_DIR}/bin', unittest_bins)

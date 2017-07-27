@@ -37,8 +37,8 @@ if env['TARGET_OS'] == 'linux':
         'cjson',
         'octbstack',
         'connectivity_abstraction',
-        'c_common', 
-        'coap', 
+        'c_common',
+        'coap',
         'resource_directory',
         ])
 elif env['TARGET_OS'] == 'windows':
@@ -52,6 +52,9 @@ elif env['TARGET_OS'] == 'windows':
         'sqlite3',
         'logger',
         ])
+
+if env['SECURED'] == '1':
+    env_bridge.AppendUnique(LIBS = ['ocpmapi'])
 
 examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
 if env['TARGET_OS'] == 'linux':

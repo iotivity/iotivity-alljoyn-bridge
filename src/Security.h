@@ -60,6 +60,7 @@ class OCSecurity
 {
     public:
         bool Init();
+        void Reset();
 
     private:
         static void DisplayPinCB(char *pin, size_t pinSize, void *context);

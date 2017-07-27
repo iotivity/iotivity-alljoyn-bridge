@@ -72,6 +72,7 @@ class Bridge : private ajn::AboutListener
 
         bool Start();
         bool Stop();
+        void ResetSecurity();
         bool Process();
 
     private:

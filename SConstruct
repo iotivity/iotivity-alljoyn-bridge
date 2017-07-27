@@ -137,6 +137,8 @@ iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
                                '${IOTIVITY_BASE}/resource/csdk/logger/include',
                                '${IOTIVITY_BASE}/resource/csdk/resource-directory/include',
                                '${IOTIVITY_BASE}/resource/csdk/security/include',
+                               '${IOTIVITY_BASE}/resource/csdk/security/provisioning/include',
+                               '${IOTIVITY_BASE}/resource/csdk/security/provisioning/include/internal',
                                '${IOTIVITY_BASE}/resource/csdk/stack/include',
                                '${IOTIVITY_BASE}/resource/include',
                                '${IOTIVITY_BASE}/resource/oc_logger/include']
