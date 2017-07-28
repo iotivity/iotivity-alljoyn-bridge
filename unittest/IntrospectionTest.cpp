@@ -875,3 +875,16 @@ TEST_F(Introspection, AllJoynObjectResource)
 {
     FAIL();
 }
+
+TEST_F(Introspection, InvalidIntrospectionDoesNotParse)
+{
+    const char *introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": []"
+            "}";
+    OCRepPayload *introspectionData;
+    EXPECT_EQ(OC_STACK_OK, ParseJsonPayload(&introspectionData, introspectionJson));
+    EXPECT_FALSE(ParseIntrospectionPayload(m_context->m_device, m_bus, introspectionData));
+}

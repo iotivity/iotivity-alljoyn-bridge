@@ -389,6 +389,11 @@ static OCStackResult ParseJsonItem(OCRepPayload *outPayload, cJSON *json)
                                 }
                             }
                             break;
+                        case cJSON_NULL:
+                            success = (dimTotal == 0) &&
+                                    OCRepPayloadSetPropObjectArrayAsOwner(outPayload, json->string,
+                                            NULL, dim);
+                            break;
                         default:
                             /* Only number, string, and object arrays are supported for now */
                             assert(0);

@@ -1498,8 +1498,10 @@ OCStackApplicationResult Bridge::GetIntrospectionDataCB(void *ctx, OCDoHandle ha
     {
         goto exit;
     }
-    thiz->ParseIntrospectionPayload(context, payload);
-    result = OC_STACK_OK;
+    if (thiz->ParseIntrospectionPayload(context, payload))
+    {
+        result = OC_STACK_OK;
+    }
 
 exit:
     if (context && (result != OC_STACK_OK))
@@ -1634,10 +1636,11 @@ exit:
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload)
+bool Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload)
 {
     OCPresence *presence = NULL;
-    if (::ParseIntrospectionPayload(&context->m_device, context->m_bus, payload))
+    bool success = ::ParseIntrospectionPayload(&context->m_device, context->m_bus, payload);
+    if (success)
     {
         QStatus status;
         presence = new OCPresence(context->m_device.m_di.c_str(), DISCOVER_PERIOD_SECS);
@@ -1659,6 +1662,7 @@ void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *p
     }
 exit:
     delete presence;
+    return success;
 }
 
 static const char *SeenStateText[] = { "NOT_SEEN", "SEEN_NATIVE", "SEEN_VIRTUAL" };

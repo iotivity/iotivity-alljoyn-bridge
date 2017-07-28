@@ -193,7 +193,7 @@ class Bridge : private ajn::AboutListener
         void UpdatePresenceStatus(const OCDiscoveryPayload *payload);
         void GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *response,
                 DiscoverContext **context, OCRepPayload **payload);
-        void ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload);
+        bool ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload);
         OCStackResult GetIntrospection(DiscoverContext *context);
         OCStackResult GetCollection(DiscoverContext *context);
         OCStackResult GetPlatformConfiguration(DiscoverContext *context);
