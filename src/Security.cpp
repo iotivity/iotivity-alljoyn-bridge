@@ -26,17 +26,48 @@
 #include "ocprovisioningmanager.h"
 #include "pinoxmcommon.h"
 
-AllJoynSecurity::AllJoynSecurity(ajn::BusAttachment *bus, Role role)
-    : m_bus(bus), m_role(role)
+AllJoynSecurity::AllJoynSecurity(ajn::BusAttachment *bus, Role role,
+        ajn::ApplicationStateListener *appStateListener)
+    : m_bus(bus), m_role(role), m_appStateListener(appStateListener)
 {
     LOG(LOG_INFO, "[%p] bus=%p", this, bus);
+}
+
+AllJoynSecurity::~AllJoynSecurity()
+{
+    /* Unregister peer security listeners by passing NULL as the authentication mechanisms */
+    QStatus status = m_bus->EnablePeerSecurity(NULL, this, NULL, true, this);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "EnablePeerSecurity - %s", QCC_StatusText(status));
+    }
+
+    if (m_appStateListener)
+    {
+        status = m_bus->UnregisterApplicationStateListener(*m_appStateListener);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "UnregisterApplicationStateListener - %s", QCC_StatusText(status));
+        }
+    }
 }
 
 QStatus AllJoynSecurity::SetClaimable()
 {
     LOG(LOG_INFO, "[%p]", this);
 
-    QStatus status = m_bus->EnablePeerSecurity("ALLJOYN_ECDHE_ECDSA ALLJOYN_ECDHE_NULL "
+    QStatus status;
+    if (m_appStateListener)
+    {
+        status = m_bus->RegisterApplicationStateListener(*m_appStateListener);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "RegisterApplicationStateListener - %s", QCC_StatusText(status));
+            return status;
+        }
+    }
+
+    status = m_bus->EnablePeerSecurity("ALLJOYN_ECDHE_ECDSA ALLJOYN_ECDHE_NULL "
             "ALLJOYN_ECDHE_PSK ALLJOYN_ECDHE_SPEKE", this, NULL, true, this);
     if (status != ER_OK)
     {

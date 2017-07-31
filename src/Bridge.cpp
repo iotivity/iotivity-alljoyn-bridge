@@ -169,7 +169,7 @@ Bridge::Bridge(const char *name, Protocol protocols)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
-    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
+    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER, this);
     m_ocSecurity = new OCSecurity();
     m_secureMode = new SecureModeResource(m_mutex, SECURE_MODE_DEFAULT);
 }
@@ -181,7 +181,7 @@ Bridge::Bridge(const char *name, const char *sender)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
-    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
+    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER, this);
     m_ocSecurity = new OCSecurity();
     m_secureMode = new SecureModeResource(m_mutex, SECURE_MODE_DEFAULT);
 }
@@ -550,24 +550,36 @@ void Bridge::WhoImplements()
     {
         matchRule += ",sender='" + std::string(m_sender) + "'";
     }
-    QStatus status = m_bus->AddMatch(matchRule.c_str());
+    QStatus status = m_bus->AddMatchAsync(matchRule.c_str(), this);
     if (status != ER_OK)
     {
-        LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
+        LOG(LOG_ERR, "[%p] AddMatchAsync - %s", this, QCC_StatusText(status));
     }
 }
 
-struct AnnouncedContext
+void Bridge::AddMatchCB(QStatus status, void *ctx)
+{
+    (void) ctx;
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "[%p] AddMatchCB - %s", this, QCC_StatusText(status));
+    }
+}
+
+struct Bridge::AnnouncedContext
 {
 public:
-    AnnouncedContext(VirtualDevice *device, const char *name,
+    AnnouncedContext(Bridge *bridge, VirtualDevice *device, const char *name, ajn::SessionPort port,
             const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
-        : m_device(device), m_name(name), m_objectDescriptionArg(objectDescriptionArg),
-          m_aboutData(aboutDataArg), m_sessionId(0), m_aboutObj(NULL) { }
+        : m_bridge(bridge), m_device(device), m_name(name), m_port(port),
+          m_objectDescriptionArg(objectDescriptionArg), m_aboutData(aboutDataArg), m_sessionId(0),
+          m_aboutObj(NULL) { }
     ~AnnouncedContext() { delete m_aboutObj; }
+    Bridge *m_bridge;
     ajn::BusAttachment *m_bus;
     VirtualDevice *m_device;
     std::string m_name;
+    ajn::SessionPort m_port;
     ajn::MsgArg m_objectDescriptionArg;
     ajn::AboutData m_aboutData;
     std::vector<std::string> m_langs;
@@ -610,12 +622,11 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
         }
     }
 
-    context = new AnnouncedContext(device, name, objectDescriptionArg, aboutDataArg);
+    context = new AnnouncedContext(this, device, name, port, objectDescriptionArg, aboutDataArg);
     if (device)
     {
         LOG(LOG_INFO, "[%p] Received updated Announce", this);
         m_mutex.unlock();
-        ajn::SessionOpts opts;
         JoinSessionCB(ER_OK, device->GetSessionId(), opts, context);
     }
     else
@@ -671,11 +682,21 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
 
     std::lock_guard<std::mutex> lock(m_mutex);
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
+
     if (m_secureMode->GetSecureMode() && (status != ER_OK))
     {
         LOG(LOG_ERR, "SecureConnectionCB - %s", QCC_StatusText(status));
+        m_insecureAnnounced.insert(context);
+        status = m_bus->LeaveSessionAsync(context->m_sessionId, &m_insecureLeaveSessionCB, context);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "LeaveSessionAsync - %s", QCC_StatusText(status));
+            delete context;
+        }
+        return;
     }
-    else if (!m_sender)
+
+    if (!m_sender)
     {
         qcc::String peerGuid;
         m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
@@ -740,6 +761,7 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
         status = m_bus->LeaveSessionAsync(context->m_sessionId, this, context);
         if (status != ER_OK)
         {
+            LOG(LOG_ERR, "LeaveSessionAsync - %s", QCC_StatusText(status));
             delete context;
         }
     }
@@ -891,6 +913,48 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
         {
             delete context;
         }
+    }
+}
+
+void Bridge::InsecureLeaveSessionCB::LeaveSessionCB(QStatus status, void *ctx)
+{
+    LOG(LOG_INFO, "[%p] status=%s,ctx=%p", this, QCC_StatusText(status), ctx);
+    AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
+    ajn::SessionId sessionId = context->m_sessionId;
+    /* context belongs to m_insecureAnnounced, so don't delete it here */
+    context->m_bridge->SessionLost(sessionId, ALLJOYN_SESSIONLOST_REASON_OTHER);
+}
+
+void Bridge::State(const char* busName, const qcc::KeyInfoNISTP256& publicKeyInfo,
+        ajn::PermissionConfigurator::ApplicationState state)
+{
+    (void) publicKeyInfo;
+    LOG(LOG_INFO, "[%p] busName=%s,state=%d", this, busName, state);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (state != ajn::PermissionConfigurator::CLAIMED)
+    {
+        return;
+    }
+    auto it = std::find_if(m_insecureAnnounced.begin(), m_insecureAnnounced.end(),
+            [busName](AnnouncedContext *ctx) -> bool {return ctx->m_name == busName;});
+    if (it != m_insecureAnnounced.end())
+    {
+        LOG(LOG_INFO, "[%p] Found %s", this, busName);
+        AnnouncedContext *context = *it;
+        m_insecureAnnounced.erase(it);
+        ajn::SessionOpts opts;
+        QStatus status = m_bus->JoinSessionAsync(context->m_name.c_str(), context->m_port,
+                this, opts, this, context);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "JoinSessionAsync - %s", QCC_StatusText(status));
+            delete context;
+        }
+    }
+    else
+    {
+        LOG(LOG_INFO, "[%p] Did not find %s", this, busName);
     }
 }
 

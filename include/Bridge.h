@@ -43,7 +43,9 @@ class VirtualDevice;
 class VirtualResource;
 
 class Bridge : private ajn::AboutListener
+    , private ajn::ApplicationStateListener
     , private ajn::BusListener
+    , private ajn::BusAttachment::AddMatchAsyncCB
     , private ajn::BusAttachment::JoinSessionAsyncCB
     , private ajn::BusAttachment::LeaveSessionAsyncCB
     , private ajn::MessageReceiver
@@ -76,6 +78,7 @@ class Bridge : private ajn::AboutListener
         bool Process();
 
     private:
+        struct AnnouncedContext;
         struct DiscoverContext;
         struct Task
         {
@@ -108,6 +111,11 @@ class Bridge : private ajn::AboutListener
             virtual ~RDPublishTask() { }
             virtual void Run(Bridge *thiz);
         };
+        class InsecureLeaveSessionCB: public ajn::BusAttachment::LeaveSessionAsyncCB {
+        public:
+            virtual ~InsecureLeaveSessionCB() { }
+            virtual void LeaveSessionCB(QStatus status, void* context);
+        };
 
         static const time_t DISCOVER_PERIOD_SECS = 5;
 
@@ -137,6 +145,8 @@ class Bridge : private ajn::AboutListener
         size_t m_pending;
         std::string m_ajSoftwareVersion;
         std::string m_manufacturerName;
+        std::set<AnnouncedContext *> m_insecureAnnounced;
+        InsecureLeaveSessionCB m_insecureLeaveSessionCB;
 
         static void RDPublish(void *context);
         void SetIntrospectionData(ajn::BusAttachment *bus, const char *ajSoftwareVersion,
@@ -155,6 +165,9 @@ class Bridge : private ajn::AboutListener
         VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus, const char *name,
                 ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
                 ajn::AboutData *aboutData);
+        virtual void State(const char* busName, const qcc::KeyInfoNISTP256& publicKeyInfo,
+                ajn::PermissionConfigurator::ApplicationState state);
+        virtual void AddMatchCB(QStatus status, void *ctx);
 
         OCRepPayload *GetSecureMode(OCEntityHandlerRequest *request);
         bool PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged);

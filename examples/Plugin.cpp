@@ -35,7 +35,8 @@ static OCStackApplicationResult RDPublishCB(void *ctx, OCDoHandle handle,
 {
     (void) ctx;
     (void) handle;
-    LOG(LOG_INFO, "response=%p,response->result=%d", response, response ? response->result : 0);
+    int severity = (response && (response->result == OC_STACK_OK)) ? LOG_INFO : LOG_ERR;
+    LOG(severity, "response=%p,response->result=%d", response, response ? response->result : 0);
     return OC_STACK_DELETE_TRANSACTION;
 }
 
