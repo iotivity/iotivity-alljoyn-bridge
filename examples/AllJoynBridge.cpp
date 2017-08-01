@@ -123,8 +123,7 @@ private:
     {
         bool *done = (bool *) ctx;
         (void) handle;
-        LOG(LOG_INFO, "response=%p,response->result=%d",
-                response, response ? response->result : 0);
+        LOG(LOG_INFO, "response=%p,response->result=%d", response, response ? response->result : 0);
         *done = true;
         return OC_STACK_DELETE_TRANSACTION;
     }
@@ -364,11 +363,12 @@ int main(int argc, char **argv)
             fprintf(stderr, "OCStopMulticastServer - %d\n", result);
             goto exit;
         }
+        OCDoHandle handle;
         OCCallbackData cbData;
         cbData.cb = DiscoverResourceDirectoryCB;
         cbData.context = NULL;
         cbData.cd = NULL;
-        result = OCDoResource(NULL, OC_REST_DISCOVER, "/oic/res?rt=oic.wk.rd", NULL, 0,
+        result = OCDoResource(&handle, OC_REST_DISCOVER, "/oic/res?rt=oic.wk.rd", NULL, 0,
                 CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
         if (result != OC_STACK_OK)
         {

@@ -68,12 +68,16 @@ std::vector<Resource>::iterator FindResourceFromType(std::vector<Resource> &reso
 OCStackResult CreateResource(OCResourceHandle *handle, const char *uri, const char *typeName,
         const char *interfaceName, OCEntityHandler entityHandler, void *callbackParam,
         uint8_t properties);
-OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
-        const OCDevAddr *destination, OCPayload *payload, OCCallbackData *cbData,
+
+typedef void *DoHandle;
+OCStackResult DoResource(DoHandle *handle, OCMethod method, const char *uri,
+        const OCDevAddr* destination, OCPayload *payload, OCCallbackData *cbData,
         OCHeaderOption *options, uint8_t numOptions);
-OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+OCStackResult DoResource(DoHandle *handle, OCMethod method, const char *uri,
         const std::vector<OCDevAddr> &destinations, OCPayload *payload, OCCallbackData *cbData,
         OCHeaderOption *options, uint8_t numOptions);
+OCStackResult Cancel(DoHandle handle, OCQualityOfService qos, OCHeaderOption *options,
+        uint8_t numOptions);
 
 bool IsValidRequest(OCEntityHandlerRequest *request);
 std::map<std::string, std::string> ParseQuery(OCResourceHandle resource, const char *query);

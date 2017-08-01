@@ -403,10 +403,10 @@ bool Bridge::Stop()
     }
     if (m_discoverHandle)
     {
-        OCStackResult result = OCCancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
+        OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "OCCancel() - %d", result);
+            LOG(LOG_ERR, "Cancel() - %d", result);
         }
         m_discoverHandle = NULL;
     }
@@ -467,10 +467,10 @@ bool Bridge::Process()
         {
             if (m_discoverHandle)
             {
-                OCStackResult result = OCCancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
+                OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
                 if (result != OC_STACK_OK)
                 {
-                    LOG(LOG_ERR, "OCCancel() - %d", result);
+                    LOG(LOG_ERR, "Cancel() - %d", result);
                 }
                 m_discoverHandle = NULL;
             }
@@ -482,12 +482,8 @@ bool Bridge::Process()
             size_t numOptions = 0;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR; // TODO retry with CBOR
             OCSetHeaderOption(options, &numOptions, CA_OPTION_ACCEPT, &format, sizeof(format));
-            OCStackResult result = ::DoResource(&m_discoverHandle, OC_REST_DISCOVER,
-                    OC_RSRVD_WELL_KNOWN_URI, NULL, 0, &cbData, options, numOptions);
-            if (result != OC_STACK_OK)
-            {
-                LOG(LOG_ERR, "DoResource(OC_REST_DISCOVER) - %d", result);
-            }
+            ::DoResource(&m_discoverHandle, OC_REST_DISCOVER, OC_RSRVD_WELL_KNOWN_URI, NULL, 0,
+                    &cbData, options, numOptions);
             m_discoverNextTick = time(NULL) + DISCOVER_PERIOD_SECS;
         }
     }
@@ -1064,12 +1060,7 @@ OCStackResult Bridge::DoResource(OCDoHandle *handle, OCMethod method, const char
     cbData.cb = cb;
     cbData.context = this;
     cbData.cd = NULL;
-    OCStackResult result = ::DoResource(handle, method, uri, addrs, NULL, &cbData, NULL, 0);
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "[%p] DoResource(method=%d,uri=%s) - %d", this, method, uri, result);
-    }
-    return result;
+    return ::DoResource(handle, method, uri, addrs, NULL, &cbData, NULL, 0);
 }
 
 OCStackResult Bridge::DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
@@ -1082,14 +1073,13 @@ OCStackResult Bridge::DoResource(OCDoHandle *handle, OCMethod method, const char
 void Bridge::GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *response,
         DiscoverContext **context, OCRepPayload **payload)
 {
+    *context = NULL;
+    *payload = NULL;
+
     std::map<OCDoHandle, DiscoverContext *>::iterator it = m_discovered.find(handle);
     if (it != m_discovered.end())
     {
         *context = it->second;
-    }
-    else
-    {
-        *context = NULL;
     }
 
     if (response && response->result == OC_STACK_OK &&
@@ -1097,11 +1087,15 @@ void Bridge::GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *respon
     {
         *payload = (OCRepPayload *) response->payload;
     }
+    else if (response)
+    {
+        LOG(LOG_INFO, "[%p] response={result=%d,resourceUri=%s,payload={type=%d}}",
+                this, response->result, response->resourceUri,
+                response->payload ? response->payload->type : PAYLOAD_TYPE_INVALID);
+    }
     else
     {
-        LOG(LOG_INFO, "[%p] Missing %s or unexpected payload type: %d", this, response->resourceUri,
-                (response && response->payload) ? response->payload->type : PAYLOAD_TYPE_INVALID);
-        *payload = NULL;
+        LOG(LOG_INFO, "[%p] response=%p", this, response);
     }
 }
 
@@ -1112,7 +1106,6 @@ OCStackResult Bridge::ContinueDiscovery(DiscoverContext *context, const char *ur
     OCStackResult result = DoResource(&cbHandle, OC_REST_GET, uri, addrs, cb);
     if (result == OC_STACK_OK)
     {
-        LOG(LOG_INFO, "Get(%s)", uri);
         m_discovered[cbHandle] = context;
     }
     return result;
@@ -1125,7 +1118,6 @@ OCStackResult Bridge::ContinueDiscovery(DiscoverContext *context, const char *ur
     OCStackResult result = DoResource(&cbHandle, OC_REST_GET, uri, addr, cb);
     if (result == OC_STACK_OK)
     {
-        LOG(LOG_INFO, "Get(%s)", uri);
         m_discovered[cbHandle] = context;
     }
     return result;

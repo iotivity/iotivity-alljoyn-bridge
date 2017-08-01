@@ -48,7 +48,7 @@ public:
     }
     VirtualBusObject *m_obj;
     std::string m_iface;
-    OCDoHandle m_handle;
+    DoHandle m_handle;
     OCStackApplicationResult m_result;
 };
 
@@ -62,7 +62,7 @@ public:
     VirtualBusObject::DoResourceHandler m_cb;
     void *m_context;
     ajn::Message m_msg;
-    OCDoHandle m_handle;
+    DoHandle m_handle;
 };
 
 VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, Resource &resource)
@@ -92,7 +92,7 @@ VirtualBusObject::~VirtualBusObject()
 
 void VirtualBusObject::Stop()
 {
-    std::vector<OCDoHandle> handles;
+    std::vector<DoHandle> handles;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (ObserveContext *context : m_observes)
@@ -101,12 +101,12 @@ void VirtualBusObject::Stop()
             handles.push_back(context->m_handle);
         }
     }
-    for (OCDoHandle handle : handles)
+    for (DoHandle handle : handles)
     {
-        OCStackResult result = OCCancel(handle, OC_LOW_QOS, NULL, 0);
+        OCStackResult result = Cancel(handle, OC_LOW_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "OCCancel - %d", result);
+            LOG(LOG_ERR, "Cancel - %d", result);
         }
     }
 }
@@ -183,10 +183,6 @@ void VirtualBusObject::Observe(Resource &resource)
         {
             m_observes.insert(context);
         }
-        else
-        {
-            LOG(LOG_ERR, "DoResource - %d", result);
-        }
     }
 }
 
@@ -198,10 +194,10 @@ void VirtualBusObject::CancelObserve()
     for (ObserveContext *context : m_observes)
     {
         context->m_result = OC_STACK_DELETE_TRANSACTION;
-        OCStackResult result = OCCancel(context->m_handle, OC_HIGH_QOS, NULL, 0);
+        OCStackResult result = Cancel(context->m_handle, OC_HIGH_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "OCCancel - %d", result);
+            LOG(LOG_ERR, "Cancel - %d", result);
         }
     }
 }
@@ -475,7 +471,6 @@ void VirtualBusObject::DoResource(OCMethod method, std::string uri, std::vector<
     }
     else
     {
-        LOG(LOG_ERR, "DoResource - %d", result);
         delete context;
         QStatus status = MethodReply(msg, ER_FAIL);
         if (status != ER_OK)

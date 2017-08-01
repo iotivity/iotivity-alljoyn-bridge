@@ -20,6 +20,7 @@
 
 #include "Resource.h"
 
+#include "Log.h"
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include "ocpayload.h"
@@ -220,31 +221,154 @@ OCStackResult CreateResource(OCResourceHandle *handle, const char *uri, const ch
     return result;
 }
 
-OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
-        const OCDevAddr *destination, OCPayload *payload, OCCallbackData *cbData,
-        OCHeaderOption *options, uint8_t numOptions)
+static const char *MethodText(OCMethod method)
 {
-    return OCDoResource(handle, method, uri, destination, payload, CT_DEFAULT, OC_HIGH_QOS, cbData,
-            options, numOptions);
+    static const char *text[] = {
+        "NoMethod", "Get", "Put", "Post", "Delete", "Observe", "ObserveAll", NULL, "Presence",
+        "Discover"
+    };
+    int i = 0;
+    for (int m = method; m; m /= 2)
+    {
+        ++i;
+    }
+    return text[i];
 }
 
-OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
+struct DoContext
+{
+    OCDoHandle m_handle;
+    OCMethod m_method;
+    std::string m_uri;
+    std::vector<OCDevAddr> m_destinations;
+    OCPayload *m_payload;
+    OCCallbackData m_cbData;
+    OCHeaderOption *m_options;
+    uint8_t m_numOptions;
+
+    std::vector<OCDevAddr>::iterator m_destination;
+    ~DoContext()
+    {
+        OCPayloadDestroy(m_payload);
+        if (m_options)
+        {
+            OICFree(m_options);
+        }
+    }
+};
+
+static void DoContextDeleter(void *ctx)
+{
+    DoContext *context = (DoContext *) ctx;
+    if (context->m_cbData.cd)
+    {
+        context->m_cbData.cd(context->m_cbData.context);
+        delete context;
+    }
+}
+
+static OCStackResult DoResource(DoContext *context);
+
+static OCStackApplicationResult DoResourceCB(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    DoContext *context = (DoContext *) ctx;
+    LOG(LOG_INFO, "%sCB(ctx=%p,handle=%p,response=%p) result=%d",
+            MethodText(context->m_method), ctx, handle, response, response ? response->result : -1);
+
+    /* Retry with other endpoints when they are available */
+    if (response && (context->m_destination != context->m_destinations.end()))
+    {
+        if ((OC_STACK_RESOURCE_CHANGED < response->result) &&
+                /* Don't expect a retry to succeed for these: */
+                (OC_STACK_INVALID_QUERY != response->result))
+        {
+            OCStackResult result = DoResource(context);
+            if (result == OC_STACK_OK)
+            {
+                return OC_STACK_DELETE_TRANSACTION;
+            }
+        }
+    }
+    OCStackApplicationResult result = context->m_cbData.cb(context->m_cbData.context, context,
+            response);
+    if ((result == OC_STACK_DELETE_TRANSACTION) && !context->m_cbData.cd)
+    {
+        delete context;
+    }
+    return result;
+}
+
+static OCStackResult DoResource(DoContext *context)
+{
+    const OCDevAddr *destination = NULL;
+    if (context->m_destination != context->m_destinations.end())
+    {
+        destination = &(*context->m_destination);
+        ++context->m_destination;
+    }
+    OCCallbackData cbData;
+    cbData.cb = DoResourceCB;
+    cbData.context = context;
+    cbData.cd = context->m_cbData.cd ? DoContextDeleter : NULL;
+    OCStackResult result = OCDoRequest(&context->m_handle, context->m_method,
+            context->m_uri.c_str(), destination, context->m_payload, CT_DEFAULT, OC_HIGH_QOS,
+            &cbData, context->m_options, context->m_numOptions);
+    int severity = (result == OC_STACK_OK) ? LOG_INFO : LOG_ERR;
+    LOG(severity, "%s(uri=%s,destination={adapter=%d,flags=0x%x,addr=%s,port=%d}) handle=%p - %d",
+            MethodText(context->m_method), context->m_uri.c_str(),
+            destination ? destination->adapter : 0, destination ? destination->flags : 0,
+            destination ? destination->addr : NULL, destination ? destination->port: 0,
+            context->m_handle, result);
+    return result;
+}
+
+OCStackResult DoResource(DoHandle *handle, OCMethod method, const char *uri,
         const std::vector<OCDevAddr> &destinations, OCPayload *payload, OCCallbackData *cbData,
         OCHeaderOption *options, uint8_t numOptions)
 {
-    /* Prefer secure destination when present otherwise just use the first destination */
-    const OCDevAddr *destination = destinations.empty() ? NULL : &destinations[0];
-    for (std::vector<OCDevAddr>::const_iterator it = destinations.begin(); it != destinations.end();
-         ++it)
+    DoContext *context = new DoContext();
+    context->m_method = method;
+    context->m_uri = uri;
+    context->m_destinations = destinations;
+    context->m_payload = payload;
+    memcpy(&context->m_cbData, cbData, sizeof(OCCallbackData));
+    context->m_numOptions = numOptions;
+    if (context->m_numOptions)
     {
-        if (it->flags & OC_FLAG_SECURE)
-        {
-            destination = &(*it);
-            break;
-        }
+        context->m_options = (OCHeaderOption *) OICCalloc(context->m_numOptions,
+                sizeof(OCHeaderOption));
+        memcpy(context->m_options, options, context->m_numOptions * sizeof(OCHeaderOption));
     }
-    return OCDoResource(handle, method, uri, destination, payload, CT_DEFAULT, OC_HIGH_QOS, cbData,
-            options, numOptions);
+
+    context->m_destination = context->m_destinations.begin();
+    *handle = context;
+
+    return DoResource(context);
+}
+
+OCStackResult DoResource(DoHandle *handle, OCMethod method, const char *uri,
+        const OCDevAddr* destination, OCPayload *payload, OCCallbackData *cbData,
+        OCHeaderOption *options, uint8_t numOptions)
+{
+    std::vector<OCDevAddr> destinations;
+    if (destination)
+    {
+        destinations.push_back(*destination);
+    }
+    return DoResource(handle, method, uri, destinations, payload, cbData, options, numOptions);
+}
+
+OCStackResult Cancel(DoHandle handle, OCQualityOfService qos, OCHeaderOption *options,
+        uint8_t numOptions)
+{
+    DoContext *context = (DoContext *) handle;
+    OCDoHandle h = context->m_handle;
+    if (!context->m_cbData.cd)
+    {
+        delete context;
+    }
+    return OCCancel(h, qos, options, numOptions);
 }
 
 std::map<std::string, std::string> ParseQuery(OCResourceHandle resource, const char *query)
