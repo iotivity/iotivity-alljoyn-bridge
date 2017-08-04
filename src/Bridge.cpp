@@ -333,6 +333,13 @@ bool Bridge::Start()
             return false;
         }
 
+        result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME,
+                m_deviceName.c_str());
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
         result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, OC_SPEC_VERSION);
         if (result != OC_STACK_OK)
         {

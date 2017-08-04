@@ -405,6 +405,7 @@ int main(int argc, char **argv)
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetProcessCB(ExecCB, KillCB, GetSeenStateCB);
     }
+    bridge->SetDeviceName("AllJoyn Bridge");
     bridge->SetManufacturerName("IoTivity");
     bridge->SetSecureMode(sSecureMode);
     if (!bridge->Start())
