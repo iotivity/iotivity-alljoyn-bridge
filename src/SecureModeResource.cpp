@@ -37,7 +37,7 @@ SecureModeResource::~SecureModeResource()
 
 OCStackResult SecureModeResource::Create()
 {
-    return CreateResource(&m_handle, "/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
+    return CreateResource(&m_handle, OC_RSRVD_SECURE_MODE_URI, OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
             OC_RSRVD_INTERFACE_READ_WRITE, SecureModeResource::EntityHandlerCB, this,
             OC_DISCOVERABLE | OC_OBSERVABLE);
 }

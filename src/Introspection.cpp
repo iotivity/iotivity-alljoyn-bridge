@@ -25,12 +25,44 @@
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
+#include "SecureModeResource.h"
 #include "Signature.h"
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include "ocpayload.h"
 #include "ocstack.h"
 #include <assert.h>
+
+/*
+ * Internal functions needed to append boilerplate introspection data at runtime.
+ */
+#define OC_RSRVD_INTROSPECTION_URI_PATH            "/introspection"
+
+static CborError append(CborEncoder *encoder, const void *data, size_t len)
+{
+    ptrdiff_t remaining = (ptrdiff_t)encoder->end;
+    remaining -= remaining ? (ptrdiff_t)encoder->data.ptr : encoder->data.bytes_needed;
+    remaining -= (ptrdiff_t)len;
+    if (remaining < 0) {
+        if (encoder->end != NULL) {
+            len -= encoder->end - encoder->data.ptr;
+            encoder->end = NULL;
+            encoder->data.bytes_needed = 0;
+        }
+
+        if (encoder->end)
+            encoder->data.ptr += len;
+        else
+            encoder->data.bytes_needed += len;
+        return CborErrorOutOfMemory;
+    }
+
+    memcpy(encoder->data.ptr, data, len);
+    encoder->data.ptr += len;
+    return CborNoError;
+}
+
+#include "IntrospectionFragments.cpp"
 
 #define VERIFY_CBOR(err)                                            \
     if ((CborNoError != (err)) && (CborErrorOutOfMemory != (err)))  \
@@ -267,63 +299,84 @@ static int64_t Paths(CborEncoder *cbor)
             // TODO skip unless there are vendor specific properties
             continue;
         }
-        CborEncoder path;
-        err |= cbor_encode_text_stringz(&paths, uri);
-        VERIFY_CBOR(err);
-        err |= cbor_encoder_create_map(&paths, &path, CborIndefiniteLength);
-        VERIFY_CBOR(err);
-        CborEncoder get;
-        err |= cbor_encode_text_stringz(&path, "get");
-        VERIFY_CBOR(err);
-        err |= cbor_encoder_create_map(&path, &get, CborIndefiniteLength);
-        VERIFY_CBOR(err);
-        CborEncoder parameters;
-        err |= cbor_encode_text_stringz(&get, "parameters");
-        VERIFY_CBOR(err);
-        err |= cbor_encoder_create_array(&get, &parameters, CborIndefiniteLength);
-        VERIFY_CBOR(err);
-        err |= QueryParameters(&parameters, h);
-        VERIFY_CBOR(err);
-        err |= cbor_encoder_close_container(&get, &parameters);
-        VERIFY_CBOR(err);
-        err |= Responses(&get, h);
-        VERIFY_CBOR(err);
-        err |= cbor_encoder_close_container(&path, &get);
-        VERIFY_CBOR(err);
-        if (ImplementsPost(h))
+        if (!strcmp(uri, OC_RSRVD_RD_URI))
         {
-            CborEncoder post;
-            err |= cbor_encode_text_stringz(&path, "post");
+            err |= append(&paths, oic_rd_paths,
+                    sizeof(oic_rd_paths) / sizeof(oic_rd_paths[0]));
             VERIFY_CBOR(err);
-            err |= cbor_encoder_create_map(&path, &post, CborIndefiniteLength);
+        }
+        else if (!strcmp(uri, OC_RSRVD_INTROSPECTION_URI_PATH))
+        {
+            err |= append(&paths, introspection_paths,
+                    sizeof(introspection_paths) / sizeof(introspection_paths[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_SECURE_MODE_URI))
+        {
+            err |= append(&paths, securemode_paths,
+                    sizeof(securemode_paths) / sizeof(securemode_paths[0]));
+            VERIFY_CBOR(err);
+        }
+        else
+        {
+            CborEncoder path;
+            err |= cbor_encode_text_stringz(&paths, uri);
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_create_map(&paths, &path, CborIndefiniteLength);
+            VERIFY_CBOR(err);
+            CborEncoder get;
+            err |= cbor_encode_text_stringz(&path, "get");
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_create_map(&path, &get, CborIndefiniteLength);
             VERIFY_CBOR(err);
             CborEncoder parameters;
-            err |= cbor_encode_text_stringz(&post, "parameters");
+            err |= cbor_encode_text_stringz(&get, "parameters");
             VERIFY_CBOR(err);
-            err |= cbor_encoder_create_array(&post, &parameters, CborIndefiniteLength);
+            err |= cbor_encoder_create_array(&get, &parameters, CborIndefiniteLength);
             VERIFY_CBOR(err);
             err |= QueryParameters(&parameters, h);
             VERIFY_CBOR(err);
-            CborEncoder body;
-            err |= cbor_encoder_create_map(&parameters, &body, CborIndefiniteLength);
+            err |= cbor_encoder_close_container(&get, &parameters);
             VERIFY_CBOR(err);
-            err |= Pair(&body, "name", "body");
+            err |= Responses(&get, h);
             VERIFY_CBOR(err);
-            err |= Pair(&body, "in", "body");
+            err |= cbor_encoder_close_container(&path, &get);
             VERIFY_CBOR(err);
-            err |= Schema(&body, h);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&parameters, &body);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&post, &parameters);
-            VERIFY_CBOR(err);
-            err |= Responses(&post, h);
-            VERIFY_CBOR(err);
-            err |= cbor_encoder_close_container(&path, &post);
+            if (ImplementsPost(h))
+            {
+                CborEncoder post;
+                err |= cbor_encode_text_stringz(&path, "post");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&path, &post, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                CborEncoder parameters;
+                err |= cbor_encode_text_stringz(&post, "parameters");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_array(&post, &parameters, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= QueryParameters(&parameters, h);
+                VERIFY_CBOR(err);
+                CborEncoder body;
+                err |= cbor_encoder_create_map(&parameters, &body, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= Pair(&body, "name", "body");
+                VERIFY_CBOR(err);
+                err |= Pair(&body, "in", "body");
+                VERIFY_CBOR(err);
+                err |= Schema(&body, h);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&parameters, &body);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&post, &parameters);
+                VERIFY_CBOR(err);
+                err |= Responses(&post, h);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&path, &post);
+                VERIFY_CBOR(err);
+            }
+            err |= cbor_encoder_close_container(&paths, &path);
             VERIFY_CBOR(err);
         }
-        err |= cbor_encoder_close_container(&paths, &path);
-        VERIFY_CBOR(err);
     }
     err |= cbor_encoder_close_container(cbor, &paths);
     VERIFY_CBOR(err);
@@ -629,6 +682,55 @@ exit:
     return err;
 }
 
+static int64_t Parameters(CborEncoder *cbor)
+{
+    OCStackResult result = OC_STACK_ERROR;
+    int64_t err = CborNoError;
+    CborEncoder parameters;
+    err |= cbor_encode_text_stringz(cbor, "parameters");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &parameters, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    uint8_t nr;
+    result = OCGetNumberOfResources(&nr);
+    if (result != OC_STACK_OK)
+    {
+        err |= CborErrorInternalError;
+        goto exit;
+    }
+    for (uint8_t i = 0; i < nr; ++i)
+    {
+        OCResourceHandle h = OCGetResourceHandle(i);
+        if (!(OCGetResourceProperties(h) & OC_ACTIVE))
+        {
+            continue;
+        }
+        const char *uri = OCGetResourceUri(h);
+        if (!strcmp(uri, OC_RSRVD_RD_URI))
+        {
+            err |= append(&parameters, oic_rd_parameters,
+                    sizeof(oic_rd_parameters) / sizeof(oic_rd_parameters[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_INTROSPECTION_URI_PATH))
+        {
+            err |= append(&parameters, introspection_parameters,
+                    sizeof(introspection_parameters) / sizeof(introspection_parameters[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_SECURE_MODE_URI))
+        {
+            err |= append(&parameters, securemode_parameters,
+                    sizeof(securemode_parameters) / sizeof(securemode_parameters[0]));
+            VERIFY_CBOR(err);
+        }
+    }
+    err |= cbor_encoder_close_container(cbor, &parameters);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
 static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
         const char *ajSoftwareVersion)
 {
@@ -638,12 +740,48 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
     const ajn::InterfaceDescription::Member **members = NULL;
     qcc::String *names = NULL;
     qcc::String *values = NULL;
+    OCStackResult result;
     int64_t err = CborNoError;
     CborEncoder definitions;
     err |= cbor_encode_text_stringz(cbor, "definitions");
     VERIFY_CBOR(err);
     err |= cbor_encoder_create_map(cbor, &definitions, CborIndefiniteLength);
     VERIFY_CBOR(err);
+
+    uint8_t nr;
+    result = OCGetNumberOfResources(&nr);
+    if (result != OC_STACK_OK)
+    {
+        err |= CborErrorInternalError;
+        goto exit;
+    }
+    for (uint8_t i = 0; i < nr; ++i)
+    {
+        OCResourceHandle h = OCGetResourceHandle(i);
+        if (!(OCGetResourceProperties(h) & OC_ACTIVE))
+        {
+            continue;
+        }
+        const char *uri = OCGetResourceUri(h);
+        if (!strcmp(uri, OC_RSRVD_RD_URI))
+        {
+            err |= append(&definitions, oic_rd_definitions,
+                    sizeof(oic_rd_definitions) / sizeof(oic_rd_definitions[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_INTROSPECTION_URI_PATH))
+        {
+            err |= append(&definitions, introspection_definitions,
+                    sizeof(introspection_definitions) / sizeof(introspection_definitions[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_SECURE_MODE_URI))
+        {
+            err |= append(&definitions, securemode_definitions,
+                    sizeof(securemode_definitions) / sizeof(securemode_definitions[0]));
+            VERIFY_CBOR(err);
+        }
+    }
 
     if (bus)
     {
@@ -1095,6 +1233,8 @@ CborError Introspect(ajn::BusAttachment *bus, const char *ajSoftwareVersion, con
     err |= Info(&map, title, version);
     VERIFY_CBOR(err);
     err |= Paths(&map);
+    VERIFY_CBOR(err);
+    err |= Parameters(&map);
     VERIFY_CBOR(err);
     err |= Definitions(&map, bus, ajSoftwareVersion);
     VERIFY_CBOR(err);

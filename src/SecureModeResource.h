@@ -27,6 +27,8 @@
 /** To represent secure mode resource type.*/
 #define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
 
+#define OC_RSRVD_SECURE_MODE_URI "/securemode"
+
 class SecureModeResource
 {
 public:

@@ -45,7 +45,7 @@ public:
     }
     DiscoverContext *DiscoverResource()
     {
-        DiscoverContext *context = new DiscoverContext("/securemode");
+        DiscoverContext *context = new DiscoverContext(OC_RSRVD_SECURE_MODE_URI);
         Callback discoverCB(Discover, context);
         EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_DISCOVER, "/oic/res", NULL, 0,
                 CT_DEFAULT, OC_HIGH_QOS, discoverCB, NULL, 0));
@@ -139,7 +139,7 @@ TEST_F(SecureMode, Get)
     DiscoverContext *context = DiscoverResource();
 
     ResourceCallback getCB;
-    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "/securemode",
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, OC_RSRVD_SECURE_MODE_URI,
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
 
@@ -198,7 +198,7 @@ TEST_F(SecureMode, Post)
     DiscoverContext *context = DiscoverResource();
 
     ResourceCallback postCB;
-    Post("/securemode", &context->m_resource->m_addrs[0], &postCB);
+    Post(OC_RSRVD_SECURE_MODE_URI, &context->m_resource->m_addrs[0], &postCB);
 
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
     EXPECT_TRUE(postCB.m_response->payload != NULL);
@@ -214,13 +214,13 @@ TEST_F(SecureMode, Observe)
     DiscoverContext *context = DiscoverResource();
 
     ObserveCallback observeCB;
-    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, "/securemode",
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, OC_RSRVD_SECURE_MODE_URI,
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
 
     observeCB.Reset();
     ResourceCallback postCB;
-    Post("/securemode", &context->m_resource->m_addrs[0], &postCB);
+    Post(OC_RSRVD_SECURE_MODE_URI, &context->m_resource->m_addrs[0], &postCB);
     EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
 
     EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
