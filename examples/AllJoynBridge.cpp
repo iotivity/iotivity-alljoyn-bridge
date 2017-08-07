@@ -321,7 +321,9 @@ int main(int argc, char **argv)
     }
 
     signal(SIGINT, SigIntCB);
+#ifdef SIGUSR1
     signal(SIGUSR1, SigUsr1CB);
+#endif
 
     QStatus status = AllJoynInit();
     if (status != ER_OK)
