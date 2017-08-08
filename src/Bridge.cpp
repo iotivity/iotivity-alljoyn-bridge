@@ -69,8 +69,16 @@ struct Bridge::DiscoverContext
     DiscoverContext(Bridge *bridge, OCDevAddr origin, OCDiscoveryPayload *payload)
         : m_bridge(bridge), m_device(origin, payload), m_bus(NULL), m_paths(NULL),
           m_definitions(NULL) { }
-    ~DiscoverContext() { OCRepPayloadDestroy(m_paths); OCRepPayloadDestroy(m_definitions);
-        delete m_bus; }
+    ~DiscoverContext()
+    {
+        OCRepPayloadDestroy(m_paths);
+        OCRepPayloadDestroy(m_definitions);
+        if (m_bus)
+        {
+            m_bus->Stop();
+            delete m_bus;
+        }
+    }
     std::vector<OCDevAddr> GetDevAddrs(const char *uri)
     {
         Resource *resource = m_device.GetResourceUri(uri);
@@ -256,6 +264,7 @@ void Bridge::Destroy(const char *id)
         VirtualBusAttachment *busAttachment = *vba;
         if (busAttachment->GetDi() == id)
         {
+            busAttachment->Stop();
             delete busAttachment;
             vba = m_virtualBusAttachments.erase(vba);
         }
