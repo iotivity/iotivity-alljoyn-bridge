@@ -541,7 +541,7 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
             }
             if (code)
             {
-                std::string name("org.openconnectivity.Error.");
+                std::string name("org.openconnectivity.Error.Code");
                 name = name + std::to_string(code);
                 status = context->m_obj->MethodReply(context->m_msg, name.c_str());
             }

@@ -197,7 +197,7 @@ public:
         }
         else if (member->name == "ErrorCode")
         {
-            EXPECT_EQ(ER_OK, MethodReply(msg, "org.openconnectivity.Error.404", "Message"));
+            EXPECT_EQ(ER_OK, MethodReply(msg, "org.openconnectivity.Error.Code404", "Message"));
         }
         else if (member->name == "MethodWithIntrospection")
         {

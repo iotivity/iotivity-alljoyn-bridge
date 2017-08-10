@@ -558,6 +558,11 @@ OCDiagnosticPayload *VirtualResource::CreatePayload(ajn::Message &msg,
         if (message.compare(0, ErrorPrefix.size(), ErrorPrefix) == 0)
         {
             message = message.substr(ErrorPrefix.size());
+            static const std::string CodePrefix = "Code";
+            if (message.compare(0, CodePrefix.size(), CodePrefix) == 0)
+            {
+                message = message.substr(CodePrefix.size());
+            }
             char *endptr = NULL;
             unsigned long code = strtoul(message.c_str(), &endptr, 10);
             if (*endptr == '\0')

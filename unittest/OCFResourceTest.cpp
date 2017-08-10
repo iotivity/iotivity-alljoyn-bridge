@@ -1747,7 +1747,7 @@ TEST_F(OCFResource, IfAnOCFOperationFailsTheErrorNameAndErrorMessageShallBeExtra
     GetPropertyCall get(resource0);
     EXPECT_EQ(ER_OK, get.Call(ToAJName("x.org.iotivity.rt").c_str(), "value", true));
     EXPECT_NE(ER_OK, get.Wait(1000));
-    EXPECT_EQ("org.openconnectivity.Error.500", get.ErrorName());
+    EXPECT_EQ("org.openconnectivity.Error.Code500", get.ErrorName());
     EXPECT_EQ("", get.ErrorDescription());
 
     delete resource0;

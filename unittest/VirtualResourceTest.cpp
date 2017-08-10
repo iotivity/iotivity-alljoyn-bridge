@@ -103,7 +103,7 @@ public:
         }
         else if (member->name == "ErrorCode")
         {
-            status = MethodReply(msg, "org.openconnectivity.Error.404", "Message");
+            status = MethodReply(msg, "org.openconnectivity.Error.Code404", "Message");
         }
         else
         {
