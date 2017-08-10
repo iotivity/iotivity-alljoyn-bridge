@@ -356,7 +356,7 @@ bool Bridge::Start()
             return false;
         }
         result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION,
-                OC_DATA_MODEL_VERSION);
+                DEVICE_DATA_MODEL_VERSION);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);

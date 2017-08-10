@@ -28,6 +28,9 @@
 #include <string>
 #include <vector>
 
+/** Device Data Model version.*/
+#define DEVICE_DATA_MODEL_VERSION            "ocf.res.1.1.0"
+
 class Resource
 {
 public:

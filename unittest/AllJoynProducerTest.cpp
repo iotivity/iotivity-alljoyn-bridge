@@ -1210,7 +1210,7 @@ TEST_F(AllJoynProducer, OCFDeviceProperties)
     properties.nln = sizeof(appNames) / sizeof(appNames[0]);
     properties.n = appNames[1].value;
     properties.piid = "10f70cc4-2398-41f5-8062-4c1facbfc41b";
-    properties.dmv = "org.iotivity.A.1,org.iotivity.B.2,org.iotivity.C.3,org.iotivity.D.4";
+    properties.dmv = "ocf.res.1.1.0,org.iotivity.A.1,org.iotivity.B.2,org.iotivity.C.3,org.iotivity.D.4";
     LocalizedString descriptions[] = {
         { "en", "en-description" },
         { "fr", "fr-description" }

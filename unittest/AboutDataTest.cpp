@@ -477,7 +477,7 @@ TEST_F(DeviceProperties, SetFromAboutData)
                               0xbe, 0x9f, 0x7f, 0xa3, 0x4a, 0xdc, 0x49, 0x7b };
     EXPECT_EQ(ER_OK, aboutData.SetAppId(appId, sizeof(appId) / sizeof(appId[0])));
     /* Version(s) => dmv */
-    const char *dmvs[] = { "org.iotivity.A.1", "org.iotivity.B.2", "org.iotivity.C.3", "org.iotivity.D.4" };
+    const char *dmvs[] = { "ocf.res.1.1.0", "org.iotivity.A.1", "org.iotivity.B.2", "org.iotivity.C.3", "org.iotivity.D.4" };
     const char *ifs[] = {
         "<interface name='org.iotivity.A'/>",
         "<interface name='org.iotivity.B'>"

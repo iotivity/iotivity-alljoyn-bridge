@@ -21,6 +21,7 @@
 #include "DeviceResource.h"
 
 #include "AboutData.h"
+#include "Resource.h"
 #include "ocrandom.h"
 #include "ocstack.h"
 #include <assert.h>
@@ -67,19 +68,13 @@ OCStackResult SetDeviceProperties(ajn::BusAttachment *bus,
             delete[] itfs;
         }
         delete[] ps;
-        std::string dmv;
+        std::string dmv = DEVICE_DATA_MODEL_VERSION;
         for (auto it = dataModelVersions.begin(); it != dataModelVersions.end(); ++it)
         {
-            if (it != dataModelVersions.begin())
-            {
-                dmv += ",";
-            }
+            dmv += ",";
             dmv += *it;
         }
-        if (!dmv.empty())
-        {
-            OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, dmv.c_str());
-        }
+        OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, dmv.c_str());
     }
     OCStringLL *ll = NULL;
     for (size_t i = 0; i < numLangs; ++i)
