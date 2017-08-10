@@ -214,16 +214,16 @@ TEST_F(Introspection, NumericTypes)
     char *s;
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "format", &s));
-    EXPECT_STREQ("uint64", s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
+    EXPECT_STREQ("^0([1-9][0-9]{0,19})$", s);
 
     VerifyMinimumAndMaximum(properties, "int64small", -9007199254740992, 9007199254740992);
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.int64large",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "format", &s));
-    EXPECT_STREQ("int64", s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
+    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18)}$", s);
 
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.double",
             &property));
@@ -591,8 +591,8 @@ TEST_F(Introspection, Arrays)
     EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
     EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "format", &s));
-    EXPECT_STREQ("uint64", s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
+    EXPECT_STREQ("^0([1-9][0-9]{0,19})$", s);
     VerifyArrayMinimumAndMaximum(properties, "int64small", -9007199254740992, 9007199254740992);
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.int64large",
             &property));
@@ -601,8 +601,8 @@ TEST_F(Introspection, Arrays)
     EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
     EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "format", &s));
-    EXPECT_STREQ("int64", s);
+    EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
+    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18)}$", s);
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.double",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
