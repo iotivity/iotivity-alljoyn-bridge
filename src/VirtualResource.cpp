@@ -569,8 +569,12 @@ OCDiagnosticPayload *VirtualResource::CreatePayload(ajn::Message &msg,
             {
                 *ehResult = (OCEntityHandlerResult) code;
             }
+            message = description;
         }
-        message = message + ": " + description;
+        else
+        {
+            message = message + ": " + description;
+        }
         payload = OCDiagnosticPayloadCreate(message.c_str());
     }
     return payload;

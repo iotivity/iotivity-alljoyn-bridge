@@ -193,9 +193,13 @@ public:
         }
         else if (member->name == "ErrorName")
         {
+            EXPECT_EQ(ER_OK, MethodReply(msg, "org.freedesktop.DBus.Error.Failed", "Message"));
+        }
+        else if (member->name == "OCFErrorName")
+        {
             EXPECT_EQ(ER_OK, MethodReply(msg, "org.openconnectivity.Error.Name", "Message"));
         }
-        else if (member->name == "ErrorCode")
+        else if (member->name == "OCFErrorCode")
         {
             EXPECT_EQ(ER_OK, MethodReply(msg, "org.openconnectivity.Error.Code404", "Message"));
         }
@@ -1147,7 +1151,7 @@ TEST_F(AllJoynProducer, WhenAnAllJoynOperationFailsTheTranslatorShallSendAnOCFEr
     delete context;
 }
 
-TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAvailableTheTranslatorShallConstructAnOCFErrorMessage)
+TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAvailableAndDoesNotContainTheOCFPrefixTheTranslatorShallConstructAnOCFErrorMessage)
 {
     const char *xml =
             "<interface name='org.iotivity.Interface'>"
@@ -1165,21 +1169,34 @@ TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAvailableTheTranslatorShallCons
     EXPECT_TRUE(postCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_DIAGNOSTIC, postCB.m_response->payload->type);
     OCDiagnosticPayload *payload = (OCDiagnosticPayload *) postCB.m_response->payload;
-    EXPECT_STREQ("Name: Message", payload->message);
+    EXPECT_STREQ("org.freedesktop.DBus.Error.Failed: Message", payload->message);
 
     delete context;
 }
 
-TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAnErrorCodeWithoutADecimalTheErrorCodeShallBeIndicatedByTheErrorName)
+TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAvailableAndDoesContainTheOCFPrefixTheTranslatorShallConstructAnOCFErrorMessage)
 {
     const char *xml =
             "<interface name='org.iotivity.Interface'>"
-            "  <method name='ErrorCode'/>"
+            "  <method name='OCFErrorName'/>"
+            "  <method name='OCFErrorCode'/>"
             "</interface>";
     DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
 
-    std::string uri = std::string(m_obj->GetPath());
+    std::string uri = std::string(m_obj->GetPath()) + "?rt=x.org.iotivity.-interface.-o-c-f-error-name";
     ResourceCallback postCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
+
+    EXPECT_GT(postCB.m_response->result, OC_STACK_RESOURCE_CHANGED);
+    EXPECT_TRUE(postCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_DIAGNOSTIC, postCB.m_response->payload->type);
+    OCDiagnosticPayload *payload = (OCDiagnosticPayload *) postCB.m_response->payload;
+    EXPECT_STREQ("Message", payload->message);
+
+    uri = std::string(m_obj->GetPath()) + "?rt=x.org.iotivity.-interface.-o-c-f-error-code";
+    postCB.Reset();
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], NULL, CT_DEFAULT, OC_HIGH_QOS, postCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
@@ -1187,8 +1204,8 @@ TEST_F(AllJoynProducer, WhenTheAllJoynErrorNameIsAnErrorCodeWithoutADecimalTheEr
     EXPECT_EQ(OC_STACK_NO_RESOURCE, postCB.m_response->result);
     EXPECT_TRUE(postCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_DIAGNOSTIC, postCB.m_response->payload->type);
-    OCDiagnosticPayload *payload = (OCDiagnosticPayload *) postCB.m_response->payload;
-    EXPECT_STREQ("404: Message", payload->message);
+    payload = (OCDiagnosticPayload *) postCB.m_response->payload;
+    EXPECT_STREQ("Message", payload->message);
 
     delete context;
 }
