@@ -88,6 +88,54 @@ std::string ToAJName(std::string ocName)
     return ajName.str();
 }
 
+std::string ToOCPropName(std::string ajName)
+{
+    std::ostringstream ocName;
+    const char *in = ajName.c_str();
+    while (*in)
+    {
+        if (*in == '_' && *(in + 1) == 'd')
+        {
+            ++in;
+            ocName << '.';
+        }
+        else if (*in == '_' && *(in + 1) == 'h')
+        {
+            ++in;
+            ocName << '-';
+        }
+        else
+        {
+            ocName << *in;
+        }
+        ++in;
+    }
+    return ocName.str();
+}
+
+std::string ToAJPropName(std::string ocName)
+{
+    std::ostringstream ajName;
+    const char *in = ocName.c_str();
+    while (*in)
+    {
+        if (*in == '.')
+        {
+            ajName << "_d";
+        }
+        else if (*in == '-')
+        {
+            ajName << "_h";
+        }
+        else
+        {
+            ajName << *in;
+        }
+        ++in;
+    }
+    return ajName.str();
+}
+
 std::string GetResourceTypeName(std::string ifaceName)
 {
     return ToOCName(ifaceName);
@@ -110,7 +158,7 @@ std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::st
 
 std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName)
 {
-    return GetResourceTypeName(iface, memberName);
+    return GetResourceTypeName(iface->GetName()) + "." + memberName;
 }
 
 std::string GetInterface(std::string rt)

@@ -27,6 +27,8 @@
 #include "VirtualBusAttachment.h"
 #include "ocpayload.h"
 #include "ocstack.h"
+#include "oic_malloc.h"
+#include "oic_string.h"
 #include <algorithm>
 #include <assert.h>
 
@@ -202,6 +204,19 @@ void VirtualBusObject::CancelObserve()
     }
 }
 
+static void TranslatePropertyNames(OCRepPayload *payload)
+{
+    for (OCRepPayloadValue *v = payload->values; v; v = v->next)
+    {
+        std::string ajName = ToAJPropName(v->name);
+        if (ajName != v->name)
+        {
+            OICFree(v->name);
+            v->name = OICStrdup(ajName.c_str());
+        }
+    }
+}
+
 OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handle,
         OCClientResponse *response)
 {
@@ -216,6 +231,7 @@ OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handl
         memset(&value, 0, sizeof(value));
         value.type = OCREP_PROP_OBJECT;
         value.obj = (OCRepPayload *) response->payload;
+        TranslatePropertyNames(value.obj);
         ajn::MsgArg args[3];
         args[0].Set("s", context->m_iface.c_str());
         std::string valueType = std::string("[") + context->m_iface + ".Properties" + "]";
@@ -302,7 +318,7 @@ void VirtualBusObject::GetPropCB(ajn::Message &msg, OCRepPayload *payload, void 
     ajn::MsgArg arg;
     for (OCRepPayloadValue *value = payload->values; value; value = value->next)
     {
-        if (!strcmp(value->name, propName))
+        if (!strcmp(ToAJPropName(value->name).c_str(), propName))
         {
             qcc::String signature = prop->signature;
             prop->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
@@ -362,7 +378,7 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     payload = OCRepPayloadCreate();
     signature = prop->signature;
     prop->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
-    ToOCPayload(payload, propName, GetPropType(prop, arg->v_variant.val), arg->v_variant.val,
+    ToOCPayload(payload, ToOCPropName(propName).c_str(), GetPropType(prop, arg->v_variant.val), arg->v_variant.val,
             signature.c_str());
     DoResource(OC_REST_POST, uri, resource->m_addrs, payload, msg, &VirtualBusObject::SetPropCB);
     return;
@@ -442,6 +458,7 @@ void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload, v
     memset(&value, 0, sizeof(value));
     value.type = OCREP_PROP_OBJECT;
     value.obj = payload;
+    TranslatePropertyNames(value.obj);
     ajn::MsgArg arg;
     std::string valueType = std::string("[") + ifaceName + ".Properties" + "]";
     ToAJMsgArg(&arg, "a{sv}", &value, valueType.c_str());

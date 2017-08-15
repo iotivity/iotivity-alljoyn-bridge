@@ -20,6 +20,7 @@
 
 #include "Payload.h"
 
+#include "Name.h"
 #include "Plugin.h"
 #include "Signature.h"
 #include "oic_malloc.h"
@@ -254,7 +255,8 @@ static OCRepPayload *CloneObject(OCRepPayloadPropType type, const ajn::MsgArg *a
             assert(Types::m_structs.find(signature) != Types::m_structs.end());
             assert(i < Types::m_structs[signature].size());
             Types::Field &field = Types::m_structs[signature][i];
-            success = ToOCPayload(obj, field.m_name.c_str(), type, &arg->v_struct.members[i],
+            std::string ocName = ToOCPropName(field.m_name);
+            success = ToOCPayload(obj, ocName.c_str(), type, &arg->v_struct.members[i],
                     field.m_signature.c_str());
         }
     }
@@ -2953,10 +2955,11 @@ bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature, OCRepPayloadValue *valu
                         for (field = Types::m_structs[sig].begin();
                              success && field != Types::m_structs[sig].end(); ++field)
                         {
+                            std::string ocName = ToOCPropName(field->m_name);
                             success = false;
                             for (OCRepPayloadValue *v = value->obj->values; v; v = v->next)
                             {
-                                if (!strcmp(v->name, field->m_name.c_str()))
+                                if (ocName == v->name)
                                 {
                                     success = ToAJMsgArg(member, field->m_signature.c_str(), v);
                                     ++member;

@@ -463,7 +463,7 @@ static bool ToFilteredOCPayload(OCRepPayload *payload, const std::string ajSoftw
             {
                 property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
             }
-            qcc::String propName = GetPropName(iface, key);
+            qcc::String propName = ToOCPropName(GetPropName(iface, key));
             success = ToOCPayload(payload, propName.c_str(),
                     GetPropType(property, entry->v_dictEntry.val->v_variant.val),
                     entry->v_dictEntry.val->v_variant.val, signature.c_str());
@@ -1042,15 +1042,34 @@ QStatus VirtualResource::Set(SetContext *context)
 {
     LOG(LOG_INFO, "[%p] context=%p name=%s", this, context, context->m_value->name);
 
+    /*
+     * OC value name may have '.' in the property name portion before translation.  This occurs when
+     * the AllJoyn bus object has a property named e.g. "one_dtwo".  The loop below tries to locate
+     * the interface component of names of this form.
+     */
+    const ajn::InterfaceDescription *iface = NULL;
+    const ajn::InterfaceDescription::Property *property = NULL;
     std::string valueName = context->m_value->name;
-    std::string ifaceName = ::GetInterface(valueName);
-    std::string propName = GetMember(valueName);
-    const ajn::InterfaceDescription *iface = GetInterface(ifaceName.c_str());
+    std::string propName;
+    for (size_t pos = valueName.rfind('.'); pos != std::string::npos;
+            pos = valueName.rfind('.', pos - 1))
+    {
+        std::string ifaceName = ToAJName(valueName.substr(0, pos));
+        iface = GetInterface(ifaceName.c_str());
+        if (iface)
+        {
+            propName = ToAJPropName(valueName.substr(pos + 1));
+            property = iface->GetProperty(propName.c_str());
+            if (property)
+            {
+                break;
+            }
+        }
+    }
     if (!iface)
     {
         return ER_BUS_NO_SUCH_INTERFACE;
     }
-    const ajn::InterfaceDescription::Property *property = iface->GetProperty(propName.c_str());
     if (!property)
     {
         return ER_BUS_NO_SUCH_PROPERTY;

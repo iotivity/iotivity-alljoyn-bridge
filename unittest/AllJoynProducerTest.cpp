@@ -168,6 +168,27 @@ public:
             {
                 return val.Set("(ii)", 0, 1);
             }
+            else if (!strcmp(prop, "oneTwo") ||
+                    !strcmp(prop, "one_dtwo") ||
+                    !strcmp(prop, "one_htwo"))
+            {
+                return val.Set("x", 12);
+            }
+            else if (!strcmp(prop, "dict"))
+            {
+                ajn::MsgArg entries[2];
+                ajn::MsgArg *entry;
+                entry = entries;
+                (entry++)->Set("{sv}", "one.two", new ajn::MsgArg("x", 12));
+                (entry++)->Set("{sv}", "one-two", new ajn::MsgArg("s", "one-two"));
+                QStatus status = val.Set("a{sv}", entry - entries, entries);
+                val.Stabilize();
+                return status;
+            }
+            else if (!strcmp(prop, "struct"))
+            {
+                return val.Set("(xs)", 12, "one-two");
+            }
             else
             {
                 return ER_BUS_NO_SUCH_PROPERTY;
@@ -226,6 +247,13 @@ public:
             args[12].Set("(ii)", 0, 1);
             EXPECT_EQ(ER_OK, MethodReply(msg, args, 13));
         }
+        else if (member->name == "PropertyNamesMethod")
+        {
+            size_t numArgs;
+            const ajn::MsgArg *args;
+            msg->GetArgs(numArgs, args);
+            EXPECT_EQ(ER_OK, MethodReply(msg, args, numArgs));
+        }
         else
         {
             EXPECT_EQ(ER_OK, MethodReply(msg, ER_OK));
@@ -234,7 +262,11 @@ public:
     void PropertiesChanged()
     {
         const char *props[] = { "True", "Invalidates" };
-        EXPECT_EQ(ER_OK, EmitPropChanged(TestInterfaceName, props, A_SIZEOF(props),
+        PropertiesChanged(props, A_SIZEOF(props));
+    }
+    void PropertiesChanged(const char **props, size_t numProps)
+    {
+        EXPECT_EQ(ER_OK, EmitPropChanged(TestInterfaceName, props, numProps,
                 ajn::SESSION_ID_ALL_HOSTED));
     }
     void Signal()
@@ -280,6 +312,25 @@ public:
         args[11].Set("ax", 0, NULL);
         args[12].Set("(ii)", 0, 1);
         EXPECT_EQ(ER_OK, ajn::BusObject::Signal(NULL, ajn::SESSION_ID_ALL_HOSTED, *member, args, 13));
+    }
+    void PropertyNamesSignal()
+    {
+        const ajn::InterfaceDescription::Member *member =
+                bus->GetInterface(TestInterfaceName)->GetSignal("PropertyNamesSignal");
+        EXPECT_TRUE(member != NULL);
+        ajn::MsgArg args[5];
+        args[0].Set("x", 12);
+        args[1].Set("x", 12);
+        args[2].Set("x", 12);
+        ajn::MsgArg entries[2];
+        ajn::MsgArg *entry;
+        entry = entries;
+        (entry++)->Set("{sv}", "one.two", new ajn::MsgArg("x", 12));
+        (entry++)->Set("{sv}", "one-two", new ajn::MsgArg("s", "one-two"));
+        args[3].Set("a{sv}", entry - entries, entries);
+        args[3].Stabilize();
+        args[4].Set("(xs)", 12, "one-two");
+        EXPECT_EQ(ER_OK, ajn::BusObject::Signal(NULL, ajn::SESSION_ID_ALL_HOSTED, *member, args, 5));
     }
 };
 
@@ -668,6 +719,75 @@ TEST(AllJoynInterfaceNameShallBeConvertedToATypeAsFollows, BoundsCheck)
     EXPECT_STREQ("example.foo__", ToAJName("x.example.foo---").c_str());
 }
 
+TEST_F(AllJoynProducer, TheNameOfEachPropertyShallBePrefixedWithTheInterfaceName)
+{
+    const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='Const' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>"
+            "  </property>"
+            "  <property name='False' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='false'/>"
+            "  </property>"
+            "  <property name='True' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='Invalidates' type='q' access='read'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='invalidates'/>"
+            "  </property>"
+            "  <method name='Method'>"
+            "    <arg name='InArg' type='q' direction='in'/>"
+            "    <arg type='q' direction='out'/>"
+            "  </method>"
+            "  <signal name='Signal'>"
+            "    <arg name='ArgA' type='q'/>"
+            "    <arg name='ArgB' type='q'/>"
+            "  </signal>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    ResourceCallback getCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "/Test/1?if=oic.if.baseline",
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
+    int64_t i;
+    bool b;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Const", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.False", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-methodvalidity", &b));
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodInArg"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodarg1"));
+
+    getCB.Reset();
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, "/Test/3?if=oic.if.baseline",
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    EXPECT_TRUE(getCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
+    payload = (OCRepPayload *) getCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Invalidates", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-signalvalidity", &b));
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalArgA"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalArgB"));
+}
+
+TEST(AllJoynPropertyName, ShallBeConvertedToAPropertyAsFollows)
+{
+    EXPECT_STREQ("one_dtwo", ToAJPropName("one.two").c_str());
+    EXPECT_STREQ("one_htwo", ToAJPropName("one-two").c_str());
+
+    EXPECT_STREQ("one.two", ToOCPropName("one_dtwo").c_str());
+    EXPECT_STREQ("one-two", ToOCPropName("one_htwo").c_str());
+}
+
 TEST_F(AllJoynProducer, AllJoynPropertiesWithTheSameEmitsChangedSignalValueAreMappedToTheSameResourceType)
 {
     const char *xml =
@@ -689,16 +809,17 @@ TEST_F(AllJoynProducer, AllJoynPropertiesWithTheSameEmitsChangedSignalValueAreMa
 
     struct {
         const char *path;
+        const char *rt;
         const char *value;
     } emitsChangedSignal[] = {
-        { "/Test/1", "const" },
-        { "/Test/1", "false" },
-        { "/Test/3", "true", },
-        { "/Test/3", "invalidates" }
+        { "/Test/1", "const", "Const" },
+        { "/Test/1", "false", "False" },
+        { "/Test/3", "true", "True" },
+        { "/Test/3", "invalidates", "Invalidates" }
     };
     for (size_t i = 0; i < sizeof(emitsChangedSignal) / sizeof(emitsChangedSignal[0]); ++i)
     {
-        std::string rt = std::string("x.org.iotivity.-interface.") + emitsChangedSignal[i].value;
+        std::string rt = std::string("x.org.iotivity.-interface.") + emitsChangedSignal[i].rt;
         std::string uri = std::string(emitsChangedSignal[i].path) + "?rt=" + rt;
         ResourceCallback getCB;
         EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
@@ -774,7 +895,7 @@ TEST_F(AllJoynProducer, VersionPropertyIsAlwaysConsideredConst)
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
     int64_t i;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-version", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Version", &i));
 
     delete context;
 }
@@ -2086,27 +2207,27 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_TRUE(getCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     payload = (OCRepPayload *) getCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-int64-small", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Int64Small", &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-int64-large", &s));
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Int64Large", &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-uint64-small", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Uint64Small", &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-uint64-large", &s));
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Uint64Large", &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-object-path",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.ObjectPath",
             &s));
     EXPECT_STREQ("/Test", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signature",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Signature",
             &s));
     EXPECT_STREQ("signatur", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-struct-name",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.StructName",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "int", &i));
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(obj, "string", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.-array-of-struct-name",
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.ArrayOfStructName",
             &objArr, dim));
     EXPECT_EQ(2u, calcDimTotal(dim));
     EXPECT_TRUE(OCRepPayloadGetPropInt(objArr[0], "int", &i));
@@ -2117,17 +2238,17 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(objArr[1], "string", &s));
     EXPECT_STREQ("string1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.-array-of-byte",
+    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.ArrayOfByte",
             &bs));
     EXPECT_EQ(5u, bs.len);
     EXPECT_EQ(0, memcmp(ay, bs.bytes, bs.len));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-variant",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Variant",
             &i));
     EXPECT_EQ(0, i);
     /* Empty arrays are decoded as OCREP_PROP_NULL (see IOT-2457) */
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-array-of-int32"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-array-of-int64"));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-struct",
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrayOfInt32"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrayOfInt64"));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.Struct",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "x", &i));
     EXPECT_EQ(0, i);
@@ -2136,18 +2257,18 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
 
     /* Set */
     payload = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-int64-small", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.-int64-large", "1"));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-uint64-small", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.-uint64-large", "1"));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.-object-path",
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Int64Small", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Int64Large", "1"));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Uint64Small", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Uint64Large", "1"));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.ObjectPath",
             "/Test"));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.-signature",
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Signature",
             "signatur"));
     obj = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "int", 1));
     EXPECT_TRUE(OCRepPayloadSetPropString(obj, "string", "string"));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-struct-name", obj));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.StructName", obj));
     dim[0] = 2;
     dim[1] = dim[2] = 0;
     objArr = (OCRepPayload **) OICCalloc(2, sizeof(OCRepPayload*));
@@ -2157,20 +2278,20 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     objArr[1] = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(objArr[1], "int", 1));
     EXPECT_TRUE(OCRepPayloadSetPropString(objArr[1], "string", "string1"));
-    EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "x.org.iotivity.-interface.-array-of-struct-name",
+    EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "x.org.iotivity.-interface.ArrayOfStructName",
             (const OCRepPayload **) objArr, dim));
-    EXPECT_TRUE(OCRepPayloadSetPropByteString(payload, "x.org.iotivity.-interface.-array-of-byte",
+    EXPECT_TRUE(OCRepPayloadSetPropByteString(payload, "x.org.iotivity.-interface.ArrayOfByte",
             bs));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-variant", 0));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Variant", 0));
     size_t emptyDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    EXPECT_TRUE(OCRepPayloadSetIntArrayAsOwner(payload, "x.org.iotivity.-interface.-array-of-int32",
+    EXPECT_TRUE(OCRepPayloadSetIntArrayAsOwner(payload, "x.org.iotivity.-interface.ArrayOfInt32",
             NULL, emptyDim));
-    EXPECT_TRUE(OCRepPayloadSetStringArrayAsOwner(payload, "x.org.iotivity.-interface.-array-of-int64",
+    EXPECT_TRUE(OCRepPayloadSetStringArrayAsOwner(payload, "x.org.iotivity.-interface.ArrayOfInt64",
             NULL, emptyDim));
     obj = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "x", 0));
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "y", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-struct",
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.Struct",
             obj));
 
     ResourceCallback setCB;
@@ -2325,23 +2446,23 @@ static void PrintTo(const MultiValueRtValue& value, ::std::ostream* os)
     *os << "{ ";
     if (value.m_version)
     {
-        *os << "\"-version\": 1, ";
+        *os << "\"Version\": 1, ";
     }
     if (value.m_const)
     {
-        *os << "\"-const\": 1, ";
+        *os << "\"Const\": 1, ";
     }
     if (value.m_false)
     {
-        *os << "\"-false\": 1, ";
+        *os << "\"False\": 1, ";
     }
     if (value.m_true)
     {
-        *os << "\"-true\": 1, ";
+        *os << "\"True\": 1, ";
     }
     if (value.m_invalidates)
     {
-        *os << "\"-invalidates\": 1, ";
+        *os << "\"Invalidates\": 1, ";
     }
     *os << "}";
 }
@@ -2376,10 +2497,10 @@ TEST_P(MultiValueRt, Get)
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
 
     int64_t i;
-    EXPECT_EQ(value.m_version, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-version", &i));
-    EXPECT_EQ(value.m_const, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-const", &i));
-    EXPECT_EQ(value.m_false, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-false", &i));
-    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-true", &i));
+    EXPECT_EQ(value.m_version, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Version", &i));
+    EXPECT_EQ(value.m_const, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Const", &i));
+    EXPECT_EQ(value.m_false, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.False", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
 
     delete context;
 }
@@ -2401,19 +2522,19 @@ TEST_P(MultiValueRt, Post)
     OCRepPayload *request = OCRepPayloadCreate();
     if (value.m_version)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-version", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.Version", 1));
     }
     if (value.m_const)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-const", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.Const", 1));
     }
     if (value.m_false)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-false", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.False", 1));
     }
     if (value.m_true)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-true", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.True", 1));
     }
 
     ResourceCallback postCB;
@@ -2491,8 +2612,8 @@ TEST_P(MultiValueRtObserve, Observe)
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
     OCRepPayload *payload = (OCRepPayload *) observeCB.m_response->payload;
     int64_t i;
-    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-true", &i));
-    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-invalidates", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Invalidates", &i));
 
     observeCB.Reset();
     m_obj->PropertiesChanged();
@@ -2502,8 +2623,8 @@ TEST_P(MultiValueRtObserve, Observe)
     EXPECT_TRUE(observeCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
     payload = (OCRepPayload *) observeCB.m_response->payload;
-    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-true", &i));
-    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-invalidates", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Invalidates", &i));
 
     delete context;
 }
@@ -2610,8 +2731,8 @@ TEST_F(AllJoynProducer, MultiValueRtPostSimultaneouslyToMultipleResourceTypes)
     DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
 
     OCRepPayload *request = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-true", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.-invalidates", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.True", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.Invalidates", 1));
 
     ResourceCallback postCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "/Test",
@@ -2623,3 +2744,272 @@ TEST_F(AllJoynProducer, MultiValueRtPostSimultaneouslyToMultipleResourceTypes)
 
     delete context;
 }
+
+static void VerifyPropertyNamesAreEscaped(OCRepPayload *payload)
+{
+    int64_t i;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.oneTwo", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.one.two", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.one-two", &i));
+    EXPECT_EQ(12, i);
+    OCRepPayload *dict;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.dict", &dict));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
+    EXPECT_EQ(12, i);
+    char *s;
+    EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
+    EXPECT_STREQ("one-two", s);
+    OCRepPayload *_struct;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.struct", &_struct));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));
+    EXPECT_STREQ("one-two", s);
+}
+
+TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
+{
+    static const char *xml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='oneTwo' type='x' access='readwrite'>"
+            "    <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "    <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='one_dtwo' type='x' access='readwrite'>"
+            "    <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "    <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='one_htwo' type='x' access='readwrite'>"
+            "    <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "    <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='dict' type='a{sv}' access='readwrite'>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <property name='struct' type='(xs)' access='readwrite'>"
+            "    <annotation name='org.alljoyn.Bus.Type.Name' value='[PropertiesStruct]'/>"
+            "    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='true'/>"
+            "  </property>"
+            "  <method name='PropertyNamesMethod'>"
+            "    <arg name='oneTwo' type='x' access='readwrite' direction='in'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='one_dtwo' type='x' access='readwrite' direction='in'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='one_htwo' type='x' access='readwrite' direction='in'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='dict' type='a{sv}' access='readwrite' direction='in'/>"
+            "    <arg name='struct' type='(xs)' access='readwrite' direction='in'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Name' value='[PropertiesStruct]'/>"
+            "    </arg>"
+            "    <arg name='outoneTwo' type='x' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='outone_dtwo' type='x' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='outone_htwo' type='x' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='outdict' type='a{sv}' access='readwrite' direction='out'/>"
+            "    <arg name='outstruct' type='(xs)' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Name' value='[PropertiesStruct]'/>"
+            "    </arg>"
+            "  </method>"
+            "  <signal name='PropertyNamesSignal'>"
+            "    <arg name='oneTwo' type='x' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='one_dtwo' type='x' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='one_htwo' type='x' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
+            "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
+            "    </arg>"
+            "    <arg name='dict' type='a{sv}' access='readwrite' direction='out'/>"
+            "    <arg name='struct' type='(xs)' access='readwrite' direction='out'>"
+            "      <annotation name='org.alljoyn.Bus.Type.Name' value='[PropertiesStruct]'/>"
+            "    </arg>"
+            "  </signal>"
+            "  <annotation name='org.alljoyn.Bus.Struct.PropertiesStruct.Field.one_dtwo.Type' value='x'/>"
+            "  <annotation name='org.alljoyn.Bus.Struct.PropertiesStruct.Field.one_htwo.Type' value='s'/>"
+            "</interface>";
+    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+
+    ResourceCallback getCB;
+    ResourceCallback postCB;
+    std::string uri;
+    OCRepPayload *payload;
+    int64_t i;
+    OCRepPayload *dict;
+    char *s;
+    OCRepPayload *_struct;
+
+    /* Get - verify that property names are escaped when rt is not specified */
+    getCB.Reset();
+    uri = "/Test/3";
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    payload = (OCRepPayload *) getCB.m_response->payload;
+    VerifyPropertyNamesAreEscaped(payload);
+
+    /* Get - Verify that property names are escaped when rt is specified */
+    getCB.Reset();
+    uri = "/Test/3?rt=x.org.iotivity.-interface.true";
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    payload = (OCRepPayload *) getCB.m_response->payload;
+    VerifyPropertyNamesAreEscaped(payload);
+
+    /* Get - Verify that arg names are unescaped */
+    getCB.Reset();
+    uri = "/Test/1?rt=x.org.iotivity.-interface.-property-names-method";
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
+    payload = (OCRepPayload *) getCB.m_response->payload;
+    // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodoneTwo"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodone_dtwo"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodone_htwo"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methoddict"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodstruct"));
+
+    /* Post - Verify that property names are escaped */
+    dict = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(dict, "one.two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropString(dict, "one-two", "two-one"));
+    _struct = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(_struct, "one.two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropString(_struct, "one-two", "two-one"));
+    payload = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.oneTwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.one.two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.one-two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.dict", dict));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.struct", _struct));
+    uri = "/Test/3?rt=x.org.iotivity.-interface.true";
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
+            postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+
+    /* Post - Verify that arg names are unescaped */
+    dict = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(dict, "one.two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropString(dict, "one-two", "two-one"));
+    _struct = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(_struct, "one.two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropString(_struct, "one-two", "two-one"));
+    payload = OCRepPayloadCreate();
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoneTwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodone_dtwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodone_htwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methoddict", dict));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodstruct", _struct));
+    postCB.Reset();
+    uri = "/Test/1?rt=x.org.iotivity.-interface.-property-names-method";
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
+            &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
+            postCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+    payload = (OCRepPayload *) postCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoutoneTwo", &i));
+    EXPECT_EQ(21, i);
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoutone_dtwo", &i));
+    EXPECT_EQ(21, i);
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoutone_htwo", &i));
+    EXPECT_EQ(21, i);
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodoutdict", &dict));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
+    EXPECT_EQ(21, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
+    EXPECT_STREQ("two-one", s);
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodoutstruct", &_struct));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
+    EXPECT_EQ(21, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));
+    EXPECT_STREQ("two-one", s);
+
+    /* Observe - Verify that property names are escaped */
+    uri = "/Test/3?rt=x.org.iotivity.-interface.true";
+    ObserveCallback observeCB;
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    payload = (OCRepPayload *) observeCB.m_response->payload;
+    VerifyPropertyNamesAreEscaped(payload);
+
+    observeCB.Reset();
+    const char *props[] = { "oneTwo", "one_dtwo", "one_htwo", "dict", "struct" };
+    m_obj->PropertiesChanged(props, A_SIZEOF(props));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    payload = (OCRepPayload *) observeCB.m_response->payload;
+    VerifyPropertyNamesAreEscaped(payload);
+
+    /* Observe - Verify that arg names are unescaped */
+    uri = "/Test/3?rt=x.org.iotivity.-interface.-property-names-signal";
+    observeCB.Reset();
+    EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, uri.c_str(),
+            &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+
+    observeCB.Reset();
+    m_obj->PropertyNamesSignal();
+    EXPECT_EQ(OC_STACK_OK, observeCB.Wait(1000));
+    EXPECT_EQ(OC_STACK_OK, observeCB.m_response->result);
+    EXPECT_TRUE(observeCB.m_response->payload != NULL);
+    EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
+    payload = (OCRepPayload *) observeCB.m_response->payload;
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signaloneTwo", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalone_dtwo", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalone_htwo", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-signaldict", &dict));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
+    EXPECT_STREQ("one-two", s);
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-signalstruct", &_struct));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
+    EXPECT_EQ(12, i);
+    EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));
+    EXPECT_STREQ("one-two", s);
+
+    delete context;
+}
+

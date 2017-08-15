@@ -205,6 +205,7 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
                     OCRepPayloadPropType propType;
                     std::pair<std::string, std::string> propSig = GetSignature(property->obj,
                             annotations, &propType);
+                    /* Use property-name directly here since it is a dictionary key, not an AJ property */
                     Types::m_dicts[dictName][property->name] =
                             Types::Value(!propSig.second.empty() ? propSig.second : propSig.first,
                                     propType);
@@ -328,17 +329,19 @@ static void AddAnnotations(const char *name, OCRepPayload *schema,
                 iface->AddPropertyAnnotation(name, "org.alljoyn.Bus.Type.Default",
                         (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
             }
-            if (OCRepPayloadGetPropDouble(schema, "maximum", &d) &&
-                    (floor(d) == d))
+            double min = MIN_SAFE_INTEGER;
+            double max = MAX_SAFE_INTEGER;
+            if ((OCRepPayloadGetPropDouble(schema, "maximum", &max) && (floor(max) == max)) ||
+                    !strcmp(str, "integer"))
             {
                 iface->AddPropertyAnnotation(name, "org.alljoyn.Bus.Type.Max",
-                        (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
+                        (max > 0) ? std::to_string((uint64_t) max) : std::to_string((int64_t) max));
             }
-            if (OCRepPayloadGetPropDouble(schema, "minimum", &d) &&
-                    (floor(d) == d))
+            if ((OCRepPayloadGetPropDouble(schema, "minimum", &min) && (floor(min) == min)) ||
+                    !strcmp(str, "integer"))
             {
                 iface->AddPropertyAnnotation(name, "org.alljoyn.Bus.Type.Min",
-                        (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
+                        (min > 0) ? std::to_string((uint64_t) min) : std::to_string((int64_t) min));
             }
         }
     }
@@ -366,22 +369,23 @@ static void AddProperty(OCRepPayloadValue *property, bool isObservable,
     {
         access = ajn::PROP_ACCESS_READ;
     }
-    iface->AddProperty(property->name, sig.first.c_str(), access);
+    std::string propName = ToAJPropName(property->name);
+    iface->AddProperty(propName.c_str(), sig.first.c_str(), access);
     std::string dictName = std::string("[") + iface->GetName() + ".Properties" + "]";
     if (sig.second.empty())
     {
-        Types::m_dicts[dictName][property->name] = Types::Value(sig.first);
+        Types::m_dicts[dictName][propName] = Types::Value(sig.first);
     }
     else
     {
-        iface->AddPropertyAnnotation(property->name, "org.alljoyn.Bus.Type.Name", sig.second);
-        Types::m_dicts[dictName][property->name] = Types::Value(sig.second);
+        iface->AddPropertyAnnotation(propName, "org.alljoyn.Bus.Type.Name", sig.second);
+        Types::m_dicts[dictName][propName] = Types::Value(sig.second);
     }
-    AddAnnotations(property->name, property->obj, annotations, iface);
+    AddAnnotations(propName.c_str(), property->obj, annotations, iface);
     if (isObservable)
     {
         /* "false" is the default value */
-        iface->AddPropertyAnnotation(property->name,
+        iface->AddPropertyAnnotation(propName,
                 ajn::org::freedesktop::DBus::AnnotateEmitsChanged, "true");
     }
 }
@@ -499,10 +503,18 @@ static void ParseAnnotations(const OCRepPayload *definitions,
                                 property->type);
                         continue;
                     }
-                    std::string unused;
                     std::string Struct = StructPrefix + definition->name;
+                    std::string fieldName = ToAJPropName(property->name);
+                    std::string fieldSig = GetSignature(property->obj, annotations).first;
                     annotations[definition->name].push_back(Annotation(Struct + ".Field." +
-                            property->name + ".Type", GetSignature(property->obj, annotations).first));
+                            fieldName + ".Type", fieldSig));
+                    std::string structName = std::string("[") + definition->name + "]";
+                    auto it = std::find_if(Types::m_structs[structName].begin(), Types::m_structs[structName].end(),
+                            [fieldName](Types::Field &field) -> bool { return field.m_name == fieldName; });
+                    if (it == Types::m_structs[structName].end())
+                    {
+                        Types::m_structs[structName].push_back(Types::Field(fieldName, fieldSig));
+                    }
                 }
             }
             OCRepPayloadDestroy(rt);

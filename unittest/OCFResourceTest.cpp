@@ -1638,7 +1638,7 @@ TEST_F(OCFResource, TheAccessAttributeForEachAllJoynPropertyShallBeReadIfTheOCFP
 
 TEST_F(OCFResource, IfTheResourceSupportsDeleteADeleteMethodShallAppearInTheInterface)
 {
-    // TODO Which interface to add delete method to? See example from oic.wk.d: no rt in
+    // TODO Which interface to add delete method to? See example from oic.wk.rd: no rt in
     // queryParameters and arguments provided as queryParameters, not in the body
     FAIL();
 }
@@ -1697,11 +1697,11 @@ TEST_F(OCFResource, IfAResourceHasAResourceTypeOicRAllJoynobjectThenAllResources
     ajn::MsgArg variant("v", &value);
     GetPropertyCall get(res);
     EXPECT_EQ(ER_OK, get.Call(ToAJName("x.org.iotivity.rt.false").c_str(),
-            "x.org.iotivity.rt.false"));
+            ToAJPropName("x.org.iotivity.rt.false").c_str()));
     EXPECT_EQ(ER_OK, get.Wait(1000));
     EXPECT_TRUE(variant == get.Value());
     EXPECT_EQ(ER_OK, get.Call(ToAJName("x.org.iotivity.rt.true").c_str(),
-            "x.org.iotivity.rt.true"));
+            ToAJPropName("x.org.iotivity.rt.true").c_str()));
     EXPECT_EQ(ER_OK, get.Wait(1000));
     EXPECT_TRUE(variant == get.Value());
 
@@ -1709,24 +1709,26 @@ TEST_F(OCFResource, IfAResourceHasAResourceTypeOicRAllJoynobjectThenAllResources
     EXPECT_FALSE(resource.False());
     SetPropertyCall set(res);
     value.Set("b", true);
-    EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt.false").c_str(), "x.org.iotivity.rt.false",
-            value));
+    EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt.false").c_str(),
+            ToAJPropName("x.org.iotivity.rt.false").c_str(), value));
     EXPECT_EQ(ER_OK, set.Wait(1000));
     EXPECT_TRUE(resource.False());
     EXPECT_FALSE(resource.True());
-    EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt.true").c_str(), "x.org.iotivity.rt.true",
-            value));
+    EXPECT_EQ(ER_OK, set.Call(ToAJName("x.org.iotivity.rt.true").c_str(),
+            ToAJPropName("x.org.iotivity.rt.true").c_str(), value));
     EXPECT_EQ(ER_OK, set.Wait(1000));
     EXPECT_TRUE(resource.True());
 
     /* GetAll */
-    ajn::MsgArg dictEntry("{sv}", "x.org.iotivity.rt.false", &value);
+    std::string propName = ToAJPropName("x.org.iotivity.rt.false");
+    ajn::MsgArg dictEntry("{sv}", propName.c_str(), &value);
     ajn::MsgArg dict("a{sv}", 1, &dictEntry);
     GetAllPropertiesCall getAll(res);
     EXPECT_EQ(ER_OK, getAll.Call(ToAJName("x.org.iotivity.rt.false").c_str()));
     EXPECT_EQ(ER_OK, getAll.Wait(1000));
     EXPECT_TRUE(dict == getAll.Values());
-    dictEntry.v_dictEntry.key->Set("s", "x.org.iotivity.rt.true");
+    propName = ToAJPropName("x.org.iotivity.rt.true");
+    dictEntry.v_dictEntry.key->Set("s", propName.c_str());
     EXPECT_EQ(ER_OK, getAll.Call(ToAJName("x.org.iotivity.rt.true").c_str()));
     EXPECT_EQ(ER_OK, getAll.Wait(1000));
     EXPECT_TRUE(dict == getAll.Values());
@@ -3141,5 +3143,313 @@ TEST_F(OCFResource, VariantTypes)
     delete res1;
     delete res2;
     delete res3;
+    TearDownResource();
+}
+
+struct PropertyNamesEntity
+{
+    int64_t m_oneTwo;
+    int64_t m_one_dtwo;
+    int64_t m_one_htwo;
+    struct {
+        int64_t one_dtwo;
+        std::string one_htwo;
+    } m_dict;
+    struct {
+        int64_t one_dtwo;
+        std::string one_htwo;
+    } m_struct;
+    PropertyNamesEntity()
+        : m_oneTwo(12), m_one_dtwo(12), m_one_htwo(12)
+    {
+        m_dict.one_dtwo = 12;
+        m_dict.one_htwo = "one-two";
+        m_struct.one_dtwo = 12;
+        m_struct.one_htwo = "one-two";
+    }
+};
+
+static OCEntityHandlerResult PropertyNamesEntityHandler(OCEntityHandlerFlag flag,
+        OCEntityHandlerRequest *request, void *ctx)
+{
+    (void) flag;
+    PropertyNamesEntity *entity = (PropertyNamesEntity *) ctx;
+    OCEntityHandlerResult result;
+    switch (request->method)
+    {
+        case OC_REST_GET:
+            {
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *dict = OCRepPayloadCreate();
+                if (!dict || !OCRepPayloadSetPropInt(dict, "one.two", entity->m_dict.one_dtwo) ||
+                        !OCRepPayloadSetPropString(dict, "one-two", entity->m_dict.one_htwo.c_str()))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayload *_struct = OCRepPayloadCreate();
+                if (!_struct || !OCRepPayloadSetPropInt(_struct, "one.two", entity->m_struct.one_dtwo) ||
+                        !OCRepPayloadSetPropString(_struct, "one-two", entity->m_struct.one_htwo.c_str()))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayload *payload = CreatePayload(request->resource, request->query);
+                if (!payload || !OCRepPayloadSetPropInt(payload, "oneTwo", entity->m_oneTwo) ||
+                        !OCRepPayloadSetPropInt(payload, "one.two", entity->m_one_dtwo) ||
+                        !OCRepPayloadSetPropInt(payload, "one-two", entity->m_one_htwo) ||
+                        !OCRepPayloadSetPropObject(payload, "dict", dict) ||
+                        !OCRepPayloadSetPropObject(payload, "struct", _struct))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(payload);
+                OCStackResult doResult = OCDoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    OCRepPayloadDestroy(payload);
+                }
+                break;
+            }
+        case OC_REST_POST:
+            {
+                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                OCRepPayloadGetPropInt((OCRepPayload *) request->payload, "oneTwo", &entity->m_oneTwo);
+                OCRepPayloadGetPropInt((OCRepPayload *) request->payload, "one.two", &entity->m_one_dtwo);
+                OCRepPayloadGetPropInt((OCRepPayload *) request->payload, "one-two", &entity->m_one_htwo);
+                char *s;
+                OCRepPayload *dict;
+                if (OCRepPayloadGetPropObject((OCRepPayload *) request->payload, "dict", &dict))
+                {
+                    OCRepPayloadGetPropInt(dict, "one.two", &entity->m_dict.one_dtwo);
+                    OCRepPayloadGetPropString(dict, "one-two", &s);
+                    entity->m_dict.one_htwo = s;
+                }
+                OCRepPayload *_struct;
+                if (OCRepPayloadGetPropObject((OCRepPayload *) request->payload, "struct", &_struct))
+                {
+                    OCRepPayloadGetPropInt(_struct, "one.two", &entity->m_struct.one_dtwo);
+                    OCRepPayloadGetPropString(_struct, "one-two", &s);
+                    entity->m_struct.one_htwo = s;
+                }
+                OCEntityHandlerResponse response;
+                memset(&response, 0, sizeof(response));
+                response.requestHandle = request->requestHandle;
+                response.resourceHandle = request->resource;
+                OCRepPayload *outPayload = CreatePayload(request->resource, request->query);
+                dict = OCRepPayloadCreate();
+                if (!dict || !OCRepPayloadSetPropInt(dict, "one.two", entity->m_dict.one_dtwo) ||
+                        !OCRepPayloadSetPropString(dict, "one-two", entity->m_dict.one_htwo.c_str()))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                _struct = OCRepPayloadCreate();
+                if (!_struct || !OCRepPayloadSetPropInt(_struct, "one.two", entity->m_struct.one_dtwo) ||
+                        !OCRepPayloadSetPropString(_struct, "one-two", entity->m_struct.one_htwo.c_str()))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                if (!outPayload || !OCRepPayloadSetPropInt(outPayload, "oneTwo", entity->m_oneTwo) ||
+                        !OCRepPayloadSetPropInt(outPayload, "one.two", entity->m_one_dtwo) ||
+                        !OCRepPayloadSetPropInt(outPayload, "one-two", entity->m_one_htwo) ||
+                        !OCRepPayloadSetPropObject(outPayload, "dict", dict) ||
+                        !OCRepPayloadSetPropObject(outPayload, "struct", _struct))
+                {
+                    result = OC_EH_ERROR;
+                    break;
+                }
+                result = OC_EH_OK;
+                response.ehResult = result;
+                response.payload = reinterpret_cast<OCPayload *>(outPayload);
+                OCStackResult doResult = OCDoResponse(&response);
+                if (doResult != OC_STACK_OK)
+                {
+                    OCRepPayloadDestroy(outPayload);
+                }
+                break;
+            }
+        default:
+            result = OC_EH_METHOD_NOT_ALLOWED;
+            break;
+    }
+    return result;
+}
+
+class TestPropertyNamesResource : public TestResource
+{
+public:
+    TestPropertyNamesResource() { }
+    virtual ~TestPropertyNamesResource() { }
+    virtual void Create()
+    {
+        OCResourceHandle handle;
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt", NULL,
+                "/resource/0", PropertyNamesEntityHandler, &m_propertyNames,
+                OC_DISCOVERABLE | OC_OBSERVABLE));
+        m_handles.push_back(handle);
+    }
+    void Notify(const char *uri)
+    {
+        EXPECT_EQ(OC_STACK_OK, OCNotifyAllObservers(OCGetResourceHandleAtUri(uri), OC_HIGH_QOS));
+    }
+    virtual const char *IntrospectionJson() { return m_introspectionJson; }
+    PropertyNamesEntity &Properties() { return m_propertyNames; }
+private:
+    const char *m_introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": {"
+            "    \"/resource/0\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt\" } ] } } }"
+            "      }"
+            "    }"
+            "  },"
+            "  \"definitions\": {"
+            "    \"x.org.iotivity.rt\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"oneTwo\": { \"type\": \"integer\" },"
+            "        \"one.two\": { \"type\": \"integer\" },"
+            "        \"one-two\": { \"type\": \"integer\" },"
+            "        \"struct\": { \"$ref\": \"#/definitions/PropertyNamesStruct\" },"
+            "        \"dict\": { \"type\": \"object\", \"properties\": { \"one.two\": { \"type\": \"integer\" }, \"one-two\": { \"type\": \"string\" } } },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    },"
+            "    \"PropertyNamesStruct\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"one.two\": { \"type\": \"integer\" },"
+            "        \"one-two\": { \"type\": \"string\" }"
+            "      }"
+            "    }"
+            "  }"
+            "}";
+    PropertyNamesEntity m_propertyNames;
+};
+
+TEST_F(OCFResource, PropertyNamesAreEscaped)
+{
+    TestPropertyNamesResource resource;
+    SetUpResource(&resource);
+
+    EXPECT_EQ(ER_OK, m_aboutListener->JoinSession());
+    ajn::ProxyBusObject *res = m_aboutListener->CreateProxyBusObject("/resource/0");
+    EXPECT_TRUE(res != NULL);
+
+    /* Get */
+    GetPropertyCall get(res);
+    EXPECT_EQ(ER_OK, get.Call("org.iotivity.rt", "one_dtwo"));
+    EXPECT_EQ(ER_OK, get.Wait(1000));
+
+    get.Reset();
+    EXPECT_EQ(ER_OK, get.Call("org.iotivity.rt", "one_htwo"));
+    EXPECT_EQ(ER_OK, get.Wait(1000));
+
+    get.Reset();
+    EXPECT_EQ(ER_OK, get.Call("org.iotivity.rt", "dict"));
+    EXPECT_EQ(ER_OK, get.Wait(1000));
+    {
+        ajn::MsgArg entries[2];
+        ajn::MsgArg *entry;
+        entry = entries;
+        (entry++)->Set("{sv}", "one.two", new ajn::MsgArg("x", 12));
+        (entry++)->Set("{sv}", "one-two", new ajn::MsgArg("s", "one-two"));
+        ajn::MsgArg value;
+        value.Set("v", new ajn::MsgArg("a{sv}", entry - entries, entries));
+        EXPECT_TRUE(value == get.Value());
+    }
+
+    get.Reset();
+    EXPECT_EQ(ER_OK, get.Call("org.iotivity.rt", "struct"));
+    EXPECT_EQ(ER_OK, get.Wait(1000));
+    {
+        ajn::MsgArg value;
+        value.Set("v", new ajn::MsgArg("(xs)", 12, "one-two"));
+        EXPECT_TRUE(value == get.Value());
+    }
+
+    /* GetAll */
+    GetAllPropertiesCall getAll(res);
+    EXPECT_EQ(ER_OK, getAll.Call("org.iotivity.rt"));
+    EXPECT_EQ(ER_OK, getAll.Wait(1000));
+    ajn::MsgArg entries[5];
+    ajn::MsgArg *entry;
+    entry = entries;
+    (entry++)->Set("{sv}", "oneTwo", new ajn::MsgArg("x", 12));
+    (entry++)->Set("{sv}", "one_dtwo", new ajn::MsgArg("x", 12));
+    (entry++)->Set("{sv}", "one_htwo", new ajn::MsgArg("x", 12));
+    ajn::MsgArg dictEntries[2];
+    ajn::MsgArg *dictEntry;
+    dictEntry = dictEntries;
+    (dictEntry++)->Set("{sv}", "one.two", new ajn::MsgArg("x", 12));
+    (dictEntry++)->Set("{sv}", "one-two", new ajn::MsgArg("s", "one-two"));
+    (entry++)->Set("{sv}", "dict", new ajn::MsgArg("a{sv}", dictEntry - dictEntries, dictEntries));
+    (entry++)->Set("{sv}", "struct", new ajn::MsgArg("(xs)", 12, "one-two"));
+    ajn::MsgArg values;
+    values.Set("a{sv}", entry - entries, entries);
+    EXPECT_TRUE(values == getAll.Values());
+
+    /* PropertiesChanged */
+    PropertiesChangedListener listener;
+    EXPECT_EQ(ER_OK, res->RegisterPropertiesChangedListener("org.iotivity.rt", NULL, 0, listener,
+            NULL));
+    Wait(1000); /* Must wait for observe request to be processed */
+    listener.m_calls = 0;
+    resource.Notify("/resource/0");
+    Wait(1000);
+    EXPECT_EQ(1u, listener.m_calls);
+    EXPECT_TRUE(values == listener.Changed());
+
+    /* Set */
+    SetPropertyCall set(res);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "oneTwo", *new ajn::MsgArg("x", 21)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_EQ(21, resource.Properties().m_oneTwo);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "one_dtwo", *new ajn::MsgArg("x", 21)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_EQ(21, resource.Properties().m_one_dtwo);
+    EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "one_htwo", *new ajn::MsgArg("x", 21)));
+    EXPECT_EQ(ER_OK, set.Wait(1000));
+    EXPECT_EQ(21, resource.Properties().m_one_htwo);
+    {
+        ajn::MsgArg entries[2];
+        ajn::MsgArg *entry;
+        entry = entries;
+        (entry++)->Set("{sv}", "one.two", new ajn::MsgArg("x", 21));
+        (entry++)->Set("{sv}", "one-two", new ajn::MsgArg("s", "two-one"));
+        ajn::MsgArg value;
+        value.Set("a{sv}", entry - entries, entries);
+        EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "dict", value));
+        EXPECT_EQ(ER_OK, set.Wait(1000));
+        EXPECT_EQ(21, resource.Properties().m_dict.one_dtwo);
+        EXPECT_STREQ("two-one", resource.Properties().m_dict.one_htwo.c_str());
+    }
+    {
+        ajn::MsgArg value;
+        value.Set("(xs)", 21, "two-one");
+        EXPECT_EQ(ER_OK, set.Call("org.iotivity.rt", "struct", value));
+        EXPECT_EQ(ER_OK, set.Wait(1000));
+        EXPECT_EQ(21, resource.Properties().m_struct.one_dtwo);
+        EXPECT_STREQ("two-one", resource.Properties().m_struct.one_htwo.c_str());
+    }
+
+    delete res;
     TearDownResource();
 }

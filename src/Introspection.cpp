@@ -832,7 +832,7 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
                         VERIFY_CBOR(err);
                         hasProps = true;
                     }
-                    std::string propName = GetPropName(ifaces[i], props[j]->name);
+                    std::string propName = GetPropName(ifaces[i], ToOCPropName(props[j]->name));
                     /*
                      * Annotations prior to v16.10.00 are not guaranteed to
                      * appear in the order they were specified, so are
@@ -1071,7 +1071,7 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
                         {
                             continue;
                         }
-                        qcc::String fieldName = names[j].substr(pos, dot - pos);
+                        qcc::String fieldName = ToOCPropName(names[j].substr(pos, dot - pos));
                         if (structName != lastName)
                         {
                             if (!lastName.empty())

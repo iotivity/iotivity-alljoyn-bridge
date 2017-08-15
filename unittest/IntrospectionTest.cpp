@@ -303,7 +303,7 @@ TEST_F(Introspection, TextStringsAndByteArrays)
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.array-of-byte",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfByte",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
@@ -337,7 +337,7 @@ TEST_F(Introspection, ObjectPathsAndSignatures)
     EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
 
     OCRepPayload *property;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.object-path",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.objectPath",
             &property));
     char *s;
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
@@ -811,7 +811,7 @@ TEST_F(Introspection, Examples)
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.object-path",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.objectPath",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
@@ -821,7 +821,7 @@ TEST_F(Introspection, Examples)
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.array-of-byte",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfByte",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
@@ -833,7 +833,7 @@ TEST_F(Introspection, Examples)
             &property));
     EXPECT_TRUE(OCRepPayloadGetStringArray(property, "type", &ss, dim));
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.array-of-int32",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfInt32",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("array", s);
@@ -841,7 +841,7 @@ TEST_F(Introspection, Examples)
     EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
     EXPECT_STREQ("integer", s);
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.array-of-int64",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfInt64",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("array", s);
@@ -887,4 +887,102 @@ TEST_F(Introspection, InvalidIntrospectionDoesNotParse)
     OCRepPayload *introspectionData;
     EXPECT_EQ(OC_STACK_OK, ParseJsonPayload(&introspectionData, introspectionJson));
     EXPECT_FALSE(ParseIntrospectionPayload(m_context->m_device, m_bus, introspectionData));
+}
+
+TEST_F(Introspection, PropertyNamesAreEscaped)
+{
+    const char *introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": {"
+            "    \"/resource\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt\" } ] } } }"
+            "      }"
+            "    }"
+            "  },"
+            "  \"definitions\": {"
+            "    \"x.org.iotivity.rt\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"oneTwo\": { \"type\": \"integer\" },"
+            "        \"one.two\": { \"type\": \"integer\" },"
+            "        \"one-two\": { \"type\": \"integer\" },"
+            "        \"struct\": { \"$ref\": \"#/definitions/StructName\" },"
+            "        \"dict\": { \"type\": \"object\", \"properties\": { \"one.two\": { \"type\": \"integer\" }, \"one-two\": { \"type\": \"string\" } } },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    },"
+            "    \"StructName\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"one.two\": { \"type\": \"integer\" },"
+            "        \"one-two\": { \"type\": \"string\" }"
+            "      }"
+            "    }"
+            "  }"
+            "}";
+    OCRepPayload *introspectionData;
+    EXPECT_EQ(OC_STACK_OK, ParseJsonPayload(&introspectionData, introspectionJson));
+    EXPECT_TRUE(ParseIntrospectionPayload(m_context->m_device, m_bus, introspectionData));
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface("org.iotivity.rt");
+    EXPECT_TRUE(iface != NULL);
+
+    EXPECT_TRUE(iface->GetProperty("oneTwo") != NULL);
+    EXPECT_TRUE(iface->GetProperty("one_dtwo") != NULL);
+    EXPECT_TRUE(iface->GetProperty("one_htwo") != NULL);
+
+    qcc::String value;
+    EXPECT_TRUE(iface->GetAnnotation("org.alljoyn.Bus.Struct.StructName.Field.one_dtwo.Type", value));
+    EXPECT_TRUE(iface->GetAnnotation("org.alljoyn.Bus.Struct.StructName.Field.one_htwo.Type", value));
+
+    static const char *introspectionXml =
+            "<interface name='org.iotivity.Interface'>"
+            "  <property name='dict' type='a{sv}' access='readwrite'/>"
+            "  <property name='oneTwo' type='x' access='readwrite'/>"
+            "  <property name='one_dtwo' type='x' access='readwrite'/>"
+            "  <property name='one_htwo' type='x' access='readwrite'/>"
+            "  <property name='struct' type='(xs)' access='readwrite'>"
+            "    <annotation name='org.alljoyn.Bus.Type.Name' value='[StructName]'/>"
+            "  </property>"
+            "  <annotation name='org.alljoyn.Bus.Struct.StructName.Field.one_dtwo.Type' value='x'/>"
+            "  <annotation name='org.alljoyn.Bus.Struct.StructName.Field.one_htwo.Type' value='s'/>"
+            "</interface>";
+    EXPECT_EQ(ER_OK, m_bus->CreateInterfacesFromXml(introspectionXml));
+    uint8_t out[8192];
+    size_t outSize = 8192;
+    EXPECT_EQ(CborNoError, Introspect(m_bus, "v16.10.00", "TITLE", "VERSION", out, &outSize));
+    OCPayload *p;
+    EXPECT_EQ(OC_STACK_OK, OCParsePayload(&p, OC_FORMAT_CBOR, PAYLOAD_TYPE_REPRESENTATION,
+            out, outSize));
+    OCRepPayload *payload = (OCRepPayload *) p;
+    OCRepPayload *definitions;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "definitions", &definitions));
+    OCRepPayload *definition;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "x.org.iotivity.-interface.false",
+            &definition));
+    OCRepPayload *properties;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
+    OCRepPayload *property;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.dict",
+            &property));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.oneTwo",
+            &property));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.one.two",
+            &property));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.one-two",
+            &property));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.struct",
+            &property));
+
+    EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "StructName",
+            &definition));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "one.two",
+            &property));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "one-two",
+            &property));
 }
