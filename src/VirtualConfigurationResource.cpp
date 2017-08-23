@@ -43,11 +43,11 @@
 #define OC_RSRVD_RESOURCE_TYPE_MAINTENANCE           "oic.wk.mnt"
 
 VirtualConfigurationResource *VirtualConfigurationResource::Create(ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        const char *name, ajn::SessionId sessionId, const char *ajSoftwareVersion,
         CreateCB createCb, void *createContext)
 {
     VirtualConfigurationResource *resource = new VirtualConfigurationResource(bus, name, sessionId,
-            path, ajSoftwareVersion, createCb, createContext);
+            ajSoftwareVersion, createCb, createContext);
     OCStackResult result = resource->Create();
     if (result != OC_STACK_OK)
     {
@@ -58,13 +58,13 @@ VirtualConfigurationResource *VirtualConfigurationResource::Create(ajn::BusAttac
 }
 
 VirtualConfigurationResource::VirtualConfigurationResource(ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        const char *name, ajn::SessionId sessionId, const char *ajSoftwareVersion,
         CreateCB createCb, void *createContext)
-    : VirtualResource(bus, name, sessionId, path, ajSoftwareVersion, createCb, createContext),
+    : VirtualResource(bus, name, sessionId, "/Config", ajSoftwareVersion, createCb, createContext),
       m_fr(false), m_rb(false)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s", this, bus, name,
-            sessionId, path, ajSoftwareVersion);
+    LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,ajSoftwareVersion=%s", this, bus, name,
+            sessionId, ajSoftwareVersion);
 }
 
 VirtualConfigurationResource::~VirtualConfigurationResource()

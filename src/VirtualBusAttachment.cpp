@@ -146,11 +146,11 @@ QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject)
     return status;
 }
 
-VirtualBusObject *VirtualBusAttachment::GetBusObject(const char *path)
+VirtualBusObject *VirtualBusAttachment::GetConfigBusObject()
 {
     for (VirtualBusObject *busObject : m_virtualBusObjects)
     {
-        if (!strcmp(busObject->GetPath(), path))
+        if (!strcmp(busObject->GetPath(), "/Config"))
         {
             return busObject;
         }

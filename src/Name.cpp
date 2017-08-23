@@ -136,6 +136,72 @@ std::string ToAJPropName(std::string ocName)
     return ajName.str();
 }
 
+std::string ToUri(std::string objectPath)
+{
+    std::ostringstream uri;
+    const char *in = objectPath.c_str();
+    while (*in)
+    {
+        if (*in == '_' && *(in + 1) == 'd')
+        {
+            ++in;
+            uri << '.';
+        }
+        else if (*in == '_' && *(in + 1) == 'h')
+        {
+            ++in;
+            uri << '-';
+        }
+        else if (*in == '_' && *(in + 1) == 't')
+        {
+            ++in;
+            uri << '~';
+        }
+        else if (*in == '_' && *(in + 1) == 'u')
+        {
+            ++in;
+            uri << '_';
+        }
+        else
+        {
+            uri << *in;
+        }
+        ++in;
+    }
+    return uri.str();
+}
+
+std::string ToObjectPath(std::string uri)
+{
+    std::ostringstream objectPath;
+    const char *in = uri.c_str();
+    while (*in)
+    {
+        if (*in == '.')
+        {
+            objectPath << "_d";
+        }
+        else if (*in == '-')
+        {
+            objectPath << "_h";
+        }
+        else if (*in == '~')
+        {
+            objectPath << "_t";
+        }
+        else if (*in == '_')
+        {
+            objectPath << "_u";
+        }
+        else
+        {
+            objectPath << *in;
+        }
+        ++in;
+    }
+    return objectPath.str();
+}
+
 std::string GetResourceTypeName(std::string ifaceName)
 {
     return ToOCName(ifaceName);

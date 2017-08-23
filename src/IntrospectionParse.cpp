@@ -772,7 +772,7 @@ bool ParseIntrospectionPayload(Device *device, VirtualBusAttachment *bus,
                 HasResourceType(it->m_rts, OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION) ||
                 !strcmp(uri, "/oic/mnt"))
         {
-            VirtualBusObject *obj = bus->GetBusObject("/Config");
+            VirtualBusObject *obj = bus->GetConfigBusObject();
             if (!obj)
             {
                 obj = new VirtualConfigBusObject(bus, *it);

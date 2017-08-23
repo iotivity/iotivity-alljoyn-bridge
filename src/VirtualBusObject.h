@@ -36,7 +36,6 @@ class VirtualBusObject : public ajn::BusObject
 {
     public:
         VirtualBusObject(VirtualBusAttachment *bus, Resource &resource);
-        VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource);
         virtual ~VirtualBusObject();
         void AddResource(Resource &resource);
         QStatus AddInterface(const char *ifaceName, bool createEmptyInterface = false);
@@ -52,6 +51,7 @@ class VirtualBusObject : public ajn::BusObject
         VirtualBusAttachment *m_bus;
         std::vector<Resource> m_resources;
 
+        VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource);
         void Observe(Resource &resource);
         virtual void GetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
         virtual void SetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);

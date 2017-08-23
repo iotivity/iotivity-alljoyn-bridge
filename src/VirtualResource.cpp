@@ -164,7 +164,7 @@ OCStackResult VirtualResource::CreateResource(OCResourceHandle *handle, std::str
     {
         return OC_STACK_OK;
     }
-    OCStackResult result = ::CreateResource(handle, path.c_str(), rt->first.c_str(),
+    OCStackResult result = ::CreateResource(handle, ToUri(path).c_str(), rt->first.c_str(),
             (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
             VirtualResource::EntityHandlerCB, this, props);
     /*
@@ -186,7 +186,7 @@ OCStackResult VirtualResource::CreateResource(OCResourceHandle *handle, std::str
     }
     if (result == OC_STACK_OK)
     {
-        LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, path.c_str());
+        LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, OCGetResourceUri(*handle));
         uint8_t n = 0;
         OCGetNumberOfResourceTypes(*handle, &n);
         for (uint8_t i = 0; i < n; ++i)
@@ -349,7 +349,7 @@ OCStackResult VirtualResource::CreateResources()
     }
     else
     {
-        result = ::CreateResource(&m_handle, GetPath().c_str(), "oic.r.alljoynobject", OC_RSRVD_INTERFACE_LL,
+        result = ::CreateResource(&m_handle, ToUri(GetPath()).c_str(), "oic.r.alljoynobject", OC_RSRVD_INTERFACE_LL,
                 NULL, this, OC_DISCOVERABLE | OC_OBSERVABLE);
         if (result == OC_STACK_OK)
         {
@@ -378,7 +378,7 @@ OCStackResult VirtualResource::CreateResources()
         }
         if (result == OC_STACK_OK)
         {
-            LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, GetPath().c_str());
+            LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, OCGetResourceUri(m_handle));
         }
         else
         {

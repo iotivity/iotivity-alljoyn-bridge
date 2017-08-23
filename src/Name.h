@@ -28,6 +28,8 @@ std::string ToOCName(std::string ajName);
 std::string ToAJName(std::string ocName);
 std::string ToOCPropName(std::string ajName);
 std::string ToAJPropName(std::string ocName);
+std::string ToUri(std::string objectPath);
+std::string ToObjectPath(std::string uri);
 
 std::string GetResourceTypeName(std::string ifaceName);
 std::string GetResourceTypeName(std::string ifaceName, std::string suffix);

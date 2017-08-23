@@ -44,3 +44,13 @@ TEST(IsValidErrorNameTest, Check)
     EXPECT_TRUE(IsValidErrorName("a.b ", &endp) && (*endp == ' '));
     EXPECT_TRUE(IsValidErrorName("a.b:", &endp) && (*endp == ':'));
 }
+
+TEST(UriToObjectPath, Translation)
+{
+    std::string uri = "/abc.def-ghi~jkl_mno";
+    std::string path = "/abc_ddef_hghi_tjkl_umno";
+    EXPECT_STREQ(path.c_str(), ToObjectPath(uri).c_str());
+    EXPECT_STREQ(uri.c_str(), ToUri(path).c_str());
+    EXPECT_STREQ(path.c_str(), ToObjectPath(ToUri(path)).c_str());
+    EXPECT_STREQ(uri.c_str(), ToUri(ToObjectPath(uri)).c_str());
+}

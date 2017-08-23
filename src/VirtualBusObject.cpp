@@ -68,14 +68,14 @@ public:
 };
 
 VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, Resource &resource)
-    : ajn::BusObject(resource.m_uri.c_str()), m_bus(bus), m_pending(0)
+    : ajn::BusObject(ToObjectPath(resource.m_uri).c_str()), m_bus(bus), m_pending(0)
 {
     LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, resource.m_uri.c_str());
     m_resources.push_back(resource);
 }
 
 VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource)
-    : ajn::BusObject(path), m_bus(bus), m_pending(0)
+    : ajn::BusObject(ToObjectPath(path).c_str()), m_bus(bus), m_pending(0)
 {
     LOG(LOG_INFO, "[%p] bus=%p,path=%s", this, bus, path);
     m_resources.push_back(resource);
@@ -265,7 +265,7 @@ void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, 
     {
         goto error;
     }
-    resource = FindResourceFromUri(m_resources, GetPath());
+    resource = FindResourceFromUri(m_resources, ToUri(GetPath()));
     if (resource == m_resources.end())
     {
         goto error;
@@ -361,7 +361,7 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     {
         goto error;
     }
-    resource = FindResourceFromUri(m_resources, GetPath());
+    resource = FindResourceFromUri(m_resources, ToUri(GetPath()));
     if (resource == m_resources.end())
     {
         goto error;
@@ -418,7 +418,7 @@ void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *memb
     {
         goto error;
     }
-    resource = FindResourceFromUri(m_resources, GetPath());
+    resource = FindResourceFromUri(m_resources, ToUri(GetPath()));
     if (resource == m_resources.end())
     {
         goto error;

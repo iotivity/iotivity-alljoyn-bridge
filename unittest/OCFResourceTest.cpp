@@ -3146,7 +3146,7 @@ TEST_F(OCFResource, VariantTypes)
     TearDownResource();
 }
 
-struct PropertyNamesEntity
+struct EscapedEntity
 {
     int64_t m_oneTwo;
     int64_t m_one_dtwo;
@@ -3159,7 +3159,7 @@ struct PropertyNamesEntity
         int64_t one_dtwo;
         std::string one_htwo;
     } m_struct;
-    PropertyNamesEntity()
+    EscapedEntity()
         : m_oneTwo(12), m_one_dtwo(12), m_one_htwo(12)
     {
         m_dict.one_dtwo = 12;
@@ -3169,11 +3169,11 @@ struct PropertyNamesEntity
     }
 };
 
-static OCEntityHandlerResult PropertyNamesEntityHandler(OCEntityHandlerFlag flag,
+static OCEntityHandlerResult EscapedEntityHandler(OCEntityHandlerFlag flag,
         OCEntityHandlerRequest *request, void *ctx)
 {
     (void) flag;
-    PropertyNamesEntity *entity = (PropertyNamesEntity *) ctx;
+    EscapedEntity *entity = (EscapedEntity *) ctx;
     OCEntityHandlerResult result;
     switch (request->method)
     {
@@ -3287,16 +3287,16 @@ static OCEntityHandlerResult PropertyNamesEntityHandler(OCEntityHandlerFlag flag
     return result;
 }
 
-class TestPropertyNamesResource : public TestResource
+class TestEscapedResource : public TestResource
 {
 public:
-    TestPropertyNamesResource() { }
-    virtual ~TestPropertyNamesResource() { }
+    TestEscapedResource() { }
+    virtual ~TestEscapedResource() { }
     virtual void Create()
     {
         OCResourceHandle handle;
         EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.org.iotivity.rt", NULL,
-                "/resource/0", PropertyNamesEntityHandler, &m_propertyNames,
+                "/abc.def-ghi~jkl_mno", EscapedEntityHandler, &m_entity,
                 OC_DISCOVERABLE | OC_OBSERVABLE));
         m_handles.push_back(handle);
     }
@@ -3305,14 +3305,14 @@ public:
         EXPECT_EQ(OC_STACK_OK, OCNotifyAllObservers(OCGetResourceHandleAtUri(uri), OC_HIGH_QOS));
     }
     virtual const char *IntrospectionJson() { return m_introspectionJson; }
-    PropertyNamesEntity &Properties() { return m_propertyNames; }
+    EscapedEntity &Properties() { return m_entity; }
 private:
     const char *m_introspectionJson =
             "{"
             "  \"swagger\": \"2.0\","
             "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
             "  \"paths\": {"
-            "    \"/resource/0\": {"
+            "    \"/abc.def-ghi~jkl_mno\": {"
             "      \"get\": {"
             "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
             "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/x.org.iotivity.rt\" } ] } } }"
@@ -3341,16 +3341,16 @@ private:
             "    }"
             "  }"
             "}";
-    PropertyNamesEntity m_propertyNames;
+    EscapedEntity m_entity;
 };
 
-TEST_F(OCFResource, PropertyNamesAreEscaped)
+TEST_F(OCFResource, UrisAndPropertyNamesAreEscaped)
 {
-    TestPropertyNamesResource resource;
+    TestEscapedResource resource;
     SetUpResource(&resource);
 
     EXPECT_EQ(ER_OK, m_aboutListener->JoinSession());
-    ajn::ProxyBusObject *res = m_aboutListener->CreateProxyBusObject("/resource/0");
+    ajn::ProxyBusObject *res = m_aboutListener->CreateProxyBusObject("/abc_ddef_hghi_tjkl_umno");
     EXPECT_TRUE(res != NULL);
 
     /* Get */
@@ -3412,7 +3412,7 @@ TEST_F(OCFResource, PropertyNamesAreEscaped)
             NULL));
     Wait(1000); /* Must wait for observe request to be processed */
     listener.m_calls = 0;
-    resource.Notify("/resource/0");
+    resource.Notify("/abc.def-ghi~jkl_mno");
     Wait(1000);
     EXPECT_EQ(1u, listener.m_calls);
     EXPECT_TRUE(values == listener.Changed());

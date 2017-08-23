@@ -86,7 +86,7 @@ const char *TestInterfaceName = "org.iotivity.Interface";
 class TestBusObject : public ajn::BusObject
 {
 public:
-    TestBusObject(ajn::BusAttachment *bus, const char *xml) : ajn::BusObject("/Test")
+    TestBusObject(ajn::BusAttachment *bus, const char *path, const char *xml) : ajn::BusObject(path)
     {
         EXPECT_EQ(ER_OK, bus->CreateInterfacesFromXml(xml));
         const ajn::InterfaceDescription *iface = bus->GetInterface(TestInterfaceName);
@@ -487,7 +487,11 @@ protected:
     }
     DiscoverContext *CreateAndDiscoverVirtualResource(const char *xml)
     {
-        m_obj = new TestBusObject(m_bus, xml);
+        return CreateAndDiscoverVirtualResource("/Test", xml);
+    }
+    DiscoverContext *CreateAndDiscoverVirtualResource(const char *path, const char *xml)
+    {
+        m_obj = new TestBusObject(m_bus, path, xml);
         EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(*m_obj));
 
         CreateCallback createCB;
@@ -495,7 +499,7 @@ protected:
                 m_obj->GetPath(), "v16.10.00", createCB, &createCB);
         EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
-        return DiscoverVirtualResource(m_obj->GetPath());
+        return DiscoverVirtualResource(ToUri(m_obj->GetPath()).c_str());
     }
     DiscoverContext *DiscoverVirtualResource(const char *path)
     {
@@ -1502,7 +1506,7 @@ TEST_F(AllJoynProducer, OCFDeviceConfigurationProperties)
     EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
-            "/Config", "v16.10.00", createCB, &createCB);
+            "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
     EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
@@ -1584,7 +1588,7 @@ TEST_F(AllJoynProducer, UpdateOCFDeviceConfigurationProperties)
     EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
-            "/Config", "v16.10.00", createCB, &createCB);
+            "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
     EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
@@ -1794,7 +1798,7 @@ TEST_F(AllJoynProducer, OCFPlatformConfigurationProperties)
     EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
-            "/Config", "v16.10.00", createCB, &createCB);
+            "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
     EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
@@ -1852,7 +1856,7 @@ TEST_F(AllJoynProducer, UpdateOCFPlatformConfigurationProperties)
     EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
-            "/Config", "v16.10.00", createCB, &createCB);
+            "v16.10.00", createCB, &createCB);
     ((VirtualConfigurationResource *) m_resource)->SetAboutData(&aboutData);
     EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
@@ -1913,7 +1917,7 @@ TEST_F(AllJoynProducer, MaintenanceResource)
     EXPECT_EQ(ER_OK, m_bus->RegisterBusObject(configObj));
     CreateCallback createCB;
     m_resource = VirtualConfigurationResource::Create(m_bus, m_bus->GetUniqueName().c_str(), 0,
-            "/Config", "v16.10.00", createCB, &createCB);
+            "v16.10.00", createCB, &createCB);
     EXPECT_EQ(OC_STACK_OK, createCB.Wait(1000));
 
     DiscoverContext *context = DiscoverVirtualResource("/oic/mnt");
@@ -2769,7 +2773,7 @@ static void VerifyPropertyNamesAreEscaped(OCRepPayload *payload)
     EXPECT_STREQ("one-two", s);
 }
 
-TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
+TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
 {
     static const char *xml =
             "<interface name='org.iotivity.Interface'>"
@@ -2850,7 +2854,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
             "  <annotation name='org.alljoyn.Bus.Struct.PropertiesStruct.Field.one_dtwo.Type' value='x'/>"
             "  <annotation name='org.alljoyn.Bus.Struct.PropertiesStruct.Field.one_htwo.Type' value='s'/>"
             "</interface>";
-    DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
+    DiscoverContext *context = CreateAndDiscoverVirtualResource("/abc_ddef_hghi_tjkl_umno", xml);
 
     ResourceCallback getCB;
     ResourceCallback postCB;
@@ -2863,7 +2867,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
 
     /* Get - verify that property names are escaped when rt is not specified */
     getCB.Reset();
-    uri = "/Test/3";
+    uri = "/abc.def-ghi~jkl_mno/3";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
@@ -2873,7 +2877,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
 
     /* Get - Verify that property names are escaped when rt is specified */
     getCB.Reset();
-    uri = "/Test/3?rt=x.org.iotivity.-interface.true";
+    uri = "/abc.def-ghi~jkl_mno/3?rt=x.org.iotivity.-interface.true";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
@@ -2883,7 +2887,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
 
     /* Get - Verify that arg names are unescaped */
     getCB.Reset();
-    uri = "/Test/1?rt=x.org.iotivity.-interface.-property-names-method";
+    uri = "/abc.def-ghi~jkl_mno/1?rt=x.org.iotivity.-interface.-property-names-method";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_GET, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, getCB, NULL, 0));
     EXPECT_EQ(OC_STACK_OK, getCB.Wait(1000));
@@ -2909,7 +2913,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
     EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.one-two", 21));
     EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.dict", dict));
     EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.struct", _struct));
-    uri = "/Test/3?rt=x.org.iotivity.-interface.true";
+    uri = "/abc.def-ghi~jkl_mno/3?rt=x.org.iotivity.-interface.true";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
             postCB, NULL, 0));
@@ -2930,7 +2934,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
     EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methoddict", dict));
     EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodstruct", _struct));
     postCB.Reset();
-    uri = "/Test/1?rt=x.org.iotivity.-interface.-property-names-method";
+    uri = "/abc.def-ghi~jkl_mno/1?rt=x.org.iotivity.-interface.-property-names-method";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,
             postCB, NULL, 0));
@@ -2955,7 +2959,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
     EXPECT_STREQ("two-one", s);
 
     /* Observe - Verify that property names are escaped */
-    uri = "/Test/3?rt=x.org.iotivity.-interface.true";
+    uri = "/abc.def-ghi~jkl_mno/3?rt=x.org.iotivity.-interface.true";
     ObserveCallback observeCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));
@@ -2977,7 +2981,7 @@ TEST_F(AllJoynProducer, PropertyNamesAreEscaped)
     VerifyPropertyNamesAreEscaped(payload);
 
     /* Observe - Verify that arg names are unescaped */
-    uri = "/Test/3?rt=x.org.iotivity.-interface.-property-names-signal";
+    uri = "/abc.def-ghi~jkl_mno/3?rt=x.org.iotivity.-interface.-property-names-signal";
     observeCB.Reset();
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_OBSERVE, uri.c_str(),
             &context->m_resource->m_addrs[0], 0, CT_DEFAULT, OC_HIGH_QOS, observeCB, NULL, 0));

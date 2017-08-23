@@ -27,7 +27,7 @@ class VirtualConfigurationResource : public VirtualResource
 {
     public:
         static VirtualConfigurationResource *Create(ajn::BusAttachment *bus, const char *name,
-                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+                ajn::SessionId sessionId, const char *ajSoftwareVersion,
                 CreateCB createCb, void *createContext);
         virtual ~VirtualConfigurationResource();
         void SetAboutData(ajn::AboutData *aboutData);
@@ -41,7 +41,7 @@ class VirtualConfigurationResource : public VirtualResource
         bool m_rb;
 
         VirtualConfigurationResource(ajn::BusAttachment *bus, const char *name,
-                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+                ajn::SessionId sessionId, const char *ajSoftwareVersion,
                 CreateCB createCb, void *createContext);
 
         OCStackResult Create();

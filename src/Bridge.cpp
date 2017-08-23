@@ -791,7 +791,7 @@ VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus, const ch
     if (!strcmp(path, "/Config"))
     {
         VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus, name,
-                sessionId, path, ajSoftwareVersion, RDPublish, this);
+                sessionId, ajSoftwareVersion, RDPublish, this);
         resource->SetAboutData(aboutData);
         return resource;
     }
