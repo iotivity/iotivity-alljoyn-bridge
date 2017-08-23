@@ -612,7 +612,7 @@ OCStackResult VirtualResource::SetMemberPayload(OCRepPayload *payload,
     OCRepPayloadSetPropBool(payload, propName.c_str(), false);
     for (size_t i = 0; i < numArgs; ++i)
     {
-        propName = GetPropName(member, NextArgName(argNames, i));
+        propName = GetPropName(member, NextArgName(argNames), i);
         OCRepPayloadSetNull(payload, propName.c_str());
     }
     return OC_STACK_OK;
@@ -903,12 +903,12 @@ handleRequest:
                         ParseCompleteType(signature);
                         qcc::String sig(argSignature, signature - argSignature);
                         argSignature = signature;
-                        std::string argName = NextArgName(argNames, i);
+                        std::string argName = NextArgName(argNames);
                         if (resource->m_ajSoftwareVersion >= "v16.10.00")
                         {
                             member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                         }
-                        qcc::String propName = GetPropName(member, argName);
+                        qcc::String propName = GetPropName(member, argName, i);
                         assert(payload);
                         for (OCRepPayloadValue *value = payload->values; value; value = value->next)
                         {
@@ -987,7 +987,7 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                 const char *argNames = context->m_member->argNames.c_str();
                 for (size_t i = 0; i < numInArgs; ++i)
                 {
-                    NextArgName(argNames, i);
+                    NextArgName(argNames);
                 }
                 success = true;
                 const char *signature = context->m_member->returnSignature.c_str();
@@ -997,13 +997,13 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                     ParseCompleteType(signature);
                     qcc::String sig(argSignature, signature - argSignature);
                     argSignature = signature;
-                    std::string argName = NextArgName(argNames, numInArgs + i);
+                    std::string argName = NextArgName(argNames);
                     if (context->m_ajSoftwareVersion >= "v16.10.00")
                     {
                         context->m_member->GetArgAnnotation(argName.c_str(),
                                 "org.alljoyn.Bus.Type.Name", sig);
                     }
-                    propName = GetPropName(context->m_member, argName);
+                    propName = GetPropName(context->m_member, argName, numInArgs + i);
                     success = ToOCPayload((OCRepPayload *) payload, propName.c_str(),
                             GetPropType(context->m_member, argName.c_str(), &outArgs[i]),
                             &outArgs[i], sig.c_str());
@@ -1223,12 +1223,12 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
                 ParseCompleteType(signature);
                 qcc::String sig(argSignature, signature - argSignature);
                 argSignature = signature;
-                std::string argName = NextArgName(argNames, i);
+                std::string argName = NextArgName(argNames);
                 if (m_ajSoftwareVersion >= "v16.10.00")
                 {
                     member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                 }
-                propName = GetPropName(member, argName);
+                propName = GetPropName(member, argName, i);
                 success = ToOCPayload(payload, propName.c_str(),
                         GetPropType(member, argName.c_str(), &args[i]), &args[i], sig.c_str());
             }

@@ -34,13 +34,14 @@ std::string ToObjectPath(std::string uri);
 std::string GetResourceTypeName(std::string ifaceName);
 std::string GetResourceTypeName(std::string ifaceName, std::string suffix);
 std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::string suffix);
+std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName, size_t i);
 std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName);
 std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName);
 
 std::string GetInterface(std::string rt);
 std::string GetMember(std::string rt);
 
-std::string NextArgName(const char *&argNames, size_t i);
+std::string NextArgName(const char *&argNames);
 
 bool IsValidErrorName(const char *np, const char **endp);
 

@@ -116,27 +116,27 @@ public:
             {
                 return val.Set("q", 1);
             }
-            else if (!strcmp(prop, "Int64Small") || !strcmp(prop, "Int64Large"))
+            else if (!strcmp(prop, "I64S") || !strcmp(prop, "I64L"))
             {
                 return val.Set("x", 1);
             }
-            else if (!strcmp(prop, "Uint64Small") || !strcmp(prop, "Uint64Large"))
+            else if (!strcmp(prop, "U64S") || !strcmp(prop, "U64L"))
             {
                 return val.Set("t", 1);
             }
-            else if (!strcmp(prop, "ObjectPath"))
+            else if (!strcmp(prop, "ObjPath"))
             {
                 return val.Set("o", "/Test");
             }
-            else if (!strcmp(prop, "Signature"))
+            else if (!strcmp(prop, "Sig"))
             {
-                return val.Set("g", "signatur");
+                return val.Set("g", "sig");
             }
             else if (!strcmp(prop, "StructName"))
             {
                 return val.Set("(is)", 1, "string");
             }
-            else if (!strcmp(prop, "ArrayOfStructName"))
+            else if (!strcmp(prop, "ArrOfStructName"))
             {
                 ajn::MsgArg args[2];
                 args[0].Set("(is)", 0, "string0");
@@ -145,7 +145,7 @@ public:
                 val.Stabilize();
                 return status;
             }
-            else if (!strcmp(prop, "ArrayOfByte"))
+            else if (!strcmp(prop, "ArrOfU8"))
             {
                 uint8_t ay[] = { 0x48, 0x65, 0x6c, 0x6c, 0x6f };
                 QStatus status = val.Set("ay", A_SIZEOF(ay), ay);
@@ -156,11 +156,11 @@ public:
             {
                 return val.Set("v", new ajn::MsgArg("i", 0));
             }
-            else if (!strcmp(prop, "ArrayOfInt32"))
+            else if (!strcmp(prop, "ArrOfI32"))
             {
                 return val.Set("ai", 0, NULL);
             }
-            else if (!strcmp(prop, "ArrayOfInt64"))
+            else if (!strcmp(prop, "ArrOfI64"))
             {
                 return val.Set("ax", 0, NULL);
             }
@@ -232,7 +232,7 @@ public:
             args[2].Set("t", 1);
             args[3].Set("t", 1);
             args[4].Set("o", "/Test");
-            args[5].Set("g", "signatur");
+            args[5].Set("g", "sig");
             args[6].Set("(is)", 1, "string");
             ajn::MsgArg rs[2];
             rs[0].Set("(is)", 0, "string0");
@@ -298,7 +298,7 @@ public:
         args[2].Set("t", 1);
         args[3].Set("t", 1);
         args[4].Set("o", "/Test");
-        args[5].Set("g", "signatur");
+        args[5].Set("g", "sig");
         args[6].Set("(is)", 1, "string");
         ajn::MsgArg rs[2];
         rs[0].Set("(is)", 0, "string0");
@@ -1977,78 +1977,78 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
 {
     const char *xml =
             "<interface name='org.iotivity.Interface'>"
-            "  <property name='Int64Small' type='x' access='readwrite'>"
+            "  <property name='I64S' type='x' access='readwrite'>"
             "    <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
             "    <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
             "  </property>"
-            "  <property name='Int64Large' type='x' access='readwrite'/>"
-            "  <property name='Uint64Small' type='t' access='readwrite'>"
+            "  <property name='I64L' type='x' access='readwrite'/>"
+            "  <property name='U64S' type='t' access='readwrite'>"
             "    <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
             "  </property>"
-            "  <property name='Uint64Large' type='t' access='readwrite'/>"
-            "  <property name='ObjectPath' type='o' access='readwrite'/>"
-            "  <property name='Signature' type='g' access='readwrite'/>"
+            "  <property name='U64L' type='t' access='readwrite'/>"
+            "  <property name='ObjPath' type='o' access='readwrite'/>"
+            "  <property name='Sig' type='g' access='readwrite'/>"
             "  <property name='StructName' type='(is)' access='readwrite'>"
             "    <annotation name='org.alljoyn.Bus.Type.Name' value='[StructName]'/>"
             "  </property>"
-            "  <property name='ArrayOfStructName' type='a(is)' access='readwrite'>"
+            "  <property name='ArrOfStructName' type='a(is)' access='readwrite'>"
             "    <annotation name='org.alljoyn.Bus.Type.Name' value='a[StructName]'/>"
             "  </property>"
-            "  <property name='ArrayOfByte' type='ay' access='readwrite'/>"
+            "  <property name='ArrOfU8' type='ay' access='readwrite'/>"
             "  <property name='Variant' type='v' access='readwrite'/>"
-            "  <property name='ArrayOfInt32' type='ai' access='readwrite'/>"
-            "  <property name='ArrayOfInt64' type='ax' access='readwrite'/>"
+            "  <property name='ArrOfI32' type='ai' access='readwrite'/>"
+            "  <property name='ArrOfI64' type='ax' access='readwrite'/>"
             "  <property name='Struct' type='(ii)' access='readwrite'>"
             "    <annotation name='org.alljoyn.Bus.Type.Name' value='[Point]'/>"
             "  </property>"
             "  <method name='MethodWithIntrospection'>"
-            "    <arg name='int64Small' type='x' direction='out'>"
+            "    <arg name='i64S' type='x' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
             "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
             "    </arg>"
-            "    <arg name='int64Large' type='x' direction='out'/>"
-            "    <arg name='uint64Small' type='t' direction='out'>"
+            "    <arg name='i64L' type='x' direction='out'/>"
+            "    <arg name='u64S' type='t' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
             "    </arg>"
-            "    <arg name='uint64Large' type='t' direction='out'/>"
-            "    <arg name='objectPath' type='o' direction='out'/>"
-            "    <arg name='signature' type='g' direction='out'/>"
+            "    <arg name='u64L' type='t' direction='out'/>"
+            "    <arg name='objPath' type='o' direction='out'/>"
+            "    <arg name='sig' type='g' direction='out'/>"
             "    <arg name='structName' type='(is)' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Name' value='[StructName]'/>"
             "    </arg>"
-            "    <arg name='arrayOfStructName' type='a(is)' direction='out'>"
+            "    <arg name='arrOfStructName' type='a(is)' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Name' value='a[StructName]'/>"
             "    </arg>"
-            "    <arg name='arrayOfByte' type='ay' direction='out'/>"
+            "    <arg name='arrOfU8' type='ay' direction='out'/>"
             "    <arg name='variant' type='v' direction='out'/>"
-            "    <arg name='arrayOfInt32' type='ai' direction='out'/>"
-            "    <arg name='arrayOfInt64' type='ax' direction='out'/>"
+            "    <arg name='arrOfI32' type='ai' direction='out'/>"
+            "    <arg name='arrOfI64' type='ax' direction='out'/>"
             "    <arg name='struct' type='(ii)' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Name' value='[Point]'/>"
             "    </arg>"
             "  </method>"
             "  <signal name='SignalWithIntrospection'>"
-            "    <arg name='int64Small' type='x' direction='out'>"
+            "    <arg name='i64S' type='x' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
             "      <annotation name='org.alljoyn.Bus.Type.Min' value='-9007199254740992'/>"
             "    </arg>"
-            "    <arg name='int64Large' type='x' direction='out'/>"
-            "    <arg name='uint64Small' type='t' direction='out'>"
+            "    <arg name='i64L' type='x' direction='out'/>"
+            "    <arg name='u64S' type='t' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Max' value='9007199254740992'/>"
             "    </arg>"
-            "    <arg name='uint64Large' type='t' direction='out'/>"
-            "    <arg name='objectPath' type='o' direction='out'/>"
-            "    <arg name='signature' type='g' direction='out'/>"
+            "    <arg name='u64L' type='t' direction='out'/>"
+            "    <arg name='objPath' type='o' direction='out'/>"
+            "    <arg name='sig' type='g' direction='out'/>"
             "    <arg name='structName' type='(is)' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Name' value='[StructName]'/>"
             "    </arg>"
-            "    <arg name='arrayOfStructName' type='a(is)' direction='out'>"
+            "    <arg name='arrOfStructName' type='a(is)' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Name' value='a[StructName]'/>"
             "    </arg>"
-            "    <arg name='arrayOfByte' type='ay' direction='out'/>"
+            "    <arg name='arrOfU8' type='ay' direction='out'/>"
             "    <arg name='variant' type='v' direction='out'/>"
-            "    <arg name='arrayOfInt32' type='ai' direction='out'/>"
-            "    <arg name='arrayOfInt64' type='ax' direction='out'/>"
+            "    <arg name='arrOfI32' type='ai' direction='out'/>"
+            "    <arg name='arrOfI64' type='ax' direction='out'/>"
             "    <arg name='struct' type='(ii)' direction='out'>"
             "      <annotation name='org.alljoyn.Bus.Type.Name' value='[Point]'/>"
             "    </arg>"
@@ -2081,31 +2081,31 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_TRUE(postCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, postCB.m_response->payload->type);
     payload = (OCRepPayload *) postCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-method-with-introspectionint64Small",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-method-with-introspectionarg0i64S",
             &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionint64Large",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionarg1i64L",
             &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-method-with-introspectionuint64Small",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-method-with-introspectionarg2u64S",
             &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionuint64Large",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionarg3u64L",
             &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionobjectPath",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionarg4objPath",
             &s));
     EXPECT_STREQ("/Test", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionsignature",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-method-with-introspectionarg5sig",
             &s));
-    EXPECT_STREQ("signatur", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-method-with-introspectionstructName",
+    EXPECT_STREQ("sig", s);
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-method-with-introspectionarg6structName",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "int", &i));
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(obj, "string", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.-method-with-introspectionarrayOfStructName",
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.-method-with-introspectionarg7arrOfStructName",
             &objArr, dim));
     EXPECT_EQ(2u, calcDimTotal(dim));
     EXPECT_TRUE(OCRepPayloadGetPropInt(objArr[0], "int", &i));
@@ -2116,17 +2116,17 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(objArr[1], "string", &s));
     EXPECT_STREQ("string1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.-method-with-introspectionarrayOfByte",
+    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.-method-with-introspectionarg8arrOfU8",
             &bs));
     EXPECT_EQ(5u, bs.len);
     EXPECT_EQ(0, memcmp(ay, bs.bytes, bs.len));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-method-with-introspectionvariant",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-method-with-introspectionarg9variant",
             &i));
     EXPECT_EQ(0, i);
     /* Empty arrays are decoded as OCREP_PROP_NULL (see IOT-2457) */
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-method-with-introspectionarrayOfInt32"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-method-with-introspectionarrayOfInt64"));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-method-with-introspectionstruct",
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-method-with-introspectionarg10arrOfI32"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-method-with-introspectionarg11arrOfI64"));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-method-with-introspectionarg12struct",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "x", &i));
     EXPECT_EQ(0, i);
@@ -2148,31 +2148,31 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_TRUE(observeCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
     payload = (OCRepPayload *) observeCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signal-with-introspectionint64Small",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg0i64S",
             &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionint64Large",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg1i64L",
             &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signal-with-introspectionuint64Small",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg2u64S",
             &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionuint64Large",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg3u64L",
             &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionobjectPath",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg4objPath",
             &s));
     EXPECT_STREQ("/Test", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionsignature",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg5sig",
             &s));
-    EXPECT_STREQ("signatur", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-signal-with-introspectionstructName",
+    EXPECT_STREQ("sig", s);
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg6structName",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "int", &i));
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(obj, "string", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.-signal-with-introspectionarrayOfStructName",
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg7arrOfStructName",
             &objArr, dim));
     EXPECT_EQ(2u, calcDimTotal(dim));
     EXPECT_TRUE(OCRepPayloadGetPropInt(objArr[0], "int", &i));
@@ -2183,17 +2183,17 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(objArr[1], "string", &s));
     EXPECT_STREQ("string1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.-signal-with-introspectionarrayOfByte",
+    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg8arrOfU8",
             &bs));
     EXPECT_EQ(5u, bs.len);
     EXPECT_EQ(0, memcmp(ay, bs.bytes, bs.len));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signal-with-introspectionvariant",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg9variant",
             &i));
     EXPECT_EQ(0, i);
     /* Empty arrays are decoded as OCREP_PROP_NULL (see IOT-2457) */
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signal-with-introspectionarrayOfInt32"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signal-with-introspectionarrayOfInt64"));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-signal-with-introspectionstruct",
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg10arrOfI32"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg11arrOfI64"));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-signal-with-introspectionarg12struct",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "x", &i));
     EXPECT_EQ(0, i);
@@ -2211,27 +2211,27 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_TRUE(getCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     payload = (OCRepPayload *) getCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Int64Small", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.I64S", &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Int64Large", &s));
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.I64L", &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Uint64Small", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.U64S", &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Uint64Large", &s));
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.U64L", &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.ObjectPath",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.ObjPath",
             &s));
     EXPECT_STREQ("/Test", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Signature",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Sig",
             &s));
-    EXPECT_STREQ("signatur", s);
+    EXPECT_STREQ("sig", s);
     EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.StructName",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "int", &i));
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(obj, "string", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.ArrayOfStructName",
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.ArrOfStructName",
             &objArr, dim));
     EXPECT_EQ(2u, calcDimTotal(dim));
     EXPECT_TRUE(OCRepPayloadGetPropInt(objArr[0], "int", &i));
@@ -2242,7 +2242,7 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(objArr[1], "string", &s));
     EXPECT_STREQ("string1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.ArrayOfByte",
+    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.ArrOfU8",
             &bs));
     EXPECT_EQ(5u, bs.len);
     EXPECT_EQ(0, memcmp(ay, bs.bytes, bs.len));
@@ -2250,8 +2250,8 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
             &i));
     EXPECT_EQ(0, i);
     /* Empty arrays are decoded as OCREP_PROP_NULL (see IOT-2457) */
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrayOfInt32"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrayOfInt64"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrOfI32"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrOfI64"));
     EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.Struct",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "x", &i));
@@ -2261,14 +2261,14 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
 
     /* Set */
     payload = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Int64Small", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Int64Large", "1"));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Uint64Small", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Uint64Large", "1"));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.ObjectPath",
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.I64S", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.I64L", "1"));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.U64S", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.U64L", "1"));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.ObjPath",
             "/Test"));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Signature",
-            "signatur"));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Sig",
+            "sig"));
     obj = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "int", 1));
     EXPECT_TRUE(OCRepPayloadSetPropString(obj, "string", "string"));
@@ -2282,15 +2282,15 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     objArr[1] = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(objArr[1], "int", 1));
     EXPECT_TRUE(OCRepPayloadSetPropString(objArr[1], "string", "string1"));
-    EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "x.org.iotivity.-interface.ArrayOfStructName",
+    EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "x.org.iotivity.-interface.ArrOfStructName",
             (const OCRepPayload **) objArr, dim));
-    EXPECT_TRUE(OCRepPayloadSetPropByteString(payload, "x.org.iotivity.-interface.ArrayOfByte",
+    EXPECT_TRUE(OCRepPayloadSetPropByteString(payload, "x.org.iotivity.-interface.ArrOfU8",
             bs));
     EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Variant", 0));
     size_t emptyDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    EXPECT_TRUE(OCRepPayloadSetIntArrayAsOwner(payload, "x.org.iotivity.-interface.ArrayOfInt32",
+    EXPECT_TRUE(OCRepPayloadSetIntArrayAsOwner(payload, "x.org.iotivity.-interface.ArrOfI32",
             NULL, emptyDim));
-    EXPECT_TRUE(OCRepPayloadSetStringArrayAsOwner(payload, "x.org.iotivity.-interface.ArrayOfInt64",
+    EXPECT_TRUE(OCRepPayloadSetStringArrayAsOwner(payload, "x.org.iotivity.-interface.ArrOfI64",
             NULL, emptyDim));
     obj = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "x", 0));
@@ -2894,11 +2894,11 @@ TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
     EXPECT_EQ(OC_STACK_OK, getCB.m_response->result);
     payload = (OCRepPayload *) getCB.m_response->payload;
     // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodoneTwo"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodone_dtwo"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodone_htwo"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methoddict"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodstruct"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodarg0oneTwo"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodarg1one_dtwo"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodarg2one_htwo"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodarg3dict"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-property-names-methodarg4struct"));
 
     /* Post - Verify that property names are escaped */
     dict = OCRepPayloadCreate();
@@ -2928,11 +2928,11 @@ TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
     EXPECT_TRUE(OCRepPayloadSetPropInt(_struct, "one.two", 21));
     EXPECT_TRUE(OCRepPayloadSetPropString(_struct, "one-two", "two-one"));
     payload = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoneTwo", 21));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodone_dtwo", 21));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodone_htwo", 21));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methoddict", dict));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodstruct", _struct));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodarg0oneTwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodarg1one_dtwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodarg2one_htwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodarg3dict", dict));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodarg4struct", _struct));
     postCB.Reset();
     uri = "/abc.def-ghi~jkl_mno/1?rt=x.org.iotivity.-interface.-property-names-method";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
@@ -2941,18 +2941,18 @@ TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
     EXPECT_EQ(OC_STACK_OK, postCB.Wait(1000));
     EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
     payload = (OCRepPayload *) postCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoutoneTwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodarg5outoneTwo", &i));
     EXPECT_EQ(21, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoutone_dtwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodarg6outone_dtwo", &i));
     EXPECT_EQ(21, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodoutone_htwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-methodarg7outone_htwo", &i));
     EXPECT_EQ(21, i);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodoutdict", &dict));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodarg8outdict", &dict));
     EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
     EXPECT_EQ(21, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
     EXPECT_STREQ("two-one", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodoutstruct", &_struct));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-methodarg9outstruct", &_struct));
     EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
     EXPECT_EQ(21, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));
@@ -2997,18 +2997,18 @@ TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
     EXPECT_TRUE(observeCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
     payload = (OCRepPayload *) observeCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signaloneTwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalarg0oneTwo", &i));
     EXPECT_EQ(12, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalone_dtwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalarg1one_dtwo", &i));
     EXPECT_EQ(12, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalone_htwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.-property-names-signalarg2one_htwo", &i));
     EXPECT_EQ(12, i);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-signaldict", &dict));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-signalarg3dict", &dict));
     EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
     EXPECT_EQ(12, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
     EXPECT_STREQ("one-two", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-signalstruct", &_struct));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.-property-names-signalarg4struct", &_struct));
     EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
     EXPECT_EQ(12, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));

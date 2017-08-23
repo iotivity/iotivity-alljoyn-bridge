@@ -658,19 +658,19 @@ static int64_t Properties(CborEncoder *cbor, const char *ajSoftwareVersion,
     const char *argNames = member->argNames.c_str();
     for (size_t k = 0; k < argN; ++k)
     {
-        NextArgName(argNames, k);
+        NextArgName(argNames);
     }
     for (size_t k = 0; k < numArgs; ++k, ++argN)
     {
         ParseCompleteType(signature);
         qcc::String sig(argSignature, signature - argSignature);
         argSignature = signature;
-        std::string argName = NextArgName(argNames, argN);
+        std::string argName = NextArgName(argNames);
         if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
         {
             member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
         }
-        std::string propName = GetPropName(member, argName);
+        std::string propName = GetPropName(member, argName, argN);
         qcc::String min, max, def;
         member->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
         member->GetAnnotation("org.alljoyn.Bus.Type.Max", max);

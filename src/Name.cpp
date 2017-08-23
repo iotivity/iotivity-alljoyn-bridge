@@ -217,6 +217,13 @@ std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::str
     return GetResourceTypeName(iface->GetName(), suffix);
 }
 
+std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName, size_t i)
+{
+    std::stringstream name;
+    name << GetResourceTypeName(member->iface, member->name) << "arg" << i << argName;
+    return name.str();
+}
+
 std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
 {
     return GetResourceTypeName(member->iface, member->name) + argName;
@@ -239,7 +246,7 @@ std::string GetMember(std::string rt)
     return aj.substr(aj.rfind('.') + 1);
 }
 
-std::string NextArgName(const char *&argNames, size_t i)
+std::string NextArgName(const char *&argNames)
 {
     std::stringstream name;
     const char *argName = argNames;
@@ -253,18 +260,10 @@ std::string NextArgName(const char *&argNames, size_t i)
         {
             name << std::string(argName, argNames - argName);
         }
-        else
-        {
-            name << "arg" << i;
-        }
         if (*argNames == ',')
         {
             ++argNames;
         }
-    }
-    else
-    {
-        name << "arg" << i;
     }
     return name.str();
 }
