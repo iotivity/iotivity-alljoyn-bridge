@@ -871,7 +871,7 @@ Row::Row(ajn::MsgArg arg, size_t d0, size_t d1, size_t d2, const uint8_t *bytes)
     m_arg = arg;
     memset(&m_value, 0, sizeof(m_value));
     m_value.name = (char *) "name";
-    size_t len;
+    size_t len = 0;
     if (d2)
     {
         len = d2;

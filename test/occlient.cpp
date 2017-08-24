@@ -447,7 +447,7 @@ int main(int, char **)
             uint16_t optionID = CA_OPTION_ACCEPT;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_CBOR;
             std::string uri;
-            OCDevAddr *devAddr;
+            OCDevAddr *devAddr = NULL;
             try
             {
                 size_t i = std::stoi(*token);

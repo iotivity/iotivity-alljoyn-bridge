@@ -55,6 +55,8 @@ elif env['TARGET_OS'] == 'windows':
 
 if env['SECURED'] == '1':
     env_bridge.AppendUnique(LIBS = ['ocpmapi'])
+if env['IOTIVITY_LIB_TYPE'] == 'debug':
+    env_bridge.AppendUnique(LIBS = ['gcov'])
 
 examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
 if env['TARGET_OS'] == 'linux':

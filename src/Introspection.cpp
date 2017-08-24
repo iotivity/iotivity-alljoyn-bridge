@@ -199,7 +199,7 @@ static int64_t QueryParameters(CborEncoder *cbor, OCResourceHandle h)
     err |= cbor_encoder_close_container(cbor, &map);
     VERIFY_CBOR(err);
 exit:
-    return result;
+    return err;
 }
 
 static int64_t Schema(CborEncoder *cbor, OCResourceHandle h)
@@ -1318,7 +1318,7 @@ static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj)
     OCRepPayload *property = NULL;
     OCRepPayload *child = NULL;
     OCRepPayload *array = NULL;
-    bool success;
+    bool success = false;
 
     if (!obj)
     {

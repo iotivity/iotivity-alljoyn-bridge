@@ -71,7 +71,7 @@ if env['TARGET_OS'] == 'linux':
     env.AppendUnique(CPPDEFINES = ['WITH_POSIX', '__linux__', 'QCC_OS_GROUP_POSIX'])
     env.AppendUnique(CFLAGS = ['-std=gnu99'])
     env.AppendUnique(CXXFLAGS = ['-std=c++11'])
-    env.AppendUnique(CCFLAGS = ['-Werror', '-Wall', '-Wextra', '-Wno-ignored-qualifiers', '-fPIC'])
+    env.AppendUnique(CCFLAGS = ['-Werror', '-Wall', '-Wextra', '-Wno-ignored-qualifiers', '-Wno-maybe-uninitialized', '-fPIC'])
 
     target_arch = env.get('TARGET_ARCH')
     if target_arch in ['x86']:
