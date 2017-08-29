@@ -151,15 +151,37 @@ bool Device::SetCollectionLinks(std::string collectionUri, OCRepPayload *payload
     OCRepPayload **links = NULL;
     std::vector<Resource>::iterator collection = FindResourceFromUri(m_resources, collectionUri);
     assert(collection != m_resources.end());
-    if (!OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_LINKS, &links, dim))
+    if (OCRepPayloadGetPropObjectArray(payload, OC_RSRVD_LINKS, &links, dim))
     {
-        goto exit;
+        dimTotal = calcDimTotal(dim);
     }
-    dimTotal = calcDimTotal(dim);
+    else
+    {
+        for (OCRepPayload *p = payload; p; p = p->next)
+        {
+            ++dim[0];
+        }
+        links = (OCRepPayload **) OICCalloc(dim[0], sizeof(OCRepPayload*));
+        if (!links)
+        {
+            goto exit;
+        }
+        dimTotal = calcDimTotal(dim);
+        OCRepPayload *p = payload;
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            links[i] = OCRepPayloadClone(p);
+            p = p->next;
+        }
+    }
     for (size_t i = 0; i < dimTotal; ++i)
     {
         char *href = NULL;
         if (!OCRepPayloadGetPropString(links[i], OC_RSRVD_HREF, &href))
+        {
+            href = OICStrdup(links[i]->uri);
+        }
+        if (!href)
         {
             goto exit;
         }
@@ -488,7 +510,10 @@ OCResourcePayload *ParseLink(OCRepPayload *payload)
     {
         goto exit;
     }
-    OCRepPayloadGetPropString(payload, OC_RSRVD_HREF, &rp->uri);
+    if (!OCRepPayloadGetPropString(payload, OC_RSRVD_HREF, &rp->uri))
+    {
+        rp->uri = OICStrdup(payload->uri);
+    }
     OCRepPayloadGetPropString(payload, OC_RSRVD_REL, &rp->rel);
     OCRepPayloadGetPropString(payload, OC_RSRVD_URI, &rp->anchor);
     if (OCRepPayloadGetStringArray(payload, OC_RSRVD_RESOURCE_TYPE, &ss, ssDim))
@@ -502,6 +527,10 @@ OCResourcePayload *ParseLink(OCRepPayload *payload)
         OICFree(ss);
         ss = NULL;
     }
+    else
+    {
+        rp->types = CloneOCStringLL(payload->types);
+    }
     if (OCRepPayloadGetStringArray(payload, OC_RSRVD_INTERFACE, &ss, ssDim))
     {
         size_t dimTotal = calcDimTotal(ssDim);
@@ -512,6 +541,10 @@ OCResourcePayload *ParseLink(OCRepPayload *payload)
         }
         OICFree(ss);
         ss = NULL;
+    }
+    else
+    {
+        rp->interfaces = CloneOCStringLL(payload->interfaces);
     }
     if (OCRepPayloadGetPropObject(payload, OC_RSRVD_POLICY, &o))
     {

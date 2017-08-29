@@ -553,7 +553,22 @@ static void VerifyAllJoynObjectLinks(DiscoverContext *context, OCDevAddr addr,
 {
     OCRepPayload **arr;
     size_t dim[MAX_REP_ARRAY_DEPTH];
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "links", &arr, dim));
+    if (!OCRepPayloadGetPropObjectArray(payload, "links", &arr, dim))
+    {
+        memset(dim, 0, sizeof(size_t) * MAX_REP_ARRAY_DEPTH);
+        OCRepPayload *p;
+        for (p = payload; p; p = p->next)
+        {
+            ++dim[0];
+        }
+        arr = (OCRepPayload **) OICCalloc(dim[0], sizeof(OCRepPayload*));
+        p = payload;
+        for (size_t i = 0; i < dim[0]; ++i)
+        {
+            arr[i] = OCRepPayloadClone(p);
+            p = p->next;
+        }
+    }
     size_t dimTotal = calcDimTotal(dim);
     EXPECT_EQ(2u, dimTotal);
     for (size_t i = 0; i < dimTotal; ++i)
@@ -2353,11 +2368,8 @@ TEST_F(AllJoynProducer, GetAllJoynObjectBaseline)
     size_t dim[MAX_REP_ARRAY_DEPTH];
     EXPECT_TRUE(OCRepPayloadGetStringArray(payload, "rts", &arr, dim));
     size_t dimTotal = calcDimTotal(dim);
-    EXPECT_EQ(6u, dimTotal);
-    static const char *rts[] = {
-        "x.org.iotivity.-interface.const", "x.org.iotivity.-interface.false",
-        "x.org.iotivity.-interface.invalidates", "x.org.iotivity.-interface.true", "oic.wk.col",
-        "oic.r.alljoynobject" };
+    EXPECT_EQ(2u, dimTotal);
+    static const char *rts[] = { "oic.wk.col", "oic.r.alljoynobject" };
     bool foundRt[] = {
         false, false,
         false, false, false,
@@ -2411,8 +2423,6 @@ TEST_F(AllJoynProducer, GetAllJoynObjectLL)
     EXPECT_TRUE(getCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
-    EXPECT_TRUE(payload->types == NULL);
-    EXPECT_TRUE(payload->interfaces == NULL);
     VerifyAllJoynObjectLinks(context, getCB.m_response->devAddr, payload);
 
     delete context;

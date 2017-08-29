@@ -29,6 +29,17 @@
 #include <alljoyn/Init.h>
 #include <thread>
 
+static OCRepPayload *PayloadClone(OCRepPayload *payload)
+{
+    OCRepPayload *clone = NULL;
+    if (payload)
+    {
+        clone = OCRepPayloadClone(payload);
+        clone->next = PayloadClone(payload->next);
+    }
+    return clone;
+}
+
 Callback::Callback(OCClientResponseHandler cb, void *context)
     : m_cb(cb), m_context(context), m_called(false)
 {
@@ -115,7 +126,7 @@ OCStackApplicationResult ResourceCallback::Handler(OCDoHandle handle, OCClientRe
         switch (response->payload->type)
         {
             case PAYLOAD_TYPE_REPRESENTATION:
-                m_response->payload = (OCPayload *) OCRepPayloadClone(
+                m_response->payload = (OCPayload *) PayloadClone(
                     (OCRepPayload *) response->payload);
                 break;
             case PAYLOAD_TYPE_DIAGNOSTIC:
@@ -154,7 +165,7 @@ OCStackApplicationResult ObserveCallback::Handler(OCDoHandle handle, OCClientRes
     if (response->payload)
     {
         EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, response->payload->type);
-        m_response->payload = (OCPayload *) OCRepPayloadClone((OCRepPayload *) response->payload);
+        m_response->payload = (OCPayload *) PayloadClone((OCRepPayload *) response->payload);
     }
     m_called = true;
     return OC_STACK_KEEP_TRANSACTION;
