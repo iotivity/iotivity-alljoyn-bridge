@@ -2887,7 +2887,7 @@ private:
             "            \"int64\": { \"type\": \"integer\" },"
             "            \"double\": { \"type\": \"number\" },"
             "            \"uint64large\": { \"type\": \"string\", \"pattern\": \"^0([1-9][0-9]{0,19})$\" },"
-            "            \"int64large\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18)}$\" },"
+            "            \"int64large\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18})$\" },"
             "            \"string\": { \"type\": \"string\" },"
             "            \"stringbase64\": { \"type\": \"string\", \"media\": { \"binaryEncoding\": \"base64\" } },"
             "            \"stringpattern\": { \"type\": \"string\", \"pattern\": \"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$\" },"

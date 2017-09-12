@@ -481,7 +481,7 @@ static int64_t GetJsonType(CborEncoder *cbor, const char *ajType,
                 {
                     err |= Pair(cbor, "type", "string");
                     VERIFY_CBOR(err);
-                    err |= Pair(cbor, "pattern", "^0(-?[1-9][0-9]{0,18)}$");
+                    err |= Pair(cbor, "pattern", "^0(-?[1-9][0-9]{0,18})$");
                     VERIFY_CBOR(err);
                 }
                 if (!typeDefault.empty())

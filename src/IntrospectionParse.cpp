@@ -163,7 +163,7 @@ static std::pair<std::string, std::string> GetSignature(OCRepPayload *schema,
                     *type = OCREP_PROP_STRING;
                 }
             }
-            else if ((pattern && !strcmp(pattern, "^0(-?[1-9][0-9]{0,18)}$")) ||
+            else if ((pattern && !strcmp(pattern, "^0(-?[1-9][0-9]{0,18})$")) ||
                     (format && !strcmp(format, "int64")))
             {
                 sig.first = "x";

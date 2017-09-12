@@ -107,7 +107,7 @@ TEST_F(Introspection, NumericTypes)
             "        \"int64\": { \"type\": \"integer\" },"
             "        \"double\": { \"type\": \"number\" },"
             "        \"uint64large\": { \"type\": \"string\", \"pattern\": \"^0([1-9][0-9]{0,19})$\" },"
-            "        \"int64large\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18)}$\" },"
+            "        \"int64large\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18})$\" },"
             "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"x.org.iotivity.rt\" ] },"
             "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
             "      }"
@@ -223,7 +223,7 @@ TEST_F(Introspection, NumericTypes)
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
-    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18)}$", s);
+    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18})$", s);
 
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.double",
             &property));
@@ -432,7 +432,7 @@ TEST_F(Introspection, Arrays)
             "        \"int64\": { \"type\": \"array\", \"items\": { \"type\": \"integer\" } },"
             "        \"double\": { \"type\": \"array\", \"items\": { \"type\": \"number\" } },"
             "        \"uint64large\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"pattern\": \"^0([1-9][0-9]{0,19})$\" } },"
-            "        \"int64large\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18)}$\" } },"
+            "        \"int64large\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"pattern\": \"^0(-?[1-9][0-9]{0,18})$\" } },"
             "        \"string\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } },"
             "        \"stringbase64\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"media\": { \"binaryEncoding\": \"base64\" } } },"
             "        \"stringpattern\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"pattern\": \"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$\" } },"
@@ -602,7 +602,7 @@ TEST_F(Introspection, Arrays)
     EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
     EXPECT_STREQ("string", s);
     EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
-    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18)}$", s);
+    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18})$", s);
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.double",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
