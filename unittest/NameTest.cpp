@@ -48,11 +48,23 @@ TEST(IsValidErrorNameTest, Check)
 TEST(UriToObjectPath, Translation)
 {
     std::string uri = "/abc.def-ghi~jkl_mno";
-    std::string path = "/abc_ddef_hghi_tjkl_umno";
+    std::string path = "/abc_ddef_hghi_tjkl_mno";
     EXPECT_STREQ(path.c_str(), ToObjectPath(uri).c_str());
     EXPECT_STREQ(uri.c_str(), ToUri(path).c_str());
     EXPECT_STREQ(path.c_str(), ToObjectPath(ToUri(path)).c_str());
     EXPECT_STREQ(uri.c_str(), ToUri(ToObjectPath(uri)).c_str());
+
+    std::string OCF1 = "_a_b_h_t_d.-~_u";
+    std::string AJ = "_a_b_uh_ut_ud_d_h_t_u";
+    std::string OCF2 = "_a_b_h_t_d.-~_u";
+    EXPECT_STREQ(AJ.c_str(), ToObjectPath(OCF1).c_str());
+    EXPECT_STREQ(OCF2.c_str(), ToUri(AJ).c_str());
+
+    std::string AJ1 = "_a_b_h_t_d_u";
+    std::string OCF = "_a_b-~._u";
+    std::string AJ2 = "_a_b_h_t_d_u";
+    EXPECT_STREQ(OCF.c_str(), ToUri(AJ1).c_str());
+    EXPECT_STREQ(AJ2.c_str(), ToObjectPath(OCF).c_str());
 }
 
 TEST(PropName, IncludesArgNumberPrefix)

@@ -3350,7 +3350,7 @@ TEST_F(OCFResource, UrisAndPropertyNamesAreEscaped)
     SetUpResource(&resource);
 
     EXPECT_EQ(ER_OK, m_aboutListener->JoinSession());
-    ajn::ProxyBusObject *res = m_aboutListener->CreateProxyBusObject("/abc_ddef_hghi_tjkl_umno");
+    ajn::ProxyBusObject *res = m_aboutListener->CreateProxyBusObject("/abc_ddef_hghi_tjkl_mno");
     EXPECT_TRUE(res != NULL);
 
     /* Get */

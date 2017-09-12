@@ -157,10 +157,23 @@ std::string ToUri(std::string objectPath)
             ++in;
             uri << '~';
         }
-        else if (*in == '_' && *(in + 1) == 'u')
+        else if (*in == '_' && *(in + 1) == 'u' && *(in + 2) == 'd')
         {
             ++in;
-            uri << '_';
+            ++in;
+            uri << "_d";
+        }
+        else if (*in == '_' && *(in + 1) == 'u' && *(in + 2) == 'h')
+        {
+            ++in;
+            ++in;
+            uri << "_h";
+        }
+        else if (*in == '_' && *(in + 1) == 'u' && *(in + 2) == 't')
+        {
+            ++in;
+            ++in;
+            uri << "_t";
         }
         else
         {
@@ -189,9 +202,20 @@ std::string ToObjectPath(std::string uri)
         {
             objectPath << "_t";
         }
-        else if (*in == '_')
+        else if (*in == '_' && *(in + 1) == 'd')
         {
-            objectPath << "_u";
+            ++in;
+            objectPath << "_ud";
+        }
+        else if (*in == '_' && *(in + 1) == 'h')
+        {
+            ++in;
+            objectPath << "_uh";
+        }
+        else if (*in == '_' && *(in + 1) == 't')
+        {
+            ++in;
+            objectPath << "_ut";
         }
         else
         {
