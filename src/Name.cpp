@@ -142,38 +142,30 @@ std::string ToUri(std::string objectPath)
     const char *in = objectPath.c_str();
     while (*in)
     {
-        if (*in == '_' && *(in + 1) == 'd')
+        if (*in == '_' && *(in + 1) == 'u')
         {
             ++in;
-            uri << '.';
+            uri << '_';
         }
         else if (*in == '_' && *(in + 1) == 'h')
         {
             ++in;
             uri << '-';
+
+        }
+        else if (*in == '_' && *(in + 1) == 'd')
+        {
+            ++in;
+            uri << '.';
         }
         else if (*in == '_' && *(in + 1) == 't')
         {
             ++in;
             uri << '~';
         }
-        else if (*in == '_' && *(in + 1) == 'u' && *(in + 2) == 'd')
+        else if (*in == '_')
         {
-            ++in;
-            ++in;
-            uri << "_d";
-        }
-        else if (*in == '_' && *(in + 1) == 'u' && *(in + 2) == 'h')
-        {
-            ++in;
-            ++in;
-            uri << "_h";
-        }
-        else if (*in == '_' && *(in + 1) == 'u' && *(in + 2) == 't')
-        {
-            ++in;
-            ++in;
-            uri << "_t";
+            uri << "~u";
         }
         else
         {
@@ -190,7 +182,16 @@ std::string ToObjectPath(std::string uri)
     const char *in = uri.c_str();
     while (*in)
     {
-        if (*in == '.')
+        if (*in == '~' && *(in + 1) == 'u')
+        {
+            ++in;
+            objectPath << "_";
+        }
+        else if (*in == '~')
+        {
+            objectPath << "_t";
+        }
+        else if (*in == '.')
         {
             objectPath << "_d";
         }
@@ -198,24 +199,9 @@ std::string ToObjectPath(std::string uri)
         {
             objectPath << "_h";
         }
-        else if (*in == '~')
+        else if (*in == '_')
         {
-            objectPath << "_t";
-        }
-        else if (*in == '_' && *(in + 1) == 'd')
-        {
-            ++in;
-            objectPath << "_ud";
-        }
-        else if (*in == '_' && *(in + 1) == 'h')
-        {
-            ++in;
-            objectPath << "_uh";
-        }
-        else if (*in == '_' && *(in + 1) == 't')
-        {
-            ++in;
-            objectPath << "_ut";
+            objectPath << "_u";
         }
         else
         {

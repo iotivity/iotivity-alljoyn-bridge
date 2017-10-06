@@ -2864,7 +2864,7 @@ TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
             "  <annotation name='org.alljoyn.Bus.Struct.PropertiesStruct.Field.one_dtwo.Type' value='x'/>"
             "  <annotation name='org.alljoyn.Bus.Struct.PropertiesStruct.Field.one_htwo.Type' value='s'/>"
             "</interface>";
-    DiscoverContext *context = CreateAndDiscoverVirtualResource("/abc_ddef_hghi_tjkl_mno", xml);
+    DiscoverContext *context = CreateAndDiscoverVirtualResource("/abc_ddef_hghi_tjkl_umno", xml);
 
     ResourceCallback getCB;
     ResourceCallback postCB;

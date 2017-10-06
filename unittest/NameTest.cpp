@@ -47,24 +47,44 @@ TEST(IsValidErrorNameTest, Check)
 
 TEST(UriToObjectPath, Translation)
 {
-    std::string uri = "/abc.def-ghi~jkl_mno";
-    std::string path = "/abc_ddef_hghi_tjkl_mno";
-    EXPECT_STREQ(path.c_str(), ToObjectPath(uri).c_str());
-    EXPECT_STREQ(uri.c_str(), ToUri(path).c_str());
-    EXPECT_STREQ(path.c_str(), ToObjectPath(ToUri(path)).c_str());
-    EXPECT_STREQ(uri.c_str(), ToUri(ToObjectPath(uri)).c_str());
+    {
+        std::string uri = "/abc.def-ghi~jkl_mno";
+        std::string path = "/abc_ddef_hghi_tjkl_umno";
+        EXPECT_STREQ(path.c_str(), ToObjectPath(uri).c_str());
+        EXPECT_STREQ(uri.c_str(), ToUri(path).c_str());
+        EXPECT_STREQ(path.c_str(), ToObjectPath(ToUri(path)).c_str());
+        EXPECT_STREQ(uri.c_str(), ToUri(ToObjectPath(uri)).c_str());
+    }
+    {
+        std::string OCF1 = "_a_b_h_t_d.-~_u";
+        std::string AJ = "_ua_ub_uh_ut_ud_d_h_t_uu";
+        std::string OCF2 = "_a_b_h_t_d.-~_u";
+        EXPECT_STREQ(AJ.c_str(), ToObjectPath(OCF1).c_str());
+        EXPECT_STREQ(OCF2.c_str(), ToUri(AJ).c_str());
 
-    std::string OCF1 = "_a_b_h_t_d.-~_u";
-    std::string AJ = "_a_b_uh_ut_ud_d_h_t_u";
-    std::string OCF2 = "_a_b_h_t_d.-~_u";
-    EXPECT_STREQ(AJ.c_str(), ToObjectPath(OCF1).c_str());
-    EXPECT_STREQ(OCF2.c_str(), ToUri(AJ).c_str());
+        EXPECT_STREQ(AJ.c_str(), ToObjectPath(ToUri(AJ)).c_str());
+        EXPECT_STREQ(OCF1.c_str(), ToUri(ToObjectPath(OCF1)).c_str());
+    }
+    {
+        std::string AJ1 = "_a_b_h_t_d_u";
+        std::string OCF = "~ua~ub-~._";
+        std::string AJ2 = "_a_b_h_t_d_u";
+        EXPECT_STREQ(OCF.c_str(), ToUri(AJ1).c_str());
+        EXPECT_STREQ(AJ2.c_str(), ToObjectPath(OCF).c_str());
 
-    std::string AJ1 = "_a_b_h_t_d_u";
-    std::string OCF = "_a_b-~._u";
-    std::string AJ2 = "_a_b_h_t_d_u";
-    EXPECT_STREQ(OCF.c_str(), ToUri(AJ1).c_str());
-    EXPECT_STREQ(AJ2.c_str(), ToObjectPath(OCF).c_str());
+        EXPECT_STREQ(AJ1.c_str(), ToObjectPath(ToUri(AJ1)).c_str());
+        EXPECT_STREQ(OCF.c_str(), ToUri(ToObjectPath(OCF)).c_str());
+    }
+    {
+        std::string OCF1 = "_uh_ud_ut";
+        std::string AJ = "_uuh_uud_uut";
+        std::string OCF2 = "_uh_ud_ut";
+        EXPECT_STREQ(AJ.c_str(), ToObjectPath(OCF1).c_str());
+        EXPECT_STREQ(OCF2.c_str(), ToUri(AJ).c_str());
+
+        EXPECT_STREQ(AJ.c_str(), ToObjectPath(ToUri(AJ)).c_str());
+        EXPECT_STREQ(OCF1.c_str(), ToUri(ToObjectPath(OCF1)).c_str());
+    }
 }
 
 TEST(PropName, IncludesArgNumberPrefix)
