@@ -577,6 +577,11 @@ static void ParseInterfaces(const OCRepPayload *definitions,
             LOG(LOG_INFO, "%s missing or empty \"default\" property, skipping", definition->name);
             goto next_iface;
         }
+        if (IsResourceTypeInWellDefinedSet(rts[0]))
+        {
+            LOG(LOG_INFO, "Skipping well-defined %s resource type", rts[0]);
+            goto next_iface;
+        }
         ifaceName = ToAJName(rts[0]);
         ajNames[definition->name] = ifaceName;
         bus->CreateInterface(ifaceName.c_str(), iface, ajn::AJ_IFC_SECURITY_INHERIT);

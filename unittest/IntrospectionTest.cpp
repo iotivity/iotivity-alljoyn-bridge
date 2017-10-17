@@ -1116,3 +1116,35 @@ TEST_F(Introspection, SimulatorIntrospectionParses)
     EXPECT_EQ(OC_STACK_OK, ParseJsonPayload(&introspectionData, introspectionJson));
     EXPECT_TRUE(ParseIntrospectionPayload(m_context->m_device, m_bus, introspectionData));
 }
+
+TEST_F(Introspection, WellDefinedResourceTypesIgnored)
+{
+    const char *introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": {"
+            "    \"/resource\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/oic.r.switch.binary\" } ] } } }"
+            "      }"
+            "    }"
+            "  },"
+            "  \"definitions\": {"
+            "    \"oic.r.switch.binary\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"value\": { \"type\": \"boolean\" },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"oic.r.switch.binary\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    }"
+            "  }"
+            "}";
+    OCRepPayload *introspectionData;
+    EXPECT_EQ(OC_STACK_OK, ParseJsonPayload(&introspectionData, introspectionJson));
+    EXPECT_TRUE(ParseIntrospectionPayload(m_context->m_device, m_bus, introspectionData));
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface("oic.r.switch.binary");
+    EXPECT_TRUE(iface == NULL);
+}

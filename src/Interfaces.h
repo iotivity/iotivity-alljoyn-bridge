@@ -32,6 +32,7 @@ namespace ajn {
 }
 
 bool IsInterfaceInWellDefinedSet(const char *name);
+bool IsResourceTypeInWellDefinedSet(const char *name);
 bool TranslateInterface(const char *name);
 bool TranslateResourceType(const char *name);
 

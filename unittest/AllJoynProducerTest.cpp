@@ -2561,14 +2561,17 @@ TEST_P(MultiValueRt, Post)
     bool rtDoesNotSupportUpdate = strstr(value.m_uri, "x.org.iotivity.-interface.const");
     bool updatedReadOnlyProperties = value.m_version || value.m_const;
     bool updatedNoProperties = !value.m_false && !value.m_true;
-    if (ifDoesNotSupportUpdate || rtDoesNotSupportUpdate || updatedReadOnlyProperties ||
-            updatedNoProperties)
-    {
-        EXPECT_NE(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
-    }
-    else
-    {
-        EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+    EXPECT_TRUE(postCB.m_response != NULL);
+    if (postCB.m_response) {
+        if (ifDoesNotSupportUpdate || rtDoesNotSupportUpdate || updatedReadOnlyProperties ||
+                updatedNoProperties)
+        {
+            EXPECT_NE(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+        }
+        else
+        {
+            EXPECT_EQ(OC_STACK_RESOURCE_CHANGED, postCB.m_response->result);
+        }
     }
 
     delete context;
