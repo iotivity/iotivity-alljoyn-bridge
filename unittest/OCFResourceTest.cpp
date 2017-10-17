@@ -3453,3 +3453,60 @@ TEST_F(OCFResource, UrisAndPropertyNamesAreEscaped)
     delete res;
     TearDownResource();
 }
+
+/*
+ * This resource's link and introspection data do not agree on the
+ * resource type.
+ */
+class TestInvalidResource : public TestResource
+{
+public:
+    virtual ~TestInvalidResource() { }
+    virtual void Create()
+    {
+        OCResourceHandle handle;
+        EXPECT_EQ(OC_STACK_OK, OCCreateResource(&handle, "x.vendor.r.switch.binary", NULL,
+                "/resource", BoolEntityHandler, &m_value, OC_DISCOVERABLE));
+        m_handles.push_back(handle);
+    }
+    virtual const char *IntrospectionJson() { return m_introspectionJson; }
+private:
+    const char *m_introspectionJson =
+            "{"
+            "  \"swagger\": \"2.0\","
+            "  \"info\": { \"title\": \"TITLE\", \"version\": \"VERSION\" },"
+            "  \"paths\": {"
+            "    \"/resource\": {"
+            "      \"get\": {"
+            "        \"parameters\": [ { \"name\": \"if\", \"in\": \"query\", \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } ],"
+            "        \"responses\": { \"200\": { \"description\": \"\", \"schema\": { \"oneOf\": [ { \"$ref\": \"#/definitions/oic.r.switch.binary\" } ] } } }"
+            "      }"
+            "    }"
+            "  },"
+            "  \"definitions\": {"
+            "    \"oic.r.switch.binary\": {"
+            "      \"type\": \"object\","
+            "      \"properties\": {"
+            "        \"value\": { \"readOnly\": true, \"type\": \"boolean\" },"
+            "        \"rt\": { \"readOnly\": true, \"type\": \"array\", \"default\": [ \"oic.r.switch.binary\" ] },"
+            "        \"if\": { \"readOnly\": true, \"type\": \"array\", \"items\": { \"type\": \"string\", \"enum\": [ \"oic.if.baseline\" ] } }"
+            "      }"
+            "    }"
+            "  }"
+            "}";
+};
+
+TEST_F(OCFResource, LinkAndIntrospectionResourceTypeDiffer)
+{
+    TestInvalidResource resource;
+    SetUpResource(&resource);
+
+    /*
+     * Object should not be created since introspection data takes
+     * priority, and oic.r.switch.binary is a well-defined (not
+     * translated) resource type.
+     */
+    EXPECT_FALSE(m_aboutListener->HasPath("/resource"));
+
+    TearDownResource();
+}
