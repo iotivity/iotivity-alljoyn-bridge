@@ -364,6 +364,27 @@ int main(int, char **)
     }
     std::cout << "di=" << OCGetServerInstanceIDString() << std::endl;
 
+    if (OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, "occlient") != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, OC_SPEC_VERSION) != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, "ocf.res.1.1.0") != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, "IoTivity") != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+
     for (;;)
     {
         struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
