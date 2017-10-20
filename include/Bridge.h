@@ -61,7 +61,7 @@ class Bridge : private ajn::AboutListener
         Bridge(const char *name, const char *sender);
         ~Bridge();
 
-        typedef void (*ExecCB)(const char *piid, const char *sender, bool isVirtual);
+        typedef void (*ExecCB)(const char *piid, const char *sender, bool secureMode, bool isVirtual);
         typedef void (*KillCB)(const char *piid);
         typedef enum { NOT_SEEN = 0, SEEN_NATIVE, SEEN_VIRTUAL } SeenState;
         typedef SeenState (*GetSeenStateCB)(const char *piid);
@@ -91,9 +91,10 @@ class Bridge : private ajn::AboutListener
         struct AnnouncedTask : public Task {
             std::string m_name;
             std::string m_piid;
+            bool m_secureMode;
             bool m_isVirtual;
-            AnnouncedTask(time_t tick, const char *name, const char *piid, bool isVirtual)
-                : Task(tick), m_name(name), m_piid(piid), m_isVirtual(isVirtual) { }
+            AnnouncedTask(time_t tick, const char *name, const char *piid, bool secureMode, bool isVirtual)
+                : Task(tick), m_name(name), m_piid(piid), m_secureMode(secureMode), m_isVirtual(isVirtual) { }
             virtual ~AnnouncedTask() { }
             virtual void Run(Bridge *thiz);
         };

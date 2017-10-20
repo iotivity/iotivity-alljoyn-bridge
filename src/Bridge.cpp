@@ -728,11 +728,11 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
                     LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
                             this);
                     m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
-                            piid, isVirtual));
+                            piid, m_secureMode->GetSecureMode(), isVirtual));
                 }
                 else
                 {
-                    m_execCb(piid, context->m_name.c_str(), isVirtual);
+                    m_execCb(piid, context->m_name.c_str(), m_secureMode->GetSecureMode(), isVirtual);
                 }
                 break;
             case SEEN_NATIVE:
@@ -746,7 +746,7 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
                 else
                 {
                     DestroyPiid(piid);
-                    m_execCb(piid, context->m_name.c_str(), isVirtual);
+                    m_execCb(piid, context->m_name.c_str(), m_secureMode->GetSecureMode(), isVirtual);
                 }
                 break;
         }
@@ -1791,7 +1791,7 @@ void Bridge::AnnouncedTask::Run(Bridge *thiz)
     switch (thiz->GetSeenState(m_piid.c_str()))
     {
         case NOT_SEEN:
-            thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_isVirtual);
+            thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_secureMode, m_isVirtual);
             break;
         case SEEN_NATIVE:
             /* Do nothing */
@@ -1804,7 +1804,7 @@ void Bridge::AnnouncedTask::Run(Bridge *thiz)
             else
             {
                 thiz->DestroyPiid(m_piid.c_str());
-                thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_isVirtual);
+                thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_secureMode, m_isVirtual);
             }
             break;
     }

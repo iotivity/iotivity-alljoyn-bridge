@@ -209,10 +209,10 @@ static OCStackApplicationResult DiscoverResourceDirectoryCB(void *ctx, OCDoHandl
     }
 }
 
-static void ExecCB(const char *uuid, const char *sender, bool isVirtual)
+static void ExecCB(const char *uuid, const char *sender, bool secureMode, bool isVirtual)
 {
     printf("exec --ps %s --uuid %s --sender %s --rd %s --secureMode %s %s\n", gPSPrefix, uuid,
-            sender, OCGetServerInstanceIDString(), sSecureMode ? "true" : "false",
+            sender, OCGetServerInstanceIDString(), secureMode ? "true" : "false",
             isVirtual ? "--virtual" : "");
     fflush(stdout);
 }
