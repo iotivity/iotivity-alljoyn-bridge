@@ -61,5 +61,6 @@ OCStackResult RDPublish()
     cbData.cb = RDPublishCB;
     cbData.context = NULL;
     cbData.cd = NULL;
-    return OCRDPublish(NULL, gRD.c_str(), CT_DEFAULT, &hs[0], hs.size(), &cbData, OC_HIGH_QOS);
+    return OCRDPublish(NULL, gRD.c_str(), CT_DEFAULT, &hs[0], hs.size(), OIC_RD_PUBLISH_TTL,
+            &cbData, OC_HIGH_QOS);
 }
