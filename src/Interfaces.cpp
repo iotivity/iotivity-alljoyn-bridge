@@ -151,8 +151,7 @@ bool TranslateResourceType(const char *name)
 {
     const char *doNotTranslate[] = {
         "oic.d.bridge",
-        OC_RSRVD_RESOURCE_TYPE_COLLECTION, OC_RSRVD_RESOURCE_TYPE_DEVICE,
-        OC_RSRVD_RESOURCE_TYPE_INTROSPECTION, OC_RSRVD_RESOURCE_TYPE_PLATFORM,
+        OC_RSRVD_RESOURCE_TYPE_COLLECTION, OC_RSRVD_RESOURCE_TYPE_INTROSPECTION,
         OC_RSRVD_RESOURCE_TYPE_RD, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH, OC_RSRVD_RESOURCE_TYPE_RES,
         "oic.r.alljoynobject", "oic.r.acl", "oic.r.acl2", "oic.r.amacl", "oic.r.cred", "oic.r.crl",
         "oic.r.csr", "oic.r.doxm", "oic.r.pstat", "oic.r.roles", "oic.r.securemode"
@@ -165,7 +164,8 @@ bool TranslateResourceType(const char *name)
         }
     }
     const char *doDeepTranslation[] = {
-        OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION, OC_RSRVD_RESOURCE_TYPE_MAINTENANCE,
+        OC_RSRVD_RESOURCE_TYPE_DEVICE, OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION,
+        OC_RSRVD_RESOURCE_TYPE_MAINTENANCE, OC_RSRVD_RESOURCE_TYPE_PLATFORM,
         OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION
     };
     for (size_t i = 0; i < sizeof(doDeepTranslation) / sizeof(doDeepTranslation[0]); ++i)
