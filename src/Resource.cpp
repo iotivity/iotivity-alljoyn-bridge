@@ -64,7 +64,15 @@ static std::vector<OCDevAddr> GetDevAddrs(OCDevAddr origin, const char *di,
         }
         addr.flags = ep->family;
         addr.port = ep->port;
-        strncpy(addr.addr, ep->addr, MAX_ADDR_STR_SIZE);
+        memset(addr.addr, 0, MAX_ADDR_STR_SIZE);
+        for (size_t i = 0, j = 0; (i < MAX_ADDR_STR_SIZE) && ep->addr[i]; ++i, ++j)
+        {
+            addr.addr[j] = ep->addr[i];
+            if (addr.flags & OC_IP_USE_V6 && !strncmp(&ep->addr[i], "%25", 3))
+            {
+                i += 2;
+            }
+        }
         addr.ifindex = 0;
         addr.routeData[0] = '\0';
         strncpy(addr.remoteId, di, MAX_IDENTITY_SIZE);
