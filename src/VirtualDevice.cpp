@@ -53,12 +53,16 @@ VirtualDevice::~VirtualDevice()
 }
 
 void VirtualDevice::SetProperties(ajn::AboutObjectDescription *objectDescription,
-        ajn::AboutData *aboutData)
+        ajn::AboutData *aboutData, bool isSecure)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_aboutData = *aboutData;
     qcc::String peerGuid;
-    m_bus->GetPeerGUID(m_name.c_str(), peerGuid);
+    if (isSecure)
+    {
+        /* Only use peer GUID when connection is secure */
+        m_bus->GetPeerGUID(m_name.c_str(), peerGuid);
+    }
     SetDeviceProperties(m_bus, objectDescription, aboutData,
             peerGuid.empty() ? NULL : peerGuid.c_str());
     SetPlatformProperties(aboutData);
