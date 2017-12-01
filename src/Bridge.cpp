@@ -585,7 +585,7 @@ public:
             const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
         : m_bridge(bridge), m_device(device), m_name(name), m_port(port),
           m_objectDescriptionArg(objectDescriptionArg), m_aboutData(aboutDataArg), m_sessionId(0),
-          m_aboutObj(NULL) { }
+          m_isSecure(false), m_aboutObj(NULL) { }
     ~AnnouncedContext() { delete m_aboutObj; }
     Bridge *m_bridge;
     ajn::BusAttachment *m_bus;
@@ -597,6 +597,7 @@ public:
     std::vector<std::string> m_langs;
     std::vector<std::string>::iterator m_lang;
     ajn::SessionId m_sessionId;
+    bool m_isSecure;
     ajn::ProxyBusObject *m_aboutObj;
 };
 
@@ -694,6 +695,7 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
 
     std::lock_guard<std::mutex> lock(m_mutex);
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
+    context->m_isSecure = (status == ER_OK);
 
     if (m_secureMode->GetSecureMode() && (status != ER_OK))
     {
@@ -711,7 +713,11 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
     if (!m_sender)
     {
         qcc::String peerGuid;
-        m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
+        /* Only use peer GUID when connection is secure */
+        if (context->m_isSecure)
+        {
+            m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
+        }
         char piid[UUID_STRING_SIZE];
         GetProtocolIndependentId(piid, &context->m_aboutData,
                 peerGuid.empty() ? NULL : peerGuid.c_str());
@@ -866,7 +872,8 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             }
 
             ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
-            context->m_device->SetProperties(&objectDescription, &context->m_aboutData);
+            context->m_device->SetProperties(&objectDescription, &context->m_aboutData,
+                    context->m_isSecure);
 
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];

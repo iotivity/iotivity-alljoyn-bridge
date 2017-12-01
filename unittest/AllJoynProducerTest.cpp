@@ -1438,7 +1438,7 @@ TEST_F(AllJoynProducer, OCFDeviceProperties)
     EXPECT_EQ(ER_OK, aboutData.SetField(vendorField, vendorArg));
 
     VirtualDevice *device = new VirtualDevice(m_bus, m_bus->GetUniqueName().c_str(), 0);
-    device->SetProperties(&objectDescription, &aboutData);
+    device->SetProperties(&objectDescription, &aboutData, false);
 
     /* Get /oic/d */
     DiscoverContext *context = DiscoverVirtualResource("/oic/d");
@@ -1744,7 +1744,7 @@ TEST_F(AllJoynProducer, OCFPlatformProperties)
     EXPECT_EQ(ER_OK, aboutData.SetDeviceId(properties.vid));
 
     VirtualDevice *device = new VirtualDevice(m_bus, m_bus->GetUniqueName().c_str(), 0);
-    device->SetProperties(NULL, &aboutData);
+    device->SetProperties(NULL, &aboutData, false);
 
     /* Get /oic/p */
     DiscoverContext *context = DiscoverVirtualResource("/oic/p");
