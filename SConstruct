@@ -154,11 +154,11 @@ iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
 
 if env['TARGET_OS'] == 'windows':
     if env['MSVC_UWP_APP'] == '1':
-        iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/uwp/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/include/c_common')
+        iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/uwp/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common')
     else:
-        iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/win32/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/include/c_common')
+        iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/win32/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common')
 else:
-    iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/include/c_common')
+    iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common')
 
 
 env['CPPPATH'] = ['${IOTIVITY_BASE}/extlibs']
