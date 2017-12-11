@@ -726,6 +726,7 @@ INSTANTIATE_TEST_CASE_P(AllJoynInterfaceName, ShallBeConvertedToATypeAsFollows, 
             /* From spec */
             "example.Widget", "example.my_widget", "example.My_Widget", "xn_p1ai.example",
             "xn__90ae.example", "example.myName_1",
+            "com.example.M__w.m_W.x__9_1",
             /* Extras */
             "oneTwoThree", "One_Two_Three", "", "x", "example.foo_", "example.foo__"));
 

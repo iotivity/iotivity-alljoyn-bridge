@@ -22,34 +22,41 @@
 
 #include <sstream>
 
+static void DrainUnderscores(std::ostringstream& rt, size_t& n, const char* s)
+{
+    while (n) {
+        rt << s;
+        --n;
+    }
+}
+
 std::string ToOCName(std::string ajName)
 {
+    size_t n = 0;
     std::ostringstream rt;
     rt << 'x';
     rt << '.';
     const char *in = ajName.c_str();
     while (*in)
     {
-        if (isupper(*in))
+        if (*in == '_')
         {
+            ++n;
+        }
+        else if (isupper(*in))
+        {
+            DrainUnderscores(rt, n, "--");
             rt << '-';
             rt << (char)(*in - 'A' + 'a');
         }
-        else if (*in == '_' && isalpha(*(in + 1)))
-        {
-            rt << '-';
-            rt << '-';
-        }
-        else if (*in == '_')
-        {
-            rt << '-';
-        }
         else
         {
+            DrainUnderscores(rt, n, isalpha(*in) ? "--" : "-");
             rt << *in;
         }
         ++in;
     }
+    DrainUnderscores(rt, n, "-");
     return rt.str();
 }
 

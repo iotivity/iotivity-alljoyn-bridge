@@ -1504,7 +1504,8 @@ INSTANTIATE_TEST_CASE_P(OCFResourceTypeName, ShallBeConvertedToAnInterfaceAsFoll
         ::testing::Values(
             /* From spec */
             "x.example.-widget", "x.example.my--widget", "x.example.-my---widget",
-            "x.xn--p1ai.example", "x.xn--90ae.example", "x.example.my-name-1"));
+            "x.xn--p1ai.example", "x.xn--90ae.example", "x.example.my-name-1",
+            "x.com.example.-m----w.m---w.x--9-1"));
 
 TEST_F(OCFResource, AnOCFDeviceTypeIsMappedToAnAllJoynInterfaceWithNoMembers)
 {
