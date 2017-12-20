@@ -45,7 +45,7 @@ class VirtualBusAttachment : public ajn::BusAttachment
         bool IsVirtual() { return m_isVirtual; }
         void SetAboutData(OCRepPayload *payload);
         const char *GetDefaultLanguage();
-        QStatus RegisterBusObject(VirtualBusObject *busObject);
+        QStatus RegisterBusObject(VirtualBusObject *busObject, bool secure = false);
         VirtualBusObject *GetConfigBusObject();
         QStatus Announce();
         void Stop();

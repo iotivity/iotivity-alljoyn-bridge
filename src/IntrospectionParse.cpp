@@ -807,7 +807,7 @@ bool ParseIntrospectionPayload(Device *device, VirtualBusAttachment *bus,
                 ParsePath(childPath, ajNames, obj);
                 OCRepPayloadDestroy(childPath);
             }
-            status = bus->RegisterBusObject(obj);
+            status = bus->RegisterBusObject(obj, it->IsSecure());
             if (status != ER_OK)
             {
                 delete obj;

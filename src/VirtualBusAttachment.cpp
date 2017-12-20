@@ -129,12 +129,12 @@ const char *VirtualBusAttachment::GetDefaultLanguage()
     return m_aboutData.GetDefaultLanguage();
 }
 
-QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject)
+QStatus VirtualBusAttachment::RegisterBusObject(VirtualBusObject *busObject, bool secure)
 {
     LOG(LOG_INFO, "[%p] busObject=%p", this, busObject);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    QStatus status = ajn::BusAttachment::RegisterBusObject(*busObject);
+    QStatus status = ajn::BusAttachment::RegisterBusObject(*busObject, secure);
     if (status == ER_OK)
     {
         m_virtualBusObjects.push_back(busObject);
