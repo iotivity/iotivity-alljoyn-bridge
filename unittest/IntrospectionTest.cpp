@@ -67,17 +67,20 @@ TEST_F(Introspection, TheTranslatorShallPreserveAsMuchOfTheOriginalInformationAs
 static void VerifyMinimumAndMaximum(OCRepPayload *properties, const char *propertyName,
         int64_t minimum, int64_t maximum)
 {
-    OCRepPayload *property;
-    std::string name = std::string("x.org.iotivity.-interface.") + propertyName;
+    OCRepPayload *property = NULL;
+    std::string name = std::string("x.org.iotivity.-interface.false.") + propertyName;
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, name.c_str(), &property));
-    char *s;
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("integer", s);
-    int64_t min, max;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(property, "minimum", &min));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(property, "maximum", &max));
-    EXPECT_EQ(minimum, min);
-    EXPECT_EQ(maximum, max);
+    if (property)
+    {
+        char *s;
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("integer", s);
+        int64_t min, max;
+        EXPECT_TRUE(OCRepPayloadGetPropInt(property, "minimum", &min));
+        EXPECT_TRUE(OCRepPayloadGetPropInt(property, "maximum", &max));
+        EXPECT_EQ(minimum, min);
+        EXPECT_EQ(maximum, max);
+    }
 }
 
 TEST_F(Introspection, NumericTypes)
@@ -208,27 +211,36 @@ TEST_F(Introspection, NumericTypes)
     VerifyMinimumAndMaximum(properties, "int32", -2147483648, 2147483647);
 
     VerifyMinimumAndMaximum(properties, "uint64small", 0, 9007199254740992);
-    OCRepPayload *property;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.uint64large",
-            &property));
     char *s;
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
-    EXPECT_STREQ("^0([1-9][0-9]{0,19})$", s);
+    OCRepPayload *property = NULL;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.uint64large",
+            &property));
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
+        EXPECT_STREQ("^0([1-9][0-9]{0,19})$", s);
+    }
 
     VerifyMinimumAndMaximum(properties, "int64small", -9007199254740992, 9007199254740992);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.int64large",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.int64large",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
-    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18})$", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "pattern", &s));
+        EXPECT_STREQ("^0(-?[1-9][0-9]{0,18})$", s);
+    }
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.double",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.double",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("number", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("number", s);
+    }
 }
 
 TEST_F(Introspection, TextStringsAndByteArrays)
@@ -297,13 +309,13 @@ TEST_F(Introspection, TextStringsAndByteArrays)
     EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
 
     OCRepPayload *property;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.string",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.string",
             &property));
     char *s;
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfByte",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.arrayOfByte",
             &property));
     EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
     EXPECT_STREQ("string", s);
@@ -336,17 +348,23 @@ TEST_F(Introspection, ObjectPathsAndSignatures)
     OCRepPayload *properties;
     EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
 
-    OCRepPayload *property;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.objectPath",
-            &property));
     char *s;
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.signature",
+    OCRepPayload *property = NULL;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.objectPath",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.signature",
+            &property));
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
 }
 
 TEST_F(Introspection, Structures)
@@ -388,21 +406,24 @@ TEST_F(Introspection, Structures)
 static void VerifyArrayMinimumAndMaximum(OCRepPayload *properties, const char *propertyName,
         int64_t minimum, int64_t maximum)
 {
-    OCRepPayload *property;
-    std::string name = std::string("x.org.iotivity.-interface.") + propertyName;
+    OCRepPayload *property = NULL;
+    std::string name = std::string("x.org.iotivity.-interface.false.") + propertyName;
     EXPECT_TRUE(OCRepPayloadGetPropObject(properties, name.c_str(), &property));
     char *s = NULL;
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    OCRepPayload *items = NULL;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("integer", s);
-    int64_t min, max;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(items, "minimum", &min));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(items, "maximum", &max));
-    EXPECT_EQ(minimum, min);
-    EXPECT_EQ(maximum, max);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        OCRepPayload *items = NULL;
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("integer", s);
+        int64_t min, max;
+        EXPECT_TRUE(OCRepPayloadGetPropInt(items, "minimum", &min));
+        EXPECT_TRUE(OCRepPayloadGetPropInt(items, "maximum", &max));
+        EXPECT_EQ(minimum, min);
+        EXPECT_EQ(maximum, max);
+    }
 }
 
 TEST_F(Introspection, Arrays)
@@ -572,110 +593,143 @@ TEST_F(Introspection, Arrays)
     size_t dim[MAX_REP_ARRAY_DEPTH];
     char **typesArr;
     OCRepPayload **itemsArr;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.byte",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.byte",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "media", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "binaryEncoding", &s));
-    EXPECT_STREQ("base64", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "media", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "binaryEncoding", &s));
+        EXPECT_STREQ("base64", s);
+    }
     VerifyArrayMinimumAndMaximum(properties, "uint16", 0, 65535);
     VerifyArrayMinimumAndMaximum(properties, "int16", -32768, 32767);
     VerifyArrayMinimumAndMaximum(properties, "uint32", 0, 4294967295);
     VerifyArrayMinimumAndMaximum(properties, "int32", -2147483648, 2147483647);
     VerifyArrayMinimumAndMaximum(properties, "uint64small", 0, 9007199254740992);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.uint64large",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.uint64large",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
-    EXPECT_STREQ("^0([1-9][0-9]{0,19})$", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
+        EXPECT_STREQ("^0([1-9][0-9]{0,19})$", s);
+    }
     VerifyArrayMinimumAndMaximum(properties, "int64small", -9007199254740992, 9007199254740992);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.int64large",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.int64large",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
-    EXPECT_STREQ("^0(-?[1-9][0-9]{0,18})$", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.double",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "pattern", &s));
+        EXPECT_STREQ("^0(-?[1-9][0-9]{0,18})$", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.double",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("number", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.string",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("number", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.string",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.variant",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.variant",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetStringArray(items, "type", &typesArr, dim));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.objectpath",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetStringArray(items, "type", &typesArr, dim));
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.objectpath",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.signature",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.signature",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.struct0",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.struct0",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(items, "items", &itemsArr, dim));
-    EXPECT_EQ(2u, calcDimTotal(dim));
-    EXPECT_TRUE(OCRepPayloadGetPropString(itemsArr[0], "type", &s));
-    EXPECT_STREQ("integer", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(itemsArr[1], "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(items, "minItems", &i));
-    EXPECT_EQ(2, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(items, "maxItems", &i));
-    EXPECT_EQ(2, i);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.struct1",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObjectArray(items, "items", &itemsArr, dim));
+        EXPECT_EQ(2u, calcDimTotal(dim));
+        EXPECT_TRUE(OCRepPayloadGetPropString(itemsArr[0], "type", &s));
+        EXPECT_STREQ("integer", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(itemsArr[1], "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropInt(items, "minItems", &i));
+        EXPECT_EQ(2, i);
+        EXPECT_TRUE(OCRepPayloadGetPropInt(items, "maxItems", &i));
+        EXPECT_EQ(2, i);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.struct1",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "$ref", &s));
-    EXPECT_STREQ("#/definitions/StructName", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "StructName", &definition));
-    EXPECT_TRUE(OCRepPayloadGetPropString(definition, "type", &s));
-    EXPECT_STREQ("object", s);
-    OCRepPayload *ps;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &ps));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "int", &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("integer", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "string", &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.dict",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "$ref", &s));
+        EXPECT_STREQ("#/definitions/StructName", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "StructName", &definition));
+        EXPECT_TRUE(OCRepPayloadGetPropString(definition, "type", &s));
+        EXPECT_STREQ("object", s);
+        OCRepPayload *ps;
+        EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &ps));
+        EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "int", &property));
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("integer", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "string", &property));
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.dict",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("object", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("object", s);
+    }
 }
 
 TEST_F(Introspection, Examples)
@@ -776,94 +830,117 @@ TEST_F(Introspection, Examples)
     OCRepPayload *properties;
     EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
 
-    OCRepPayload *property;
+    OCRepPayload *property = NULL;
     char *s;
     double d;
     char **ss;
     size_t dim[MAX_REP_ARRAY_DEPTH];
     OCRepPayload *items;
 
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.uint32",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.uint32",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("integer", s);
-    EXPECT_TRUE(OCRepPayloadGetPropDouble(property, "minimum", &d));
-    EXPECT_EQ(0, d);
-    EXPECT_TRUE(OCRepPayloadGetPropDouble(property, "maximum", &d));
-    EXPECT_EQ(4294967295, d);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.int64",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("integer", s);
+        EXPECT_TRUE(OCRepPayloadGetPropDouble(property, "minimum", &d));
+        EXPECT_EQ(0, d);
+        EXPECT_TRUE(OCRepPayloadGetPropDouble(property, "maximum", &d));
+        EXPECT_EQ(4294967295, d);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.int64",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "format", &s));
-    EXPECT_STREQ("int64", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.uint64",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "format", &s));
+        EXPECT_STREQ("int64", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.uint64",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "format", &s));
-    EXPECT_STREQ("uint64", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.string",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "format", &s));
+        EXPECT_STREQ("uint64", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.string",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.objectPath",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.objectPath",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.signature",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.signature",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfByte",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.arrayOfByte",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "media", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "binaryEncoding", &s));
-    EXPECT_STREQ("base64", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.variant",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "media", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "binaryEncoding", &s));
+        EXPECT_STREQ("base64", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.variant",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetStringArray(property, "type", &ss, dim));
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfInt32",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetStringArray(property, "type", &ss, dim));
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.arrayOfInt32",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("integer", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.arrayOfInt64",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("integer", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.arrayOfInt64",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("array", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
-    EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(items, "format", &s));
-    EXPECT_STREQ("int64", s);
-
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.struct",
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("array", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(property, "items", &items));
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "type", &s));
+        EXPECT_STREQ("string", s);
+        EXPECT_TRUE(OCRepPayloadGetPropString(items, "format", &s));
+        EXPECT_STREQ("int64", s);
+    }
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.struct",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "$ref", &s));
-    EXPECT_STREQ("#/definitions/Point", s);
-    OCRepPayload *ps;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "Point", &definition));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &ps));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "x", &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("integer", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "y", &property));
-    EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
-    EXPECT_STREQ("integer", s);
+    if (property)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "$ref", &s));
+        EXPECT_STREQ("#/definitions/Point", s);
+        OCRepPayload *ps;
+        EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "Point", &definition));
+        EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &ps));
+        EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "x", &property));
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("integer", s);
+        EXPECT_TRUE(OCRepPayloadGetPropObject(ps, "y", &property));
+        EXPECT_TRUE(OCRepPayloadGetPropString(property, "type", &s));
+        EXPECT_STREQ("integer", s);
+    }
 }
 
 TEST_F(Introspection, SecureModeResource)
@@ -967,15 +1044,15 @@ TEST_F(Introspection, PropertyNamesAreEscaped)
     OCRepPayload *properties;
     EXPECT_TRUE(OCRepPayloadGetPropObject(definition, "properties", &properties));
     OCRepPayload *property;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.dict",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.dict",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.oneTwo",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.oneTwo",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.one.two",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.one.two",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.one-two",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.one-two",
             &property));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.struct",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(properties, "x.org.iotivity.-interface.false.struct",
             &property));
 
     EXPECT_TRUE(OCRepPayloadGetPropObject(definitions, "StructName",

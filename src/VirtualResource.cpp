@@ -463,7 +463,7 @@ static bool ToFilteredOCPayload(OCRepPayload *payload, const std::string ajSoftw
             {
                 property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
             }
-            qcc::String propName = ToOCPropName(GetPropName(iface, key));
+            qcc::String propName = ToOCPropName(GetPropName(iface, emitsChanged + "." + key));
             success = ToOCPayload(payload, propName.c_str(),
                     GetPropType(property, entry->v_dictEntry.val->v_variant.val),
                     entry->v_dictEntry.val->v_variant.val, signature.c_str());
@@ -1050,21 +1050,36 @@ QStatus VirtualResource::Set(SetContext *context)
     const ajn::InterfaceDescription *iface = NULL;
     const ajn::InterfaceDescription::Property *property = NULL;
     std::string valueName = context->m_value->name;
-    std::string propName;
     for (size_t pos = valueName.rfind('.'); pos != std::string::npos;
             pos = valueName.rfind('.', pos - 1))
     {
         std::string ifaceName = ToAJName(valueName.substr(0, pos));
         iface = GetInterface(ifaceName.c_str());
-        if (iface)
+        if (!iface)
         {
-            propName = ToAJPropName(valueName.substr(pos + 1));
-            property = iface->GetProperty(propName.c_str());
-            if (property)
-            {
-                break;
-            }
+            continue;
         }
+        size_t dot = valueName.find('.', pos + 1);
+        if (dot == std::string::npos)
+        {
+            continue;
+        }
+        std::string prefix = valueName.substr(pos + 1, dot - (pos + 1));
+        std::string propName = valueName.substr(dot + 1);
+        propName = ToAJPropName(propName);
+        property = iface->GetProperty(propName.c_str());
+        if (!property)
+        {
+            continue;
+        }
+        qcc::String emitsChangedValue = (property->name == "Version") ? "const" : "false";
+        property->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, emitsChangedValue);
+        if (emitsChangedValue != prefix)
+        {
+            property = NULL;
+            continue;
+        }
+        break;
     }
     if (!iface)
     {
@@ -1081,7 +1096,7 @@ QStatus VirtualResource::Set(SetContext *context)
     size_t numArgs = 3;
     ajn::MsgArg args[3];
     args[0].Set("s", iface->GetName());
-    args[1].Set("s", propName.c_str());
+    args[1].Set("s", property->name.c_str());
     qcc::String signature = property->signature;
     if (context->m_ajSoftwareVersion >= "v16.10.00")
     {

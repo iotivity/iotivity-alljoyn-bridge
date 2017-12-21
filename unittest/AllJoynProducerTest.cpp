@@ -739,7 +739,7 @@ TEST(AllJoynInterfaceNameShallBeConvertedToATypeAsFollows, BoundsCheck)
     EXPECT_STREQ("example.foo__", ToAJName("x.example.foo---").c_str());
 }
 
-TEST_F(AllJoynProducer, TheNameOfEachPropertyShallBePrefixedWithTheInterfaceName)
+TEST_F(AllJoynProducer, TheNameOfEachPropertyShallBePrefixedWithTheResourceType)
 {
     const char *xml =
             "<interface name='org.iotivity.Interface'>"
@@ -776,8 +776,8 @@ TEST_F(AllJoynProducer, TheNameOfEachPropertyShallBePrefixedWithTheInterfaceName
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
     int64_t i;
     bool b;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Const", &i));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.False", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.const.Const", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.false.False", &i));
     EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-methodvalidity", &b));
     // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
     EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-methodInArg"));
@@ -791,8 +791,8 @@ TEST_F(AllJoynProducer, TheNameOfEachPropertyShallBePrefixedWithTheInterfaceName
     EXPECT_TRUE(getCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     payload = (OCRepPayload *) getCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Invalidates", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.true.True", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.invalidates.Invalidates", &i));
     EXPECT_TRUE(OCRepPayloadGetPropBool(payload, "x.org.iotivity.-interface.-signalvalidity", &b));
     // TODO value is OCREP_PROP_NULL for below - need dummy value instead so that introspection data is correct
     EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.-signalArgA"));
@@ -915,7 +915,7 @@ TEST_F(AllJoynProducer, VersionPropertyIsAlwaysConsideredConst)
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
     int64_t i;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Version", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.const.Version", &i));
 
     delete context;
 }
@@ -2227,27 +2227,27 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_TRUE(getCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, getCB.m_response->payload->type);
     payload = (OCRepPayload *) getCB.m_response->payload;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.I64S", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.false.I64S", &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.I64L", &s));
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.false.I64L", &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.U64S", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.false.U64S", &i));
     EXPECT_EQ(1, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.U64L", &s));
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.false.U64L", &s));
     EXPECT_STREQ("1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.ObjPath",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.false.ObjPath",
             &s));
     EXPECT_STREQ("/Test", s);
-    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.Sig",
+    EXPECT_TRUE(OCRepPayloadGetPropString(payload, "x.org.iotivity.-interface.false.Sig",
             &s));
     EXPECT_STREQ("sig", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.StructName",
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.false.StructName",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "int", &i));
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(obj, "string", &s));
     EXPECT_STREQ("string", s);
-    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.ArrOfStructName",
+    EXPECT_TRUE(OCRepPayloadGetPropObjectArray(payload, "x.org.iotivity.-interface.false.ArrOfStructName",
             &objArr, dim));
     EXPECT_EQ(2u, calcDimTotal(dim));
     EXPECT_TRUE(OCRepPayloadGetPropInt(objArr[0], "int", &i));
@@ -2258,17 +2258,17 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     EXPECT_EQ(1, i);
     EXPECT_TRUE(OCRepPayloadGetPropString(objArr[1], "string", &s));
     EXPECT_STREQ("string1", s);
-    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.ArrOfU8",
+    EXPECT_TRUE(OCRepPayloadGetPropByteString(payload, "x.org.iotivity.-interface.false.ArrOfU8",
             &bs));
     EXPECT_EQ(5u, bs.len);
     EXPECT_EQ(0, memcmp(ay, bs.bytes, bs.len));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Variant",
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.false.Variant",
             &i));
     EXPECT_EQ(0, i);
     /* Empty arrays are decoded as OCREP_PROP_NULL (see IOT-2457) */
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrOfI32"));
-    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.ArrOfI64"));
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.Struct",
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.false.ArrOfI32"));
+    EXPECT_TRUE(OCRepPayloadIsNull(payload, "x.org.iotivity.-interface.false.ArrOfI64"));
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.false.Struct",
             &obj));
     EXPECT_TRUE(OCRepPayloadGetPropInt(obj, "x", &i));
     EXPECT_EQ(0, i);
@@ -2277,18 +2277,18 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
 
     /* Set */
     payload = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.I64S", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.I64L", "1"));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.U64S", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.U64L", "1"));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.ObjPath",
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.false.I64S", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.false.I64L", "1"));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.false.U64S", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.false.U64L", "1"));
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.false.ObjPath",
             "/Test"));
-    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.Sig",
+    EXPECT_TRUE(OCRepPayloadSetPropString(payload, "x.org.iotivity.-interface.false.Sig",
             "sig"));
     obj = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "int", 1));
     EXPECT_TRUE(OCRepPayloadSetPropString(obj, "string", "string"));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.StructName", obj));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.false.StructName", obj));
     dim[0] = 2;
     dim[1] = dim[2] = 0;
     objArr = (OCRepPayload **) OICCalloc(2, sizeof(OCRepPayload*));
@@ -2298,20 +2298,20 @@ TEST_F(AllJoynProducer, TranslationWithAidOfIntrospection)
     objArr[1] = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(objArr[1], "int", 1));
     EXPECT_TRUE(OCRepPayloadSetPropString(objArr[1], "string", "string1"));
-    EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "x.org.iotivity.-interface.ArrOfStructName",
+    EXPECT_TRUE(OCRepPayloadSetPropObjectArray(payload, "x.org.iotivity.-interface.false.ArrOfStructName",
             (const OCRepPayload **) objArr, dim));
-    EXPECT_TRUE(OCRepPayloadSetPropByteString(payload, "x.org.iotivity.-interface.ArrOfU8",
+    EXPECT_TRUE(OCRepPayloadSetPropByteString(payload, "x.org.iotivity.-interface.false.ArrOfU8",
             bs));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.Variant", 0));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.false.Variant", 0));
     size_t emptyDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    EXPECT_TRUE(OCRepPayloadSetIntArrayAsOwner(payload, "x.org.iotivity.-interface.ArrOfI32",
+    EXPECT_TRUE(OCRepPayloadSetIntArrayAsOwner(payload, "x.org.iotivity.-interface.false.ArrOfI32",
             NULL, emptyDim));
-    EXPECT_TRUE(OCRepPayloadSetStringArrayAsOwner(payload, "x.org.iotivity.-interface.ArrOfI64",
+    EXPECT_TRUE(OCRepPayloadSetStringArrayAsOwner(payload, "x.org.iotivity.-interface.false.ArrOfI64",
             NULL, emptyDim));
     obj = OCRepPayloadCreate();
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "x", 0));
     EXPECT_TRUE(OCRepPayloadSetPropInt(obj, "y", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.Struct",
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.false.Struct",
             obj));
 
     ResourceCallback setCB;
@@ -2512,10 +2512,10 @@ TEST_P(MultiValueRt, Get)
     OCRepPayload *payload = (OCRepPayload *) getCB.m_response->payload;
 
     int64_t i;
-    EXPECT_EQ(value.m_version, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Version", &i));
-    EXPECT_EQ(value.m_const, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Const", &i));
-    EXPECT_EQ(value.m_false, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.False", &i));
-    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
+    EXPECT_EQ(value.m_version, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.const.Version", &i));
+    EXPECT_EQ(value.m_const, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.const.Const", &i));
+    EXPECT_EQ(value.m_false, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.false.False", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.false.True", &i));
 
     delete context;
 }
@@ -2537,19 +2537,19 @@ TEST_P(MultiValueRt, Post)
     OCRepPayload *request = OCRepPayloadCreate();
     if (value.m_version)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.Version", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.const.Version", 1));
     }
     if (value.m_const)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.Const", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.const.Const", 1));
     }
     if (value.m_false)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.False", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.false.False", 1));
     }
     if (value.m_true)
     {
-        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.True", 1));
+        EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.false.True", 1));
     }
 
     ResourceCallback postCB;
@@ -2630,8 +2630,8 @@ TEST_P(MultiValueRtObserve, Observe)
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
     OCRepPayload *payload = (OCRepPayload *) observeCB.m_response->payload;
     int64_t i;
-    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
-    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Invalidates", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.true.True", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.invalidates.Invalidates", &i));
 
     observeCB.Reset();
     m_obj->PropertiesChanged();
@@ -2641,8 +2641,8 @@ TEST_P(MultiValueRtObserve, Observe)
     EXPECT_TRUE(observeCB.m_response->payload != NULL);
     EXPECT_EQ(PAYLOAD_TYPE_REPRESENTATION, observeCB.m_response->payload->type);
     payload = (OCRepPayload *) observeCB.m_response->payload;
-    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.True", &i));
-    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.Invalidates", &i));
+    EXPECT_EQ(value.m_true, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.true.True", &i));
+    EXPECT_EQ(value.m_invalidates, OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.invalidates.Invalidates", &i));
 
     delete context;
 }
@@ -2749,8 +2749,8 @@ TEST_F(AllJoynProducer, MultiValueRtPostSimultaneouslyToMultipleResourceTypes)
     DiscoverContext *context = CreateAndDiscoverVirtualResource(xml);
 
     OCRepPayload *request = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.True", 1));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.Invalidates", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.true.True", 1));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(request, "x.org.iotivity.-interface.invalidates.Invalidates", 1));
 
     ResourceCallback postCB;
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, "/Test",
@@ -2766,25 +2766,31 @@ TEST_F(AllJoynProducer, MultiValueRtPostSimultaneouslyToMultipleResourceTypes)
 static void VerifyPropertyNamesAreEscaped(OCRepPayload *payload)
 {
     int64_t i;
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.oneTwo", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.true.oneTwo", &i));
     EXPECT_EQ(12, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.one.two", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.true.one.two", &i));
     EXPECT_EQ(12, i);
-    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.one-two", &i));
+    EXPECT_TRUE(OCRepPayloadGetPropInt(payload, "x.org.iotivity.-interface.true.one-two", &i));
     EXPECT_EQ(12, i);
-    OCRepPayload *dict;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.dict", &dict));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
-    EXPECT_EQ(12, i);
-    char *s;
-    EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
-    EXPECT_STREQ("one-two", s);
-    OCRepPayload *_struct;
-    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.struct", &_struct));
-    EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
-    EXPECT_EQ(12, i);
-    EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));
-    EXPECT_STREQ("one-two", s);
+    char *s = NULL;
+    OCRepPayload *dict = NULL;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.true.dict", &dict));
+    if (dict)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropInt(dict, "one.two", &i));
+        EXPECT_EQ(12, i);
+        EXPECT_TRUE(OCRepPayloadGetPropString(dict, "one-two", &s));
+        EXPECT_STREQ("one-two", s);
+    }
+    OCRepPayload *_struct = NULL;
+    EXPECT_TRUE(OCRepPayloadGetPropObject(payload, "x.org.iotivity.-interface.true.struct", &_struct));
+    if (_struct)
+    {
+        EXPECT_TRUE(OCRepPayloadGetPropInt(_struct, "one.two", &i));
+        EXPECT_EQ(12, i);
+        EXPECT_TRUE(OCRepPayloadGetPropString(_struct, "one-two", &s));
+        EXPECT_STREQ("one-two", s);
+    }
 }
 
 TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
@@ -2922,11 +2928,11 @@ TEST_F(AllJoynProducer, ObjectPathsAndPropertyNamesAreEscaped)
     EXPECT_TRUE(OCRepPayloadSetPropInt(_struct, "one.two", 21));
     EXPECT_TRUE(OCRepPayloadSetPropString(_struct, "one-two", "two-one"));
     payload = OCRepPayloadCreate();
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.oneTwo", 21));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.one.two", 21));
-    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.one-two", 21));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.dict", dict));
-    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.struct", _struct));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.true.oneTwo", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.true.one.two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropInt(payload, "x.org.iotivity.-interface.true.one-two", 21));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.true.dict", dict));
+    EXPECT_TRUE(OCRepPayloadSetPropObject(payload, "x.org.iotivity.-interface.true.struct", _struct));
     uri = "/abc.def-ghi~jkl_mno/3?rt=x.org.iotivity.-interface.true";
     EXPECT_EQ(OC_STACK_OK, OCDoResource(NULL, OC_REST_POST, uri.c_str(),
             &context->m_resource->m_addrs[0], (OCPayload *) payload, CT_DEFAULT, OC_HIGH_QOS,

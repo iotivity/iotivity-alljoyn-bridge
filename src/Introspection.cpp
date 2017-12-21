@@ -809,10 +809,10 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
                 std::string rt = GetResourceTypeName(ifaces[i], *emitsChanged);
                 for (size_t j = 0; j < numProps; ++j)
                 {
-                    qcc::String value = (props[j]->name == "Version") ? "const" : "false";
+                    qcc::String emitsChangedValue = (props[j]->name == "Version") ? "const" : "false";
                     props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
-                            value);
-                    if (value != *emitsChanged)
+                            emitsChangedValue);
+                    if (emitsChangedValue != *emitsChanged)
                     {
                         continue;
                     }
@@ -832,7 +832,8 @@ static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
                         VERIFY_CBOR(err);
                         hasProps = true;
                     }
-                    std::string propName = GetPropName(ifaces[i], ToOCPropName(props[j]->name));
+                    std::string propName = GetPropName(ifaces[i], emitsChangedValue + "." +
+                            ToOCPropName(props[j]->name));
                     /*
                      * Annotations prior to v16.10.00 are not guaranteed to
                      * appear in the order they were specified, so are
