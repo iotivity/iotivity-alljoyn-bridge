@@ -26,24 +26,26 @@
 class VirtualConfigBusObject : public VirtualBusObject
 {
     public:
-        VirtualConfigBusObject(ajn::BusAttachment *bus, const std::vector<OCDevAddr> &devAddrs);
+        VirtualConfigBusObject(VirtualBusAttachment *bus, Resource &resource);
         virtual ~VirtualConfigBusObject();
 
     private:
         const ajn::InterfaceDescription *m_iface;
 
-        virtual QStatus Get(const char *ifaceName, const char *propName, ajn::MsgArg &val);
+        virtual void GetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
+        virtual void SetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
+        virtual void GetAllProps(const ajn::InterfaceDescription::Member *member,
+                ajn::Message &msg);
         void FactoryReset(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
         void GetConfigurations(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
-        void ResetConfigurations(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
         void Restart(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
-        void SetPasscode(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
         void UpdateConfigurations(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
+        void NotImplemented(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
 
-        void GetConfigurationsCB(ajn::Message &msg, OCRepPayload *payload);
-        void UpdateConfigurationsCB(ajn::Message &msg, OCRepPayload *payload);
-        void FactoryResetCB(ajn::Message &msg, OCRepPayload *payload);
-        void RestartCB(ajn::Message &msg, OCRepPayload *payload);
+        void GetConfigurationsCB(ajn::Message &msg, OCRepPayload *payload, void *context);
+        void UpdateConfigurationsCB(ajn::Message &msg, OCRepPayload *payload, void *context);
+        void FactoryResetCB(ajn::Message &msg, OCRepPayload *payload, void *context);
+        void RestartCB(ajn::Message &msg, OCRepPayload *payload, void *context);
 };
 
 #endif

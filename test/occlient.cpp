@@ -199,7 +199,7 @@ static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle,
             LogResponse(OC_REST_DISCOVER, response, OC_FORMAT_CBOR);
             break;
     }
-    if (response)
+    if (response && response->payload && (response->payload->type == PAYLOAD_TYPE_DISCOVERY))
     {
         OCDiscoveryPayload *payload = (OCDiscoveryPayload *) response->payload;
         while (payload)
@@ -364,6 +364,27 @@ int main(int, char **)
     }
     std::cout << "di=" << OCGetServerInstanceIDString() << std::endl;
 
+    if (OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME, "occlient") != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, OC_SPEC_VERSION) != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION, "ocf.res.1.1.0") != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME, "IoTivity") != OC_STACK_OK)
+    {
+        std::cerr << "OCSetPropertyValue error" << std::endl;
+        return EXIT_FAILURE;
+    }
+
     for (;;)
     {
         struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
@@ -401,6 +422,7 @@ int main(int, char **)
         {
             uint16_t optionID = CA_OPTION_ACCEPT;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR;
+            std::string uri = "/oic/res";
             std::string query;
             while (token != tokens.end())
             {
@@ -413,6 +435,10 @@ int main(int, char **)
                         format = COAP_MEDIATYPE_APPLICATION_CBOR;
                     }
                 }
+                else if (str[0] == '/')
+                {
+                    uri = str;
+                }
                 else
                 {
                     if (!query.empty())
@@ -422,7 +448,6 @@ int main(int, char **)
                     query += str;
                 }
             }
-            std::string uri = "/oic/res";
             if (!query.empty())
             {
                 uri += "?" + query;
@@ -443,7 +468,7 @@ int main(int, char **)
             uint16_t optionID = CA_OPTION_ACCEPT;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_CBOR;
             std::string uri;
-            OCDevAddr *devAddr;
+            OCDevAddr *devAddr = NULL;
             try
             {
                 size_t i = std::stoi(*token);

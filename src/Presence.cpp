@@ -21,6 +21,7 @@
 #include "Presence.h"
 
 #include "Plugin.h"
+#include "Log.h"
 
 AllJoynPresence::AllJoynPresence(ajn::BusAttachment *bus, const std::string &name)
     : Presence(name), m_bus(bus), m_lastTick(time(NULL)), m_tries(0), m_state(IDLE)

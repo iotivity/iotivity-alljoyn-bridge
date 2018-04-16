@@ -30,6 +30,8 @@ vars.Add(BoolVariable('VERBOSE', 'Show compilation', False))
 vars.Add(BoolVariable('COLOR', 'Enable color in build diagnostics, if supported by compiler', False))
 vars.Add(EnumVariable('SECURED', 'Build with DTLS', '1', allowed_values=('0', '1')))
 #vars.Add(EnumVariable('TEST', 'Run unit tests', '0', allowed_values=('0', '1')))
+vars.Add(EnumVariable('MSVC_VERSION', 'MSVC compiler version - Windows', default=None, allowed_values=('12.0', '14.0')))
+vars.Add(EnumVariable('MSVC_UWP_APP', 'Build a Universal Windows Platform (UWP) Application', default='0', allowed_values=('0', '1')))
 
 env = Environment(variables = vars);
 Help('''
@@ -61,6 +63,8 @@ env['CPPDEFINES'] = ['ROUTING_EP', 'RD_SERVER', 'RD_CLIENT']
 
 if env['TARGET_OS'] == 'linux':
 
+    env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
+
     # Set release/debug flags
     if env['BUILD_TYPE'] == 'release':
 	env.AppendUnique(CCFLAGS = ['-Os'])
@@ -71,7 +75,7 @@ if env['TARGET_OS'] == 'linux':
     env.AppendUnique(CPPDEFINES = ['WITH_POSIX', '__linux__', 'QCC_OS_GROUP_POSIX'])
     env.AppendUnique(CFLAGS = ['-std=gnu99'])
     env.AppendUnique(CXXFLAGS = ['-std=c++11'])
-    env.AppendUnique(CCFLAGS = ['-Werror', '-Wall', '-Wextra', '-Wno-ignored-qualifiers', '-fPIC'])
+    env.AppendUnique(CCFLAGS = ['-Werror', '-Wall', '-Wextra', '-Wno-ignored-qualifiers', '-Wno-maybe-uninitialized', '-Wno-pragmas', '-Wno-attributes', '-fPIC'])
 
     target_arch = env.get('TARGET_ARCH')
     if target_arch in ['x86']:
@@ -84,6 +88,11 @@ if env['TARGET_OS'] == 'linux':
     env.AppendUnique(LIBS = ['pthread'])
 
 elif env['TARGET_OS'] == 'windows':
+
+    if env['MSVC_UWP_APP'] == '1':
+        env.Replace(BUILD_DIR = 'out/${TARGET_OS}/uwp/${TARGET_ARCH}/${BUILD_TYPE}' )
+    else:
+        env.Replace(BUILD_DIR = 'out/${TARGET_OS}/win32/${TARGET_ARCH}/${BUILD_TYPE}' )
 
     # Set release/debug flags
     if env['BUILD_TYPE'] == 'release':
@@ -127,7 +136,7 @@ if env.get('COLOR') == True:
 alljoyn_inc_paths = ['${ALLJOYN_DIST}/cpp/inc']
 iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
                                '${IOTIVITY_BASE}/extlibs/cjson',
-	                       '${IOTIVITY_BASE}/resource/c_common/ocrandom/include',
+	                       '${IOTIVITY_BASE}/resource/c_common/ocrandom/include/experimental',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_malloc/include',
 	                       '${IOTIVITY_BASE}/resource/c_common/oic_string/include',
                                '${IOTIVITY_BASE}/resource/c_common',
@@ -137,9 +146,20 @@ iotivity_resource_inc_paths = ['${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src',
                                '${IOTIVITY_BASE}/resource/csdk/logger/include',
                                '${IOTIVITY_BASE}/resource/csdk/resource-directory/include',
                                '${IOTIVITY_BASE}/resource/csdk/security/include',
+                               '${IOTIVITY_BASE}/resource/csdk/security/provisioning/include',
+                               '${IOTIVITY_BASE}/resource/csdk/security/provisioning/include/internal',
                                '${IOTIVITY_BASE}/resource/csdk/stack/include',
                                '${IOTIVITY_BASE}/resource/include',
                                '${IOTIVITY_BASE}/resource/oc_logger/include']
+
+if env['TARGET_OS'] == 'windows':
+    if env['MSVC_UWP_APP'] == '1':
+        iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/uwp/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common')
+    else:
+        iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/win32/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common')
+else:
+    iotivity_resource_inc_paths.append('${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common')
+
 
 env['CPPPATH'] = ['${IOTIVITY_BASE}/extlibs']
 env.AppendUnique(CPPPATH = alljoyn_inc_paths)
@@ -147,13 +167,20 @@ env.AppendUnique(CPPPATH = iotivity_resource_inc_paths)
 
 env.AppendUnique(CPPPATH = ['#/include/'])
 
-env.Replace(BUILD_DIR = 'out/${TARGET_OS}/${TARGET_ARCH}/${BUILD_TYPE}' )
-
 # libraries
 env['LIBPATH'] = ['${ALLJOYN_DIST}/cpp/lib',
-                  '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}']
+                  '${IOTIVITY_BASE}/extlibs/cjson']
 if env['TARGET_OS'] == 'windows':
-    env.AppendUnique(LIBPATH = '${IOTIVITY_BASE}/extlibs/sqlite3')
+    env.AppendUnique(LIBPATH = ['${IOTIVITY_BASE}/extlibs/sqlite3',
+                                '${IOTIVITY_BASE}/extlibs/mbedtls'])
+    if env['MSVC_UWP_APP'] == '1':
+        env.AppendUnique(LIBPATH = ['${IOTIVITY_BASE}/out/${TARGET_OS}/uwp/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}',
+                                    '${IOTIVITY_BASE}/out/${TARGET_OS}/uwp/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common/windows'])
+    else:
+        env.AppendUnique(LIBPATH = ['${IOTIVITY_BASE}/out/${TARGET_OS}/win32/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}',
+                                    '${IOTIVITY_BASE}/out/${TARGET_OS}/win32/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}/resource/c_common/windows'])
+else:
+    env.AppendUnique(LIBPATH = '${IOTIVITY_BASE}/out/${TARGET_OS}/${TARGET_ARCH}/${IOTIVITY_LIB_TYPE}')
 
 alljoynplugin_lib = env.SConscript('src/SConscript', variant_dir = env['BUILD_DIR'] + '/obj/src', exports= 'env', duplicate=0)
 env.Install('${BUILD_DIR}/libs', alljoynplugin_lib)

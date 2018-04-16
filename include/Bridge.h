@@ -36,13 +36,16 @@
 class AllJoynSecurity;
 class OCSecurity;
 class Presence;
+class SecureModeResource;
 class VirtualBusAttachment;
 class VirtualBusObject;
 class VirtualDevice;
 class VirtualResource;
 
 class Bridge : private ajn::AboutListener
+    , private ajn::ApplicationStateListener
     , private ajn::BusListener
+    , private ajn::BusAttachment::AddMatchAsyncCB
     , private ajn::BusAttachment::JoinSessionAsyncCB
     , private ajn::BusAttachment::LeaveSessionAsyncCB
     , private ajn::MessageReceiver
@@ -58,7 +61,7 @@ class Bridge : private ajn::AboutListener
         Bridge(const char *name, const char *sender);
         ~Bridge();
 
-        typedef void (*ExecCB)(const char *piid, const char *sender, bool isVirtual);
+        typedef void (*ExecCB)(const char *piid, const char *sender, bool secureMode, bool isVirtual);
         typedef void (*KillCB)(const char *piid);
         typedef enum { NOT_SEEN = 0, SEEN_NATIVE, SEEN_VIRTUAL } SeenState;
         typedef SeenState (*GetSeenStateCB)(const char *piid);
@@ -66,16 +69,17 @@ class Bridge : private ajn::AboutListener
                 { m_execCb = execCb; m_killCb = killCb; m_seenStateCb = seenStateCb; }
         typedef void (*SessionLostCB)();
         void SetSessionLostCB(SessionLostCB cb) { m_sessionLostCb = cb; }
-        void SetSecureMode(bool secureMode) { m_secureMode = secureMode; }
+        void SetDeviceName(const char *deviceName) { m_deviceName = deviceName; }
+        void SetManufacturerName(const char *manufacturerName) { m_manufacturerName = manufacturerName; }
+        void SetSecureMode(bool secureMode);
 
         bool Start();
         bool Stop();
+        void ResetSecurity();
         bool Process();
 
-        /* Used internally */
-        void RDPublish();
-
     private:
+        struct AnnouncedContext;
         struct DiscoverContext;
         struct Task
         {
@@ -87,9 +91,10 @@ class Bridge : private ajn::AboutListener
         struct AnnouncedTask : public Task {
             std::string m_name;
             std::string m_piid;
+            bool m_secureMode;
             bool m_isVirtual;
-            AnnouncedTask(time_t tick, const char *name, const char *piid, bool isVirtual)
-                : Task(tick), m_name(name), m_piid(piid), m_isVirtual(isVirtual) { }
+            AnnouncedTask(time_t tick, const char *name, const char *piid, bool secureMode, bool isVirtual)
+                : Task(tick), m_name(name), m_piid(piid), m_secureMode(secureMode), m_isVirtual(isVirtual) { }
             virtual ~AnnouncedTask() { }
             virtual void Run(Bridge *thiz);
         };
@@ -107,6 +112,11 @@ class Bridge : private ajn::AboutListener
             RDPublishTask(time_t tick) : Task(tick) { }
             virtual ~RDPublishTask() { }
             virtual void Run(Bridge *thiz);
+        };
+        class InsecureLeaveSessionCB: public ajn::BusAttachment::LeaveSessionAsyncCB {
+        public:
+            virtual ~InsecureLeaveSessionCB() { }
+            virtual void LeaveSessionCB(QStatus status, void* context);
         };
 
         static const time_t DISCOVER_PERIOD_SECS = 5;
@@ -131,12 +141,19 @@ class Bridge : private ajn::AboutListener
         std::vector<VirtualResource *> m_virtualResources;
         std::vector<VirtualBusAttachment *> m_virtualBusAttachments;
         std::map<OCDoHandle, DiscoverContext *> m_discovered;
-        bool m_secureMode;
+        SecureModeResource *m_secureMode;
         std::list<Task*> m_tasks;
         RDPublishTask *m_rdPublishTask;
         size_t m_pending;
         std::string m_ajSoftwareVersion;
+        std::string m_deviceName;
+        std::string m_manufacturerName;
+        std::set<AnnouncedContext *> m_insecureAnnounced;
+        InsecureLeaveSessionCB m_insecureLeaveSessionCB;
 
+        static void RDPublish(void *context);
+        void SetIntrospectionData(ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+                const char *title, const char *version);
         void WhoImplements();
         void Destroy(const char *id);
         virtual void BusDisconnected();
@@ -149,7 +166,11 @@ class Bridge : private ajn::AboutListener
         virtual void SessionLost(ajn::SessionId sessionId,
                 ajn::SessionListener::SessionLostReason reason);
         VirtualResource *CreateVirtualResource(ajn::BusAttachment *bus, const char *name,
-                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion);
+                ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+                ajn::AboutData *aboutData);
+        virtual void State(const char* busName, const qcc::KeyInfoNISTP256& publicKeyInfo,
+                ajn::PermissionConfigurator::ApplicationState state);
+        virtual void AddMatchCB(QStatus status, void *ctx);
 
         OCRepPayload *GetSecureMode(OCEntityHandlerRequest *request);
         bool PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged);
@@ -157,9 +178,15 @@ class Bridge : private ajn::AboutListener
                 OCEntityHandlerRequest *request, void *context);
         static OCStackApplicationResult DiscoverCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
+        static OCStackApplicationResult GetCollectionCB(void *context, OCDoHandle handle,
+                OCClientResponse *response);
         static OCStackApplicationResult GetPlatformCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
+        static OCStackApplicationResult GetPlatformConfigurationCB(void *context, OCDoHandle handle,
+                OCClientResponse *response);
         static OCStackApplicationResult GetDeviceCB(void *context, OCDoHandle handle,
+                OCClientResponse *response);
+        static OCStackApplicationResult GetDeviceConfigurationCB(void *context, OCDoHandle handle,
                 OCClientResponse *response);
         static OCStackApplicationResult GetCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
@@ -182,7 +209,10 @@ class Bridge : private ajn::AboutListener
         void UpdatePresenceStatus(const OCDiscoveryPayload *payload);
         void GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *response,
                 DiscoverContext **context, OCRepPayload **payload);
-        void ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload);
+        bool ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload);
+        OCStackResult GetIntrospection(DiscoverContext *context);
+        OCStackResult GetCollection(DiscoverContext *context);
+        OCStackResult GetPlatformConfiguration(DiscoverContext *context);
         OCStackResult ContinueDiscovery(DiscoverContext *context, const char *uri,
                 const std::vector<OCDevAddr> &addrs, OCClientResponseHandler cb);
         OCStackResult ContinueDiscovery(DiscoverContext *context, const char *uri, OCDevAddr *addr,
@@ -193,7 +223,5 @@ class Bridge : private ajn::AboutListener
         OCStackResult DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
                 const std::vector<OCDevAddr> &addrs, OCClientResponseHandler cb);
 };
-
-bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData);
 
 #endif

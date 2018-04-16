@@ -25,7 +25,7 @@
 BUILD_TYPE = 'debug'
 
 # Specify the location of the AllJoyn Standard Core project dist folder
-# example ALLJOYN_DIST = '/home/tmalsbar/core/alljoyn/build/linux/x86_64/debug/dist'
+# example ALLJOYN_DIST = '/home/tmalsbar/core/alljoyn/build/linux/x86_64/release/dist'
 ALLJOYN_DIST = '/path/to/ALLJOYN_DIST'
 
 # Specify the location of the IoTivity project

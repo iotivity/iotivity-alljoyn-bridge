@@ -22,34 +22,41 @@
 
 #include <sstream>
 
+static void DrainUnderscores(std::ostringstream& rt, size_t& n, const char* s)
+{
+    while (n) {
+        rt << s;
+        --n;
+    }
+}
+
 std::string ToOCName(std::string ajName)
 {
+    size_t n = 0;
     std::ostringstream rt;
     rt << 'x';
     rt << '.';
     const char *in = ajName.c_str();
     while (*in)
     {
-        if (isupper(*in))
+        if (*in == '_')
         {
+            ++n;
+        }
+        else if (isupper(*in))
+        {
+            DrainUnderscores(rt, n, "--");
             rt << '-';
             rt << (char)(*in - 'A' + 'a');
         }
-        else if (*in == '_' && isalpha(*(in + 1)))
-        {
-            rt << '-';
-            rt << '-';
-        }
-        else if (*in == '_')
-        {
-            rt << '-';
-        }
         else
         {
+            DrainUnderscores(rt, n, isalpha(*in) ? "--" : "-");
             rt << *in;
         }
         ++in;
     }
+    DrainUnderscores(rt, n, "-");
     return rt.str();
 }
 
@@ -88,6 +95,130 @@ std::string ToAJName(std::string ocName)
     return ajName.str();
 }
 
+std::string ToOCPropName(std::string ajName)
+{
+    std::ostringstream ocName;
+    const char *in = ajName.c_str();
+    while (*in)
+    {
+        if (*in == '_' && *(in + 1) == 'd')
+        {
+            ++in;
+            ocName << '.';
+        }
+        else if (*in == '_' && *(in + 1) == 'h')
+        {
+            ++in;
+            ocName << '-';
+        }
+        else
+        {
+            ocName << *in;
+        }
+        ++in;
+    }
+    return ocName.str();
+}
+
+std::string ToAJPropName(std::string ocName)
+{
+    std::ostringstream ajName;
+    const char *in = ocName.c_str();
+    while (*in)
+    {
+        if (*in == '.')
+        {
+            ajName << "_d";
+        }
+        else if (*in == '-')
+        {
+            ajName << "_h";
+        }
+        else
+        {
+            ajName << *in;
+        }
+        ++in;
+    }
+    return ajName.str();
+}
+
+std::string ToUri(std::string objectPath)
+{
+    std::ostringstream uri;
+    const char *in = objectPath.c_str();
+    while (*in)
+    {
+        if (*in == '_' && *(in + 1) == 'u')
+        {
+            ++in;
+            uri << '_';
+        }
+        else if (*in == '_' && *(in + 1) == 'h')
+        {
+            ++in;
+            uri << '-';
+
+        }
+        else if (*in == '_' && *(in + 1) == 'd')
+        {
+            ++in;
+            uri << '.';
+        }
+        else if (*in == '_' && *(in + 1) == 't')
+        {
+            ++in;
+            uri << '~';
+        }
+        else if (*in == '_')
+        {
+            uri << "~u";
+        }
+        else
+        {
+            uri << *in;
+        }
+        ++in;
+    }
+    return uri.str();
+}
+
+std::string ToObjectPath(std::string uri)
+{
+    std::ostringstream objectPath;
+    const char *in = uri.c_str();
+    while (*in)
+    {
+        if (*in == '~' && *(in + 1) == 'u')
+        {
+            ++in;
+            objectPath << "_";
+        }
+        else if (*in == '~')
+        {
+            objectPath << "_t";
+        }
+        else if (*in == '.')
+        {
+            objectPath << "_d";
+        }
+        else if (*in == '-')
+        {
+            objectPath << "_h";
+        }
+        else if (*in == '_')
+        {
+            objectPath << "_u";
+        }
+        else
+        {
+            objectPath << *in;
+        }
+        ++in;
+    }
+    return objectPath.str();
+}
+
 std::string GetResourceTypeName(std::string ifaceName)
 {
     return ToOCName(ifaceName);
@@ -103,6 +234,13 @@ std::string GetResourceTypeName(const ajn::InterfaceDescription *iface, std::str
     return GetResourceTypeName(iface->GetName(), suffix);
 }
 
+std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName, size_t i)
+{
+    std::stringstream name;
+    name << GetResourceTypeName(member->iface, member->name) << "arg" << i << argName;
+    return name.str();
+}
+
 std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::string argName)
 {
     return GetResourceTypeName(member->iface, member->name) + argName;
@@ -110,7 +248,7 @@ std::string GetPropName(const ajn::InterfaceDescription::Member *member, std::st
 
 std::string GetPropName(const ajn::InterfaceDescription *iface, std::string memberName)
 {
-    return GetResourceTypeName(iface, memberName);
+    return GetResourceTypeName(iface->GetName()) + "." + memberName;
 }
 
 std::string GetInterface(std::string rt)
@@ -125,7 +263,7 @@ std::string GetMember(std::string rt)
     return aj.substr(aj.rfind('.') + 1);
 }
 
-std::string NextArgName(const char *&argNames, size_t i)
+std::string NextArgName(const char *&argNames)
 {
     std::stringstream name;
     const char *argName = argNames;
@@ -139,31 +277,12 @@ std::string NextArgName(const char *&argNames, size_t i)
         {
             name << std::string(argName, argNames - argName);
         }
-        else
-        {
-            name << "arg" << i;
-        }
         if (*argNames == ',')
         {
             ++argNames;
         }
     }
-    else
-    {
-        name << "arg" << i;
-    }
     return name.str();
-}
-
-bool TranslateInterface(const char *ifaceName)
-{
-    return !(strstr(ifaceName, "org.freedesktop.DBus") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.About") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Bus") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Daemon") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Debug") == ifaceName ||
-             strstr(ifaceName, "org.alljoyn.Security") == ifaceName ||
-             strstr(ifaceName, "org.allseen.Introspectable") == ifaceName);
 }
 
 bool IsValidErrorName(const char *np, const char **endp)

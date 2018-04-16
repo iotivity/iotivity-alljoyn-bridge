@@ -20,14 +20,66 @@
 
 Import('env')
 
+alljoyn_libs = ['alljoyn', 'ajrouter']
+
 if env['TARGET_OS'] == 'linux':
     env_unittest = env.Clone();
+    env_unittest.VariantDir('examples', '../examples')
     env_unittest.VariantDir('src', '../src')
-    unittest_cpp = ['AllJoynBridgeTest.cpp',
-                    'src/Name.cpp',
-                    '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
-                    '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
-    env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include', '#/src'])
-    env_unittest.AppendUnique(LIBS = ['pthread'])
-    unittest_bins = env_unittest.Program('AllJoynBridgeTest', unittest_cpp)
+    common_cpp = ['examples/Log.cpp',
+                  'src/AboutData.cpp',
+                  'src/DeviceConfigurationResource.cpp',
+                  'src/DeviceResource.cpp',
+                  'src/Hash.cpp',
+                  'src/Interfaces.cpp',
+                  'src/Introspection.cpp',
+                  'src/IntrospectionParse.cpp',
+                  'src/Name.cpp',
+                  'src/Payload.cpp',
+                  'src/PlatformConfigurationResource.cpp',
+                  'src/PlatformResource.cpp',
+                  'src/Resource.cpp',
+                  'src/SecureModeResource.cpp',
+                  'src/Security.cpp',
+                  'src/Signature.cpp',
+                  'src/VirtualBusAttachment.cpp',
+                  'src/VirtualBusObject.cpp',
+                  'src/VirtualConfigBusObject.cpp',
+                  'src/VirtualConfigurationResource.cpp',
+                  'src/VirtualDevice.cpp',
+                  'src/VirtualResource.cpp']
+    unittest_cpp = ['AboutDataTest.cpp',
+                    'AllJoynProducerTest.cpp',
+                    'IntrospectionTest.cpp',
+                    'NameTest.cpp',
+                    'OCFResourceTest.cpp',
+                    'PayloadTest.cpp',
+                    'PayloadAdditionalTest.cpp',
+                    'SecureModeResourceTest.cpp',
+                    'UnitTest.cpp',
+                    '${IOTIVITY_BASE}/extlibs/gtest/googletest-release-1.7.0/lib/.libs/libgtest.a',
+                    '${IOTIVITY_BASE}/extlibs/gtest/googletest-release-1.7.0/lib/.libs/libgtest_main.a']
+    env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/googletest-release-1.7.0/include',
+                                         '${IOTIVITY_BASE}/resource/c_common/oic_time/include',
+                                         '${IOTIVITY_BASE}/resource/csdk/stack/include/internal',
+                                         '${IOTIVITY_BASE}/resource/csdk/stack/test',
+                                         '#/src'])
+    env_unittest.AppendUnique(LIBS = [
+        'crypto',
+        alljoyn_libs,
+        'cjson',
+        'octbstack',
+        'connectivity_abstraction',
+        'c_common',
+        'coap',
+        'resource_directory',
+        ])
+
+    if env_unittest['SECURED'] == '1':
+        env_unittest.AppendUnique(LIBS = ['ocpmapi'])
+    if env_unittest['IOTIVITY_LIB_TYPE'] == 'debug':
+        env_unittest.AppendUnique(LIBS = ['gcov'])
+
+    unittest_bins = [env_unittest.Program('AllJoynBridgeTest', [unittest_cpp, common_cpp]),
+                     env_unittest.Program('VirtualResourceTest', ['VirtualResourceTest.cpp', common_cpp])]
     env.Install('#/${BUILD_DIR}/bin', unittest_bins)

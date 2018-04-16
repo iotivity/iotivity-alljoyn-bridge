@@ -25,7 +25,8 @@ Import('alljoynplugin_lib')
 alljoyn_libs = ['alljoyn', 'ajrouter']
 
 env_bridge = env.Clone()
-bridge_cpp = ['Plugin.cpp',
+bridge_cpp = ['Log.cpp',
+              'Plugin.cpp',
               'AllJoynBridge.cpp']
 manager_cpp = ['PluginManager.cpp']
 env_bridge.AppendUnique(LIBS = [alljoynplugin_lib])
@@ -36,10 +37,14 @@ if env['TARGET_OS'] == 'linux':
         'cjson',
         'octbstack',
         'connectivity_abstraction',
-        'c_common', 
-        'coap', 
+        'c_common',
+        'coap',
         'resource_directory',
         ])
+    if env['SECURED'] == '1':
+        env_bridge.AppendUnique(LIBS = ['ocpmapi'])
+    if env['IOTIVITY_LIB_TYPE'] == 'debug':
+        env_bridge.AppendUnique(LIBS = ['gcov'])
 elif env['TARGET_OS'] == 'windows':
     env_bridge.AppendUnique(LIBS = [
         'win_helper',
@@ -51,6 +56,8 @@ elif env['TARGET_OS'] == 'windows':
         'sqlite3',
         'logger',
         ])
+    if env['SECURED'] == '1':
+        env_bridge.AppendUnique(LIBS = ['ocpmapi_internal'])
 
 examples_bins = [env_bridge.Program('AllJoynBridge', bridge_cpp)]
 if env['TARGET_OS'] == 'linux':

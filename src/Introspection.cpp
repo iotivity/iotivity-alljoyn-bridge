@@ -20,23 +20,129 @@
 
 #include "Introspection.h"
 
+#include "Interfaces.h"
+#include "Log.h"
 #include "Name.h"
 #include "Payload.h"
+#include "Plugin.h"
+#include "SecureModeResource.h"
 #include "Signature.h"
 #include "oic_malloc.h"
 #include "oic_string.h"
 #include "ocpayload.h"
 #include "ocstack.h"
-#include "cJSON.h"
 #include <assert.h>
 
-static OCStackResult Info(std::ostream &os, const char *title, const char *version)
+/*
+ * Internal functions needed to append boilerplate introspection data at runtime.
+ */
+#define OC_RSRVD_INTROSPECTION_URI_PATH            "/introspection"
+
+static CborError append(CborEncoder *encoder, const void *data, size_t len)
 {
-    os << "\"info\":{"
-       << "\"title\":\"" << title << "\","
-       << "\"version\":\"" << version << "\""
-       << "}";
-    return OC_STACK_OK;
+    ptrdiff_t remaining = (ptrdiff_t)encoder->end;
+    remaining -= remaining ? (ptrdiff_t)encoder->data.ptr : encoder->data.bytes_needed;
+    remaining -= (ptrdiff_t)len;
+    if (remaining < 0) {
+        if (encoder->end != NULL) {
+            len -= encoder->end - encoder->data.ptr;
+            encoder->end = NULL;
+            encoder->data.bytes_needed = 0;
+        }
+
+        if (encoder->end)
+            encoder->data.ptr += len;
+        else
+            encoder->data.bytes_needed += len;
+        return CborErrorOutOfMemory;
+    }
+
+    memcpy(encoder->data.ptr, data, len);
+    encoder->data.ptr += len;
+    return CborNoError;
+}
+
+#include "IntrospectionFragments.cpp"
+
+#define VERIFY_CBOR(err)                                            \
+    if ((CborNoError != (err)) && (CborErrorOutOfMemory != (err)))  \
+    {                                                               \
+        goto exit;                                                  \
+    }
+
+static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj);
+
+static int64_t Pair(CborEncoder *cbor, const char *key, const char *value)
+{
+    int64_t err = CborNoError;
+    err |= cbor_encode_text_stringz(cbor, key);
+    VERIFY_CBOR(err);
+    err |= cbor_encode_text_stringz(cbor, value);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Pair(CborEncoder *cbor, const char *key, bool value)
+{
+    int64_t err = CborNoError;
+    err |= cbor_encode_text_stringz(cbor, key);
+    VERIFY_CBOR(err);
+    err |= cbor_encode_boolean(cbor, value);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Pair(CborEncoder *cbor, const char *key, uint64_t value)
+{
+    int64_t err = CborNoError;
+    err |= cbor_encode_text_stringz(cbor, key);
+    VERIFY_CBOR(err);
+    err |= cbor_encode_uint(cbor, value);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Pair(CborEncoder *cbor, const char *key, int64_t value)
+{
+    int64_t err = CborNoError;
+    err |= cbor_encode_text_stringz(cbor, key);
+    VERIFY_CBOR(err);
+    err |= cbor_encode_int(cbor, value);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Pair(CborEncoder *cbor, const char *key, double value)
+{
+    int64_t err = CborNoError;
+    err |= cbor_encode_text_stringz(cbor, key);
+    VERIFY_CBOR(err);
+    err |= cbor_encode_double(cbor, value);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Info(CborEncoder *cbor, const char *title, const char *version)
+{
+    int64_t err = CborNoError;
+    CborEncoder info;
+    err |= cbor_encode_text_stringz(cbor, "info");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &info, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    err |= Pair(&info, "title", title);
+    VERIFY_CBOR(err);
+    err |= Pair(&info, "version", version);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(cbor, &info);
+    VERIFY_CBOR(err);
+exit:
+    return err;
 }
 
 static bool ImplementsPost(OCResourceHandle h)
@@ -58,60 +164,132 @@ static bool ImplementsPost(OCResourceHandle h)
     return false;
 }
 
-static OCStackResult QueryParameters(std::ostream &os, OCResourceHandle h)
+static int64_t QueryParameters(CborEncoder *cbor, OCResourceHandle h)
 {
-    os << "{"
-       << "\"name\":\"if\","
-       << "\"in\":\"query\","
-       << "\"type\":\"string\","
-       << "\"enum\":[";
+    OCStackResult result;
+    int64_t err = CborNoError;
+    CborEncoder map;
+    err |= cbor_encoder_create_map(cbor, &map, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    err |= Pair(&map, "name", "if");
+    VERIFY_CBOR(err);
+    err |= Pair(&map, "in", "query");
+    VERIFY_CBOR(err);
+    err |= Pair(&map, "type", "string");
+    VERIFY_CBOR(err);
+    CborEncoder enumArr;
+    err |= cbor_encode_text_stringz(&map, "enum");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_array(&map, &enumArr, CborIndefiniteLength);
+    VERIFY_CBOR(err);
     uint8_t ni;
-    OCStackResult result = OCGetNumberOfResourceInterfaces(h, &ni);
+    result = OCGetNumberOfResourceInterfaces(h, &ni);
     if (result != OC_STACK_OK)
     {
-        return result;
+        err |= CborErrorInternalError;
+        goto exit;
     }
     for (uint8_t j = 0; j < ni; ++j)
     {
-        os << (j ? ",\"" : "\"") << OCGetResourceInterfaceName(h, j) << "\"";
+        err |= cbor_encode_text_stringz(&enumArr, OCGetResourceInterfaceName(h, j));
+        VERIFY_CBOR(err);
     }
-    os << "]" /* enum */
-       << "}";
-    return OC_STACK_OK;
+    err |= cbor_encoder_close_container(&map, &enumArr);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(cbor, &map);
+    VERIFY_CBOR(err);
+exit:
+    return err;
 }
 
-static OCStackResult Schema(std::ostream &os, OCResourceHandle h)
+static int64_t Schema(CborEncoder *cbor, OCResourceHandle h)
 {
-    os << "\"schema\":{"
-       << "\"oneOf\":[";
+    OCStackResult result;
+    int64_t err = CborNoError;
+    CborEncoder schema;
+    err |= cbor_encode_text_stringz(cbor, "schema");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &schema, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    CborEncoder oneOf;
+    err |= cbor_encode_text_stringz(&schema, "oneOf");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_array(&schema, &oneOf, CborIndefiniteLength);
+    VERIFY_CBOR(err);
     uint8_t nrt;
-    OCStackResult result = OCGetNumberOfResourceTypes(h, &nrt);
+    result = OCGetNumberOfResourceTypes(h, &nrt);
     if (result != OC_STACK_OK)
     {
-        return result;
+        err |= CborErrorInternalError;
+        goto exit;
     }
     for (uint8_t j = 0; j < nrt; ++j)
     {
-        os << (j ? ",{" : "{") << "\"$ref\":\"#/definitions/" << OCGetResourceTypeName(h, j) << "\"}";
+        std::string ref = std::string("#/definitions/") + OCGetResourceTypeName(h, j);
+        CborEncoder nestedSchema;
+        err |= cbor_encoder_create_map(&oneOf, &nestedSchema, 1);
+        VERIFY_CBOR(err);
+        err |= Pair(&nestedSchema, "$ref", ref.c_str());
+        VERIFY_CBOR(err);
+        err |= cbor_encoder_close_container(&oneOf, &nestedSchema);
+        VERIFY_CBOR(err);
     }
-    os << "]" /* oneOf */
-       << "}";
-    return OC_STACK_OK;
+    err |= cbor_encoder_close_container(&schema, &oneOf);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(cbor, &schema);
+    VERIFY_CBOR(err);
+exit:
+    return err;
 }
 
-static OCStackResult Paths(std::ostream &os)
+static int64_t Responses(CborEncoder *cbor, OCResourceHandle h)
 {
-    os << "\"paths\":{";
+    int64_t err = CborNoError;
+    CborEncoder responses;
+    err |= cbor_encode_text_stringz(cbor, "responses");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &responses, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    CborEncoder response;
+    err |= cbor_encode_text_stringz(&responses, "200");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(&responses, &response, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    err |= Pair(&response, "description", "");
+    VERIFY_CBOR(err);
+    err |= Schema(&response, h);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(&responses, &response);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(cbor, &responses);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Paths(CborEncoder *cbor)
+{
+    OCStackResult result = OC_STACK_ERROR;
+    int64_t err = CborNoError;
+    CborEncoder paths;
+    err |= cbor_encode_text_stringz(cbor, "paths");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &paths, CborIndefiniteLength);
+    VERIFY_CBOR(err);
     uint8_t nr;
-    OCStackResult result = OCGetNumberOfResources(&nr);
+    result = OCGetNumberOfResources(&nr);
     if (result != OC_STACK_OK)
     {
-        return result;
+        err |= CborErrorInternalError;
+        goto exit;
     }
-    int comma = 0;
     for (uint8_t i = 0; i < nr; ++i)
     {
         OCResourceHandle h = OCGetResourceHandle(i);
+        if (!(OCGetResourceProperties(h) & OC_ACTIVE))
+        {
+            continue;
+        }
         const char *uri = OCGetResourceUri(h);
         if (!strcmp(uri, OC_RSRVD_WELL_KNOWN_URI) ||
                 !strcmp(uri, OC_RSRVD_DEVICE_URI) ||
@@ -121,65 +299,89 @@ static OCStackResult Paths(std::ostream &os)
             // TODO skip unless there are vendor specific properties
             continue;
         }
-        os << (comma++ ? ",\"" : "\"") << uri << "\":{";
-
-        os << "\"get\":{";
-        os << "\"parameters\":[";
-        result = QueryParameters(os, h);
-        if (result != OC_STACK_OK)
+        if (!strcmp(uri, OC_RSRVD_RD_URI))
         {
-            return result;
+            err |= append(&paths, oic_rd_paths,
+                    sizeof(oic_rd_paths) / sizeof(oic_rd_paths[0]));
+            VERIFY_CBOR(err);
         }
-        os << "],"; /* parameters */
-        os << "\"responses\":{"
-           << "\"200\":{"
-           << "\"description\":\"\",";
-        result = Schema(os, h);
-        if (result != OC_STACK_OK)
+        else if (!strcmp(uri, OC_RSRVD_INTROSPECTION_URI_PATH))
         {
-            return result;
+            err |= append(&paths, introspection_paths,
+                    sizeof(introspection_paths) / sizeof(introspection_paths[0]));
+            VERIFY_CBOR(err);
         }
-        os << "}" /* 200 */
-           << "}" /* responses */
-           << "}"; /* get */
-
-        if (ImplementsPost(h))
+        else if (!strcmp(uri, OC_RSRVD_SECURE_MODE_URI))
         {
-            os << ",\"post\":{";
-            os << "\"parameters\":[";
-            result = QueryParameters(os, h);
-            if (result != OC_STACK_OK)
-            {
-                return result;
-            }
-            os << "," /* query */
-               << "{"
-               << "\"name\":\"body\","
-               << "\"in\":\"body\",";
-            result = Schema(os, h);
-            if (result != OC_STACK_OK)
-            {
-                return result;
-            }
-            os << "}"
-               << "]," /* parameters */
-               << "\"responses\":{"
-               << "\"200\":{"
-               << "\"description\":\"\",";
-            result = Schema(os, h);
-            if (result != OC_STACK_OK)
-            {
-                return result;
-            }
-            os << "}" /* 200 */
-               << "}" /* responses */
-               << "}"; /* post */
+            err |= append(&paths, securemode_paths,
+                    sizeof(securemode_paths) / sizeof(securemode_paths[0]));
+            VERIFY_CBOR(err);
         }
-
-        os << "}"; /* path */
+        else
+        {
+            CborEncoder path;
+            err |= cbor_encode_text_stringz(&paths, uri);
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_create_map(&paths, &path, CborIndefiniteLength);
+            VERIFY_CBOR(err);
+            CborEncoder get;
+            err |= cbor_encode_text_stringz(&path, "get");
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_create_map(&path, &get, CborIndefiniteLength);
+            VERIFY_CBOR(err);
+            CborEncoder parameters;
+            err |= cbor_encode_text_stringz(&get, "parameters");
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_create_array(&get, &parameters, CborIndefiniteLength);
+            VERIFY_CBOR(err);
+            err |= QueryParameters(&parameters, h);
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_close_container(&get, &parameters);
+            VERIFY_CBOR(err);
+            err |= Responses(&get, h);
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_close_container(&path, &get);
+            VERIFY_CBOR(err);
+            if (ImplementsPost(h))
+            {
+                CborEncoder post;
+                err |= cbor_encode_text_stringz(&path, "post");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&path, &post, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                CborEncoder parameters;
+                err |= cbor_encode_text_stringz(&post, "parameters");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_array(&post, &parameters, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= QueryParameters(&parameters, h);
+                VERIFY_CBOR(err);
+                CborEncoder body;
+                err |= cbor_encoder_create_map(&parameters, &body, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= Pair(&body, "name", "body");
+                VERIFY_CBOR(err);
+                err |= Pair(&body, "in", "body");
+                VERIFY_CBOR(err);
+                err |= Schema(&body, h);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&parameters, &body);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&post, &parameters);
+                VERIFY_CBOR(err);
+                err |= Responses(&post, h);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&path, &post);
+                VERIFY_CBOR(err);
+            }
+            err |= cbor_encoder_close_container(&paths, &path);
+            VERIFY_CBOR(err);
+        }
     }
-    os << "}";
-    return OC_STACK_OK;
+    err |= cbor_encoder_close_container(cbor, &paths);
+    VERIFY_CBOR(err);
+exit:
+    return err;
 }
 
 static uint64_t GetUnsignedTypeMax(const char *signature)
@@ -213,16 +415,19 @@ static int64_t GetTypeMax(const char *signature)
     }
 }
 
-static void GetJsonType(std::ostream &os, const char *ajType,
+static int64_t GetJsonType(CborEncoder *cbor, const char *ajType,
         const qcc::String &typeMin, const qcc::String &typeMax, const qcc::String &typeDefault)
 {
+    int64_t err = CborNoError;
     switch (ajType[0])
     {
         case ajn::ALLJOYN_BOOLEAN:
-            os << "\"type\":\"boolean\"";
+            err |= Pair(cbor, "type", "boolean");
+            VERIFY_CBOR(err);
             if (!typeDefault.empty())
             {
-                os << ",\"default\":" << typeDefault;
+                err |= Pair(cbor, "default", (typeDefault == "true"));
+                VERIFY_CBOR(err);
             }
             break;
         case ajn::ALLJOYN_BYTE:
@@ -234,15 +439,26 @@ static void GetJsonType(std::ostream &os, const char *ajType,
                 uint64_t max = typeMax.empty() ? GetUnsignedTypeMax(ajType) : strtoull(typeMax.c_str(), NULL, 0);
                 if (max <= MAX_SAFE_INTEGER)
                 {
-                    os << "\"type\":\"integer\",\"minimum\":" << min << ",\"maximum\":" << max;
+                    err |= Pair(cbor, "type", "integer");
+                    VERIFY_CBOR(err);
+                    err |= Pair(cbor, "minimum", min);
+                    VERIFY_CBOR(err);
+                    err |= Pair(cbor, "maximum", max);
+                    VERIFY_CBOR(err);
                 }
                 else
                 {
-                    os << "\"type\":\"string\",\"format\":\"uint64\"";
+                    err |= Pair(cbor, "type", "string");
+                    VERIFY_CBOR(err);
+                    err |= Pair(cbor, "pattern", "^0([1-9][0-9]{0,19})$");
+                    VERIFY_CBOR(err);
                 }
                 if (!typeDefault.empty())
                 {
-                    os << ",\"default\":" << typeDefault;
+                    uint64_t v;
+                    sscanf(typeDefault.c_str(), "%" SCNu64, &v);
+                    err |= Pair(cbor, "default", v);
+                    VERIFY_CBOR(err);
                 }
             }
             break;
@@ -254,421 +470,746 @@ static void GetJsonType(std::ostream &os, const char *ajType,
                 int64_t max = typeMax.empty() ? GetTypeMax(ajType) : strtoull(typeMax.c_str(), NULL, 0);
                 if (MIN_SAFE_INTEGER <= min && max <= MAX_SAFE_INTEGER)
                 {
-                    os << "\"type\":\"integer\",\"minimum\":" << min << ",\"maximum\":" << max;
+                    err |= Pair(cbor, "type", "integer");
+                    VERIFY_CBOR(err);
+                    err |= Pair(cbor, "minimum", min);
+                    VERIFY_CBOR(err);
+                    err |= Pair(cbor, "maximum", max);
+                    VERIFY_CBOR(err);
                 }
                 else
                 {
-                    os << "\"type\":\"string\",\"format\":\"int64\"";
+                    err |= Pair(cbor, "type", "string");
+                    VERIFY_CBOR(err);
+                    err |= Pair(cbor, "pattern", "^0(-?[1-9][0-9]{0,18})$");
+                    VERIFY_CBOR(err);
                 }
                 if (!typeDefault.empty())
                 {
-                    os << ",\"default\":" << typeDefault;
+                    int64_t v;
+                    sscanf(typeDefault.c_str(), "%" SCNd64, &v);
+                    err |= Pair(cbor, "default", v);
+                    VERIFY_CBOR(err);
                 }
             }
             break;
         case ajn::ALLJOYN_DOUBLE:
-            os << "\"type\":\"number\"";
+            err |= Pair(cbor, "type", "number");
+            VERIFY_CBOR(err);
             if (!typeDefault.empty())
             {
-                os << ",\"default\":" << typeDefault;
+                err |= Pair(cbor, "default", std::stod(typeDefault));
+                VERIFY_CBOR(err);
             }
             break;
         case ajn::ALLJOYN_STRING:
         case ajn::ALLJOYN_OBJECT_PATH:
         case ajn::ALLJOYN_SIGNATURE:
-            os << "\"type\":\"string\"";
+            err |= Pair(cbor, "type", "string");
+            VERIFY_CBOR(err);
             if (!typeDefault.empty())
             {
-                os << ",\"default\":\"" << typeDefault << "\"";
+                err |= Pair(cbor, "default", typeDefault.c_str());
+                VERIFY_CBOR(err);
             }
             break;
         case ajn::ALLJOYN_ARRAY:
             switch (ajType[1])
             {
                 case ajn::ALLJOYN_BYTE:
-                    os << "\"type\":\"string\",\"media\":{\"binaryEncoding\":\"base64\"}";
-                    break;
-                case ajn::ALLJOYN_VARIANT:
-                    os << "\"type\":\"undefined\"";
+                    err |= Pair(cbor, "type", "string");
+                    VERIFY_CBOR(err);
+                    CborEncoder media;
+                    err |= cbor_encode_text_stringz(cbor, "media");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(cbor, &media, 1);
+                    VERIFY_CBOR(err);
+                    err |= Pair(&media, "binaryEncoding", "base64");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(cbor, &media);
+                    VERIFY_CBOR(err);
                     break;
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
-                    os << "\"type\":\"object\"";
+                    err |= Pair(cbor, "type", "object");
+                    VERIFY_CBOR(err);
                     break;
                 default:
-                    os << "\"type\":\"array\","
-                       << "\"items\":{";
-                    qcc::String min, max, def;
-                    GetJsonType(os, &ajType[1], min, max, def);
-                    os << "}";
+                    err |= Pair(cbor, "type", "array");
+                    VERIFY_CBOR(err);
+                    CborEncoder items;
+                    err |= cbor_encode_text_stringz(cbor, "items");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(cbor, &items, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= GetJsonType(&items, &ajType[1], typeMin, typeMax, typeDefault);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(cbor, &items);
+                    VERIFY_CBOR(err);
                     break;
             }
             break;
         case ajn::ALLJOYN_STRUCT_OPEN:
-            os << "\"type\":\"array\"";
+            {
+                err |= Pair(cbor, "type", "array");
+                VERIFY_CBOR(err);
+                CborEncoder items;
+                err |= cbor_encode_text_stringz(cbor, "items");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_array(cbor, &items, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                int64_t numItems = 0;
+                const char *signature = &ajType[1];
+                const char *argSignature = signature;
+                while (ParseCompleteType(signature) == ER_OK)
+                {
+                    std::string sig(argSignature, signature - argSignature);
+                    argSignature = signature;
+                    qcc::String min, max, def;
+                    CborEncoder item;
+                    err |= cbor_encoder_create_map(&items, &item, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= GetJsonType(&item, sig.c_str(), min, max, def);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&items, &item);
+                    VERIFY_CBOR(err);
+                    ++numItems;
+                }
+                err |= cbor_encoder_close_container(cbor, &items);
+                VERIFY_CBOR(err);
+                err |= Pair(cbor, "minItems", numItems);
+                VERIFY_CBOR(err);
+                err |= Pair(cbor, "maxItems", numItems);
+                VERIFY_CBOR(err);
+            }
             break;
         case ajn::ALLJOYN_VARIANT:
-            os << "\"anyOf\":["
-               << "{\"type\":\"string\"},"
-               << "{\"type\":\"integer\"},"
-               << "{\"type\":\"number\"},"
-               << "{\"type\":\"object\"},"
-               << "{\"type\":\"array\"},"
-               << "{\"type\":\"boolean\"}"
-               << "]";
+            CborEncoder types;
+            err |= cbor_encode_text_stringz(cbor, "type");
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_create_array(cbor, &types, CborIndefiniteLength);
+            VERIFY_CBOR(err);
+            err |= cbor_encode_text_stringz(&types, "boolean");
+            VERIFY_CBOR(err);
+            err |= cbor_encode_text_stringz(&types, "object");
+            VERIFY_CBOR(err);
+            err |= cbor_encode_text_stringz(&types, "array");
+            VERIFY_CBOR(err);
+            err |= cbor_encode_text_stringz(&types, "number");
+            VERIFY_CBOR(err);
+            err |= cbor_encode_text_stringz(&types, "string");
+            VERIFY_CBOR(err);
+            err |= cbor_encode_text_stringz(&types, "integer");
+            VERIFY_CBOR(err);
+            err |= cbor_encoder_close_container(cbor, &types);
+            VERIFY_CBOR(err);
             break;
         case '[':
             {
                 std::string def = ajType;
-                def = def.substr(1, def.size() - 2);
-                os << "\"$ref\":\"#/definitions/" << def << "\"";
+                def = "#/definitions/" + def.substr(1, def.size() - 2);
+                err |= Pair(cbor, "$ref", def.c_str());
+                VERIFY_CBOR(err);
             }
             break;
         default:
-            os << "\"type\":\"undefined\"";
+            err |= Pair(cbor, "type", "undefined");
+            VERIFY_CBOR(err);
             break;
     }
+exit:
+    return err;
 }
 
-static OCStackResult Property(std::ostream &os, std::string propName, qcc::String description,
+static int64_t Property(CborEncoder *cbor, std::string propName, qcc::String description,
         bool readOnly, qcc::String sig, qcc::String min, qcc::String max, qcc::String def)
 {
-    os << "\"" << propName << "\":{";
+    int64_t err = CborNoError;
+    CborEncoder prop;
+    err |= cbor_encode_text_stringz(cbor, propName.c_str());
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &prop, CborIndefiniteLength);
+    VERIFY_CBOR(err);
     if (!description.empty())
     {
-        os << "\"description\":\"" << description << "\",";
+        err |= Pair(&prop, "description", description.c_str());
+        VERIFY_CBOR(err);
     }
     if (readOnly)
     {
-        os << "\"readOnly\":true,";
+        err |= Pair(&prop, "readOnly", true);
+        VERIFY_CBOR(err);
     }
-    GetJsonType(os, sig.c_str(), min, max, def);
-    os << "}";
-    return OC_STACK_OK;
+    err |= GetJsonType(&prop, sig.c_str(), min, max, def);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(cbor, &prop);
+    VERIFY_CBOR(err);
+exit:
+    return err;
 }
 
-static OCStackResult Properties(std::ostream &os, const char *ajSoftwareVersion,
+static int64_t Properties(CborEncoder *cbor, const char *ajSoftwareVersion,
         const ajn::InterfaceDescription::Member *member, const char *memberSignature, size_t &argN,
         bool readOnly)
 {
+    int64_t err = CborNoError;
     size_t numArgs = CountCompleteTypes(memberSignature);
     const char *signature = memberSignature;
     const char *argSignature = signature;
     const char *argNames = member->argNames.c_str();
     for (size_t k = 0; k < argN; ++k)
     {
-        NextArgName(argNames, k);
+        NextArgName(argNames);
     }
     for (size_t k = 0; k < numArgs; ++k, ++argN)
     {
         ParseCompleteType(signature);
         qcc::String sig(argSignature, signature - argSignature);
         argSignature = signature;
-        std::string argName = NextArgName(argNames, argN);
+        std::string argName = NextArgName(argNames);
         if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
         {
             member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
         }
-        std::string propName = GetPropName(member, argName);
+        std::string propName = GetPropName(member, argName, argN);
         qcc::String min, max, def;
         member->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
         member->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
         member->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
-        os << (k ? "," : "");
-        OCStackResult result = Property(os, propName, member->description, readOnly, sig, min, max,
-                def);
-        if (result != OC_STACK_OK)
-        {
-            return result;
-        }
+        err |= Property(cbor, propName, member->description, readOnly, sig, min, max, def);
+        VERIFY_CBOR(err);
     }
-    return OC_STACK_OK;
+exit:
+    return err;
 }
 
-static OCStackResult Definitions(std::ostream &os, ajn::BusAttachment *bus,
+static int64_t Parameters(CborEncoder *cbor)
+{
+    OCStackResult result = OC_STACK_ERROR;
+    int64_t err = CborNoError;
+    CborEncoder parameters;
+    err |= cbor_encode_text_stringz(cbor, "parameters");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &parameters, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    uint8_t nr;
+    result = OCGetNumberOfResources(&nr);
+    if (result != OC_STACK_OK)
+    {
+        err |= CborErrorInternalError;
+        goto exit;
+    }
+    for (uint8_t i = 0; i < nr; ++i)
+    {
+        OCResourceHandle h = OCGetResourceHandle(i);
+        if (!(OCGetResourceProperties(h) & OC_ACTIVE))
+        {
+            continue;
+        }
+        const char *uri = OCGetResourceUri(h);
+        if (!strcmp(uri, OC_RSRVD_RD_URI))
+        {
+            err |= append(&parameters, oic_rd_parameters,
+                    sizeof(oic_rd_parameters) / sizeof(oic_rd_parameters[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_INTROSPECTION_URI_PATH))
+        {
+            err |= append(&parameters, introspection_parameters,
+                    sizeof(introspection_parameters) / sizeof(introspection_parameters[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_SECURE_MODE_URI))
+        {
+            err |= append(&parameters, securemode_parameters,
+                    sizeof(securemode_parameters) / sizeof(securemode_parameters[0]));
+            VERIFY_CBOR(err);
+        }
+    }
+    err |= cbor_encoder_close_container(cbor, &parameters);
+    VERIFY_CBOR(err);
+exit:
+    return err;
+}
+
+static int64_t Definitions(CborEncoder *cbor, ajn::BusAttachment *bus,
         const char *ajSoftwareVersion)
 {
-    os << "\"definitions\":{";
-
-    OCStackResult result = OC_STACK_OK;
+    size_t numIfaces = 0;
     const ajn::InterfaceDescription **ifaces = NULL;
     const ajn::InterfaceDescription::Property **props = NULL;
     const ajn::InterfaceDescription::Member **members = NULL;
     qcc::String *names = NULL;
     qcc::String *values = NULL;
+    OCStackResult result;
+    int64_t err = CborNoError;
+    CborEncoder definitions;
+    err |= cbor_encode_text_stringz(cbor, "definitions");
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_create_map(cbor, &definitions, CborIndefiniteLength);
+    VERIFY_CBOR(err);
 
-    size_t numIfaces = bus->GetInterfaces(NULL, 0);
-    ifaces = new const ajn::InterfaceDescription*[numIfaces];
-    bus->GetInterfaces(ifaces, numIfaces);
-    int comma = 0;
-    for (size_t i = 0; i < numIfaces; ++i)
+    uint8_t nr;
+    result = OCGetNumberOfResources(&nr);
+    if (result != OC_STACK_OK)
     {
-        const char *ifaceName = ifaces[i]->GetName();
-        if (!TranslateInterface(ifaceName))
+        err |= CborErrorInternalError;
+        goto exit;
+    }
+    for (uint8_t i = 0; i < nr; ++i)
+    {
+        OCResourceHandle h = OCGetResourceHandle(i);
+        if (!(OCGetResourceProperties(h) & OC_ACTIVE))
         {
             continue;
         }
-        size_t numProps = ifaces[i]->GetProperties(NULL, 0);
-        props = new const ajn::InterfaceDescription::Property*[numProps];
-        ifaces[i]->GetProperties(props, numProps);
-        static const char *emitsChangedValues[] = { "const", "false", "true", "invalidates", NULL };
-        for (const char **emitsChanged = emitsChangedValues; *emitsChanged; ++emitsChanged)
+        const char *uri = OCGetResourceUri(h);
+        if (!strcmp(uri, OC_RSRVD_RD_URI))
         {
-            int fieldComma = 0;
-            bool hasProps = false;
-            uint8_t access = NONE;
-            std::string rt = GetResourceTypeName(ifaces[i], *emitsChanged);
-            for (size_t j = 0; j < numProps; ++j)
-            {
-                qcc::String value = (props[j]->name == "Version") ? "const" : "false";
-                props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, value);
-                if (value != *emitsChanged)
-                {
-                    continue;
-                }
-                if (!hasProps)
-                {
-                    os << (comma++ ? ",\"" : "\"") << rt << "\":{"
-                       << "\"type\":\"object\","
-                       << "\"properties\":{";
-                    hasProps = true;
-                }
-                std::string propName = GetPropName(ifaces[i], props[j]->name);
-                /*
-                 * Annotations prior to v16.10.00 are not guaranteed to
-                 * appear in the order they were specified, so are
-                 * unreliable.
-                 */
-                qcc::String signature = props[j]->signature;
-                if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
-                {
-                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
-                }
-                qcc::String min, max, def;
-                props[j]->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
-                props[j]->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
-                props[j]->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
-                os << (fieldComma++ ? "," : "");
-                result = Property(os, propName, props[j]->description,
-                        (props[j]->access == ajn::PROP_ACCESS_READ), signature, min, max, def);
-                if (result != OC_STACK_OK)
-                {
-                    goto exit;
-                }
-                switch (props[j]->access)
-                {
-                    case ajn::PROP_ACCESS_RW:
-                    case ajn::PROP_ACCESS_WRITE:
-                        access |= READWRITE;
-                        break;
-                    case ajn::PROP_ACCESS_READ:
-                        access |= READ;
-                        break;
-                }
-            }
-            if (hasProps)
-            {
-                os << ",\"rt\":{"
-                   << "\"readOnly\":true,"
-                   << "\"type\":\"array\","
-                   << "\"default\":[\"" << rt << "\"]"
-                   << "}";
-                os << ",\"if\":{"
-                   << "\"readOnly\":true,"
-                   << "\"type\":\"array\","
-                   << "\"items\":{"
-                   << "\"type\":\"string\","
-                   << "\"enum\":["
-                   << "\"oic.if.baseline\"";
-                if (access & READ)
-                {
-                    os << ",\"oic.if.r\"";
-                }
-                if (access & READWRITE)
-                {
-                    os << ",\"oic.if.rw\"";
-                }
-                os << "]" /* enum */
-                   << "}" /* items */
-                   << "}"; /* if */
-                os << "}" /* properties */
-                   << "}";
-            }
+            err |= append(&definitions, oic_rd_definitions,
+                    sizeof(oic_rd_definitions) / sizeof(oic_rd_definitions[0]));
+            VERIFY_CBOR(err);
         }
-        delete[] props;
-        props = NULL;
-        size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
-        members = new const ajn::InterfaceDescription::Member*[numMembers];
-        ifaces[i]->GetMembers(members, numMembers);
-        for (size_t j = 0; j < numMembers; ++j)
+        else if (!strcmp(uri, OC_RSRVD_INTROSPECTION_URI_PATH))
         {
-            std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
-            os << (comma++ ? ",\"" : "\"") << rt << "\":{"
-               << "\"type\":\"object\","
-               << "\"properties\":{";
-            std::string propName = GetPropName(members[j], "validity");
-            os << "\"" << propName << "\":{";
-            if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
-            {
-                os << "\"readOnly\":true,";
-            }
-            os << "\"type\":\"boolean\""
-               << "},";
-            size_t argN = 0;
-            result = Properties(os, ajSoftwareVersion, members[j], members[j]->signature.c_str(),
-                    argN, (members[j]->memberType == ajn::MESSAGE_SIGNAL));
-            if (result != OC_STACK_OK)
-            {
-                goto exit;
-            }
-            os << (members[j]->signature.empty() ? "" : ",");
-            result = Properties(os, ajSoftwareVersion, members[j],
-                    members[j]->returnSignature.c_str(), argN, true);
-            if (result != OC_STACK_OK)
-            {
-                goto exit;
-            }
-            os << (members[j]->returnSignature.empty() ? "" : ",");
-            os << "\"rt\":{"
-               << "\"readOnly\":true,"
-               << "\"type\":\"array\","
-               << "\"default\":[\"" << rt << "\"]"
-               << "},";
-            os << "\"if\":{"
-               << "\"readOnly\":true,"
-               << "\"type\":\"array\","
-               << "\"items\":{"
-               << "\"type\":\"string\","
-               << "\"enum\":["
-               << "\"oic.if.baseline\"";
-            if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
-            {
-                os << ",\"oic.if.r\"";
-            }
-            else
-            {
-                os << ",\"oic.if.rw\"";
-            }
-            os << "]" /* enum */
-               << "}" /* items */
-               << "}"; /* if */
+            err |= append(&definitions, introspection_definitions,
+                    sizeof(introspection_definitions) / sizeof(introspection_definitions[0]));
+            VERIFY_CBOR(err);
+        }
+        else if (!strcmp(uri, OC_RSRVD_SECURE_MODE_URI))
+        {
+            err |= append(&definitions, securemode_definitions,
+                    sizeof(securemode_definitions) / sizeof(securemode_definitions[0]));
+            VERIFY_CBOR(err);
+        }
+    }
 
-            os << "}" /* properties */
-               << "}";
-        }
-        delete[] members;
-        members = NULL;
-        if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
+    if (bus)
+    {
+        numIfaces = bus->GetInterfaces(NULL, 0);
+        ifaces = new const ajn::InterfaceDescription*[numIfaces];
+        bus->GetInterfaces(ifaces, numIfaces);
+        for (size_t i = 0; i < numIfaces; ++i)
         {
-            size_t numAnnotations = ifaces[i]->GetAnnotations();
-            names = new qcc::String[numAnnotations];
-            values = new qcc::String[numAnnotations];
-            ifaces[i]->GetAnnotations(names, values, numAnnotations);
-            qcc::String lastName;
-            int fieldComma = 0;
-            for (size_t j = 0; j < numAnnotations; ++j)
+            const char *ifaceName = ifaces[i]->GetName();
+            if (!TranslateInterface(ifaceName))
             {
-                if (names[j].find("org.alljoyn.Bus.Struct.") == 0)
+                continue;
+            }
+            size_t numProps = ifaces[i]->GetProperties(NULL, 0);
+            props = new const ajn::InterfaceDescription::Property*[numProps];
+            ifaces[i]->GetProperties(props, numProps);
+            static const char *emitsChangedValues[] =
+                    { "const", "false", "true", "invalidates", NULL };
+            for (const char **emitsChanged = emitsChangedValues; *emitsChanged; ++emitsChanged)
+            {
+                bool hasProps = false;
+                CborEncoder definition;
+                CborEncoder properties;
+                uint8_t access = NONE;
+                std::string rt = GetResourceTypeName(ifaces[i], *emitsChanged);
+                for (size_t j = 0; j < numProps; ++j)
                 {
-                    size_t pos = sizeof("org.alljoyn.Bus.Struct.") - 1;
-                    size_t dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
+                    qcc::String emitsChangedValue = (props[j]->name == "Version") ? "const" : "false";
+                    props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
+                            emitsChangedValue);
+                    if (emitsChangedValue != *emitsChanged)
                     {
                         continue;
                     }
-                    qcc::String structName = names[j].substr(pos, dot - pos);
-                    pos = dot + sizeof(".Field.") - 1;
-                    dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
+                    if (!hasProps)
                     {
-                        continue;
+                        err |= cbor_encode_text_stringz(&definitions, rt.c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_map(&definitions, &definition,
+                                CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        err |= Pair(&definition, "type", "object");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&definition, "properties");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_map(&definition, &properties,
+                                CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        hasProps = true;
                     }
-                    qcc::String fieldName = names[j].substr(pos, dot - pos);
-                    if (structName != lastName)
+                    std::string propName = GetPropName(ifaces[i], emitsChangedValue + "." +
+                            ToOCPropName(props[j]->name));
+                    /*
+                     * Annotations prior to v16.10.00 are not guaranteed to
+                     * appear in the order they were specified, so are
+                     * unreliable.
+                     */
+                    qcc::String signature = props[j]->signature;
+                    if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
                     {
-                        if (!lastName.empty())
-                        {
-                            os << "}"
-                               << "}";
-                        }
-                        os << (comma++ ? ",\"" : "\"") << structName << "\":{"
-                           << "\"type\":\"object\","
-                           << "\"properties\":{";
-                        lastName = structName;
-                        fieldComma = 0;
+                        props[j]->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
                     }
-                    os << (fieldComma++ ? ",\"" : "\"") << fieldName << "\":{";
                     qcc::String min, max, def;
-                    GetJsonType(os, values[j].c_str(), min, max, def);
-                    os << "}";
-                }
-            }
-            if (!lastName.empty())
-            {
-                os << "}"
-                   << "}";
-            }
-            lastName.clear();
-            for (size_t j = 0; j < numAnnotations; ++j)
-            {
-                if (names[j].find("org.alljoyn.Bus.Dict.") == 0)
-                {
-                    size_t pos = sizeof("org.alljoyn.Bus.Dict.") - 1;
-                    size_t dot = names[j].find(".", pos);
-                    if (dot == qcc::String::npos)
+                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Min", min);
+                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Max", max);
+                    props[j]->GetAnnotation("org.alljoyn.Bus.Type.Default", def);
+                    err  |= Property(&properties, propName, props[j]->description,
+                            (props[j]->access == ajn::PROP_ACCESS_READ), signature, min, max, def);
+                    VERIFY_CBOR(err);
+                    switch (props[j]->access)
                     {
-                        continue;
-                    }
-                    qcc::String dictName = names[j].substr(pos, dot - pos);
-                    if (dictName != lastName)
-                    {
-                        os << (comma++ ? ",\"" : "\"") << dictName << "\":{"
-                           << "\"type\":\"object\""
-                           << "}";
-                        lastName = dictName;
+                        case ajn::PROP_ACCESS_RW:
+                        case ajn::PROP_ACCESS_WRITE:
+                            access |= READWRITE;
+                            break;
+                        case ajn::PROP_ACCESS_READ:
+                            access |= READ;
+                            break;
                     }
                 }
-            }
-            lastName.clear();
-            for (size_t j = 0; j < numAnnotations; ++j)
-            {
-                if (names[j].find("org.alljoyn.Bus.Enum.") == 0)
+                if (hasProps)
                 {
-                    size_t pos = sizeof("org.alljoyn.Bus.Enum.") - 1;
-                    size_t dot = names[j].find_first_of('.', pos);
-                    if (dot == qcc::String::npos)
+                    CborEncoder rtMap;
+                    err |= cbor_encode_text_stringz(&properties, "rt");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(&properties, &rtMap, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&rtMap, "readOnly");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_boolean(&rtMap, true);
+                    VERIFY_CBOR(err);
+                    err |= Pair(&rtMap, "type", "array");
+                    VERIFY_CBOR(err);
+                    CborEncoder def;
+                    err |= cbor_encode_text_stringz(&rtMap, "default");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_array(&rtMap, &def, 1);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&def, rt.c_str());
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&rtMap, &def);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&properties, &rtMap);
+                    VERIFY_CBOR(err);
+                    CborEncoder ifMap;
+                    err |= cbor_encode_text_stringz(&properties, "if");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(&properties, &ifMap, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&ifMap, "readOnly");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_boolean(&ifMap, true);
+                    VERIFY_CBOR(err);
+                    err |= Pair(&ifMap, "type", "array");
+                    VERIFY_CBOR(err);
+                    CborEncoder items;
+                    err |= cbor_encode_text_stringz(&ifMap, "items");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_map(&ifMap, &items, 2);
+                    VERIFY_CBOR(err);
+                    err |= Pair(&items, "type", "string");
+                    VERIFY_CBOR(err);
+                    CborEncoder enumArr;
+                    err |= cbor_encode_text_stringz(&items, "enum");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_create_array(&items, &enumArr, CborIndefiniteLength);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_text_stringz(&enumArr, "oic.if.baseline");
+                    VERIFY_CBOR(err);
+                    if (access & READ)
                     {
-                        continue;
+                        err |= cbor_encode_text_stringz(&enumArr, "oic.if.r");
+                        VERIFY_CBOR(err);
                     }
-                    qcc::String enumName = names[j].substr(pos, dot - pos);
-                    dot = names[j].find_last_of_std('.');
-                    qcc::String enumValue = names[j].substr(dot + 1);
-                    if (enumName != lastName)
+                    if (access & READWRITE)
                     {
-                        if (!lastName.empty())
+                        err |= cbor_encode_text_stringz(&enumArr, "oic.if.rw");
+                        VERIFY_CBOR(err);
+                    }
+                    err |= cbor_encoder_close_container(&items, &enumArr);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&ifMap, &items);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&properties, &ifMap);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definition, &properties);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definitions, &definition);
+                    VERIFY_CBOR(err);
+                }
+            }
+            delete[] props;
+            props = NULL;
+            size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
+            members = new const ajn::InterfaceDescription::Member*[numMembers];
+            ifaces[i]->GetMembers(members, numMembers);
+            for (size_t j = 0; j < numMembers; ++j)
+            {
+                std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
+                CborEncoder definition;
+                err |= cbor_encode_text_stringz(&definitions, rt.c_str());
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&definitions, &definition, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= Pair(&definition, "type", "object");
+                VERIFY_CBOR(err);
+                CborEncoder properties;
+                err |= cbor_encode_text_stringz(&definition, "properties");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&definition, &properties, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                std::string propName = GetPropName(members[j], "validity");
+                CborEncoder prop;
+                err |= cbor_encode_text_stringz(&properties, propName.c_str());
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
+                {
+                    err |= cbor_encode_text_stringz(&prop, "readOnly");
+                    VERIFY_CBOR(err);
+                    err |= cbor_encode_boolean(&prop, true);
+                    VERIFY_CBOR(err);
+                }
+                err |= Pair(&prop, "type", "boolean");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&properties, &prop);
+                VERIFY_CBOR(err);
+                size_t argN = 0;
+                err |= Properties(&properties, ajSoftwareVersion, members[j],
+                        members[j]->signature.c_str(), argN,
+                        (members[j]->memberType == ajn::MESSAGE_SIGNAL));
+                VERIFY_CBOR(err);
+                err |= Properties(&properties, ajSoftwareVersion, members[j],
+                        members[j]->returnSignature.c_str(), argN, true);
+                VERIFY_CBOR(err);
+                err |= cbor_encode_text_stringz(&properties, "rt");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= cbor_encode_text_stringz(&prop, "readOnly");
+                VERIFY_CBOR(err);
+                err |= cbor_encode_boolean(&prop, true);
+                VERIFY_CBOR(err);
+                err |= Pair(&prop, "type", "array");
+                VERIFY_CBOR(err);
+                CborEncoder def;
+                err |= cbor_encode_text_stringz(&prop, "default");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_array(&prop, &def, 1);
+                VERIFY_CBOR(err);
+                err |= cbor_encode_text_stringz(&def, rt.c_str());
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&prop, &def);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&properties, &prop);
+                VERIFY_CBOR(err);
+                err |= cbor_encode_text_stringz(&properties, "if");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= cbor_encode_text_stringz(&prop, "readOnly");
+                VERIFY_CBOR(err);
+                err |= cbor_encode_boolean(&prop, true);
+                VERIFY_CBOR(err);
+                err |= Pair(&prop, "type", "array");
+                VERIFY_CBOR(err);
+                CborEncoder items;
+                err |= cbor_encode_text_stringz(&prop, "items");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_map(&prop, &items, 2);
+                VERIFY_CBOR(err);
+                err |= Pair(&items, "type", "string");
+                VERIFY_CBOR(err);
+                CborEncoder enumArr;
+                err |= cbor_encode_text_stringz(&items, "enum");
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_create_array(&items, &enumArr, CborIndefiniteLength);
+                VERIFY_CBOR(err);
+                err |= cbor_encode_text_stringz(&enumArr, "oic.if.baseline");
+                VERIFY_CBOR(err);
+                if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
+                {
+                    err |= cbor_encode_text_stringz(&enumArr, "oic.if.r");
+                    VERIFY_CBOR(err);
+                }
+                else
+                {
+                    err |= cbor_encode_text_stringz(&enumArr, "oic.if.rw");
+                    VERIFY_CBOR(err);
+                }
+                err |= cbor_encoder_close_container(&items, &enumArr);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&prop, &items);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&properties, &prop);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&definition, &properties);
+                VERIFY_CBOR(err);
+                err |= cbor_encoder_close_container(&definitions, &definition);
+                VERIFY_CBOR(err);
+            }
+            delete[] members;
+            members = NULL;
+            if (strcmp(ajSoftwareVersion, "v16.10.00") >= 0)
+            {
+                size_t numAnnotations = ifaces[i]->GetAnnotations();
+                names = new qcc::String[numAnnotations];
+                values = new qcc::String[numAnnotations];
+                ifaces[i]->GetAnnotations(names, values, numAnnotations);
+                CborEncoder definition;
+                CborEncoder properties;
+                qcc::String lastName;
+                for (size_t j = 0; j < numAnnotations; ++j)
+                {
+                    if (names[j].find("org.alljoyn.Bus.Struct.") == 0)
+                    {
+                        size_t pos = sizeof("org.alljoyn.Bus.Struct.") - 1;
+                        size_t dot = names[j].find(".", pos);
+                        if (dot == qcc::String::npos)
                         {
-                            os << "]"
-                               << "}";
+                            continue;
                         }
-                        os << (comma++ ? ",\"" : "\"") << enumName << "\":{"
-                           << "\"oneOf\":[";
-                        lastName = enumName;
-                        fieldComma = 0;
+                        qcc::String structName = names[j].substr(pos, dot - pos);
+                        pos = dot + sizeof(".Field.") - 1;
+                        dot = names[j].find(".", pos);
+                        if (dot == qcc::String::npos)
+                        {
+                            continue;
+                        }
+                        qcc::String fieldName = ToOCPropName(names[j].substr(pos, dot - pos));
+                        if (structName != lastName)
+                        {
+                            if (!lastName.empty())
+                            {
+                                err |= cbor_encoder_close_container(&definition, &properties);
+                                VERIFY_CBOR(err);
+                                err |= cbor_encoder_close_container(&definitions, &definition);
+                                VERIFY_CBOR(err);
+                            }
+                            err |= cbor_encode_text_stringz(&definitions, structName.c_str());
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definitions, &definition,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            err |= Pair(&definition, "type", "object");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encode_text_stringz(&definition, "properties");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definition, &properties,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            lastName = structName;
+                        }
+                        CborEncoder prop;
+                        err |= cbor_encode_text_stringz(&properties, fieldName.c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_map(&properties, &prop, CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        qcc::String min, max, def;
+                        err |= GetJsonType(&prop, values[j].c_str(), min, max, def);
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_close_container(&properties, &prop);
+                        VERIFY_CBOR(err);
                     }
-                    os << (fieldComma++ ? "," : "") << "{"
-                       << "\"enum\":[" << values[j] << "],"
-                       << "\"title\":\"" << enumValue << "\""
-                       << "}";
                 }
-            }
-            if (!lastName.empty())
-            {
-                os << "]"
-                   << "}";
+                if (!lastName.empty())
+                {
+                    err |= cbor_encoder_close_container(&definition, &properties);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definitions, &definition);
+                    VERIFY_CBOR(err);
+                }
+                lastName.clear();
+                for (size_t j = 0; j < numAnnotations; ++j)
+                {
+                    if (names[j].find("org.alljoyn.Bus.Dict.") == 0)
+                    {
+                        size_t pos = sizeof("org.alljoyn.Bus.Dict.") - 1;
+                        size_t dot = names[j].find(".", pos);
+                        if (dot == qcc::String::npos)
+                        {
+                            continue;
+                        }
+                        qcc::String dictName = names[j].substr(pos, dot - pos);
+                        if (dictName != lastName)
+                        {
+                            err |= cbor_encode_text_stringz(&definitions, dictName.c_str());
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definitions, &definition, 1);
+                            VERIFY_CBOR(err);
+                            err |= Pair(&definition, "type", "object");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_close_container(&definitions, &definition);
+                            VERIFY_CBOR(err);
+                            lastName = dictName;
+                        }
+                    }
+                }
+                lastName.clear();
+                CborEncoder prop;
+                for (size_t j = 0; j < numAnnotations; ++j)
+                {
+                    if (names[j].find("org.alljoyn.Bus.Enum.") == 0)
+                    {
+                        size_t pos = sizeof("org.alljoyn.Bus.Enum.") - 1;
+                        size_t dot = names[j].find_first_of('.', pos);
+                        if (dot == qcc::String::npos)
+                        {
+                            continue;
+                        }
+                        qcc::String enumName = names[j].substr(pos, dot - pos);
+                        dot = names[j].find_last_of_std('.');
+                        qcc::String enumValue = names[j].substr(dot + 1);
+                        if (enumName != lastName)
+                        {
+                            if (!lastName.empty())
+                            {
+                                err |= cbor_encoder_close_container(&definitions, &prop);
+                                VERIFY_CBOR(err);
+                                err |= cbor_encoder_close_container(&definitions, &definition);
+                                VERIFY_CBOR(err);
+                            }
+                            err |= cbor_encode_text_stringz(&definitions, enumName.c_str());
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_map(&definitions, &definition,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            err |= cbor_encode_text_stringz(&definitions, "oneOf");
+                            VERIFY_CBOR(err);
+                            err |= cbor_encoder_create_array(&definitions, &prop,
+                                    CborIndefiniteLength);
+                            VERIFY_CBOR(err);
+                            lastName = enumName;
+                        }
+                        CborEncoder enumMap;
+                        err |= cbor_encoder_create_map(&prop, &enumMap, CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        CborEncoder enumArr;
+                        err |= cbor_encode_text_stringz(&enumMap, "enum");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_create_array(&enumMap, &enumArr, CborIndefiniteLength);
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&enumArr, values[j].c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_close_container(&enumMap, &enumArr);
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&enumMap, "title");
+                        VERIFY_CBOR(err);
+                        err |= cbor_encode_text_stringz(&enumMap, enumValue.c_str());
+                        VERIFY_CBOR(err);
+                        err |= cbor_encoder_close_container(&prop, &enumMap);
+                        VERIFY_CBOR(err);
+                    }
+                }
+                if (!lastName.empty())
+                {
+                    err |= cbor_encoder_close_container(&definitions, &prop);
+                    VERIFY_CBOR(err);
+                    err |= cbor_encoder_close_container(&definitions, &definition);
+                    VERIFY_CBOR(err);
+                }
             }
         }
     }
 
-    result = OC_STACK_OK;
+    err |= cbor_encoder_close_container(cbor, &definitions);
+    VERIFY_CBOR(err);
 
 exit:
     delete[] names;
@@ -676,266 +1217,587 @@ exit:
     delete[] members;
     delete[] props;
     delete[] ifaces;
-
-    os << "}";
-    return result;
+    return err;
 }
 
-OCStackResult Introspect(std::ostream &os, ajn::BusAttachment *bus, const char *ajSoftwareVersion,
-        const char *title, const char *version)
+CborError Introspect(ajn::BusAttachment *bus, const char *ajSoftwareVersion, const char *title,
+        const char *version, uint8_t *out, size_t *outSize)
 {
-    os << "{\"swagger\":\"2.0\",";
-    OCStackResult result = Info(os, title, version);
-    if (result != OC_STACK_OK)
+    int64_t err = CborNoError;
+    CborEncoder encoder;
+    cbor_encoder_init(&encoder, out, *outSize, 0);
+    CborEncoder map;
+    err |= cbor_encoder_create_map(&encoder, &map, CborIndefiniteLength);
+    VERIFY_CBOR(err);
+    err |= Pair(&map, "swagger", "2.0");
+    VERIFY_CBOR(err);
+    err |= Info(&map, title, version);
+    VERIFY_CBOR(err);
+    err |= Paths(&map);
+    VERIFY_CBOR(err);
+    err |= Parameters(&map);
+    VERIFY_CBOR(err);
+    err |= Definitions(&map, bus, ajSoftwareVersion);
+    VERIFY_CBOR(err);
+    err |= cbor_encoder_close_container(&encoder, &map);
+    VERIFY_CBOR(err);
+
+exit:
+    if (err == CborErrorOutOfMemory)
     {
-        return result;
+        *outSize += cbor_encoder_get_extra_bytes_needed(&encoder);
     }
-    os << ",";
-    result = Paths(os);
-    if (result != OC_STACK_OK)
+    else if (err == CborNoError)
     {
-        return result;
+        *outSize = cbor_encoder_get_buffer_size(&encoder, out);
     }
-    os << ",";
-    result = Definitions(os, bus, ajSoftwareVersion);
-    if (result != OC_STACK_OK)
-    {
-        return result;
-    }
-    os << "}";
-    return OC_STACK_OK;
+    return (CborError)err;
 }
 
-/* Only single-dimension homogenous arrays are supported for now */
-static int JsonArrayType(cJSON *json, size_t dim[MAX_REP_ARRAY_DEPTH])
+static bool SetPropertiesSchema(OCRepPayload *property, OCRepPayloadPropType type,
+        OCRepPayload *obj)
 {
-    dim[0] = 0;
-    cJSON *element = json->child;
-    if (!element)
+    OCRepPayload *child = NULL;
+    bool success;
+
+    switch (type)
     {
-        return cJSON_NULL;
+        case OCREP_PROP_NULL:
+            success = false;
+            break;
+        case OCREP_PROP_INT:
+            success = OCRepPayloadSetPropString(property, "type", "integer");
+            break;
+        case OCREP_PROP_DOUBLE:
+            success = OCRepPayloadSetPropString(property, "type", "number");
+            break;
+        case OCREP_PROP_BOOL:
+            success = OCRepPayloadSetPropString(property, "type", "boolean");
+            break;
+        case OCREP_PROP_STRING:
+            success = OCRepPayloadSetPropString(property, "type", "string");
+            break;
+        case OCREP_PROP_BYTE_STRING:
+            child = OCRepPayloadCreate();
+            success = child &&
+                    OCRepPayloadSetPropString(child, "binaryEncoding", "base64") &&
+                    OCRepPayloadSetPropObjectAsOwner(property, "media", child) &&
+                    OCRepPayloadSetPropString(property, "type", "string");
+            if (success)
+            {
+                child = NULL;
+            }
+            break;
+        case OCREP_PROP_OBJECT:
+            child = OCRepPayloadCreate();
+            success = child &&
+                    SetPropertiesSchema(child, obj) &&
+                    OCRepPayloadSetPropObjectAsOwner(property, "properties", child) &&
+                    OCRepPayloadSetPropString(property, "type", "object");
+            if (success)
+            {
+                child = NULL;
+            }
+            break;
+        case OCREP_PROP_ARRAY:
+            success = false;
+            break;
     }
-    int type = element->type;
-    while (element)
+    if (!success)
     {
-        if (element->type != type)
+        goto exit;
+    }
+    success = true;
+
+exit:
+    OCRepPayloadDestroy(child);
+    return success;
+}
+
+static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj)
+{
+    OCRepPayload *property = NULL;
+    OCRepPayload *child = NULL;
+    OCRepPayload *array = NULL;
+    bool success = false;
+
+    if (!obj)
+    {
+        success = true;
+        goto exit;
+    }
+    for (OCRepPayloadValue *value = obj->values; value; value = value->next)
+    {
+        property = OCRepPayloadCreate();
+        if (!property)
         {
-            return 0;
+            LOG(LOG_ERR, "Failed to create payload");
+            success = false;
+            goto exit;
         }
-        ++dim[0];
-        element = element->next;
-    }
-    return type;
-}
-
-static OCStackResult ParseJsonItem(OCRepPayload *outPayload, cJSON *json)
-{
-    bool success = true;
-    while (success && json)
-    {
-        switch (json->type)
+        switch (value->type)
         {
-            case cJSON_False:
-                success = OCRepPayloadSetPropBool(outPayload, json->string, false);
-                break;
-            case cJSON_True:
-                success = OCRepPayloadSetPropBool(outPayload, json->string, true);
-                break;
-            case cJSON_NULL:
+            case OCREP_PROP_NULL:
                 success = false;
                 break;
-            case cJSON_Number:
-                success = OCRepPayloadSetPropDouble(outPayload, json->string, json->valuedouble);
+            case OCREP_PROP_INT:
+                success = OCRepPayloadSetPropString(property, "type", "integer");
                 break;
-            case cJSON_String:
-                success = OCRepPayloadSetPropString(outPayload, json->string, json->valuestring);
+            case OCREP_PROP_DOUBLE:
+                success = OCRepPayloadSetPropString(property, "type", "number");
                 break;
-            case cJSON_Array:
+            case OCREP_PROP_BOOL:
+                success = OCRepPayloadSetPropString(property, "type", "boolean");
+                break;
+            case OCREP_PROP_STRING:
+                success = OCRepPayloadSetPropString(property, "type", "string");
+                break;
+            case OCREP_PROP_BYTE_STRING:
+                child = OCRepPayloadCreate();
+                success = child &&
+                        OCRepPayloadSetPropString(child, "binaryEncoding", "base64") &&
+                        OCRepPayloadSetPropObjectAsOwner(property, "media", child) &&
+                        OCRepPayloadSetPropString(property, "type", "string");
+                if (success)
                 {
-                    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-                    int type = JsonArrayType(json, dim);
-                    size_t dimTotal = calcDimTotal(dim);
-                    switch (type)
-                    {
-                        case cJSON_Number:
-                            {
-                                double *array = (double *) OICCalloc(dimTotal, sizeof(double));
-                                if (!array)
-                                {
-                                    success = false;
-                                    break;
-                                }
-                                cJSON *element = json->child;
-                                for (size_t i = 0; i < dimTotal; ++i)
-                                {
-                                    array[i] = element->valuedouble;
-                                    element = element->next;
-                                }
-                                success = OCRepPayloadSetDoubleArrayAsOwner(outPayload,
-                                        json->string, array, dim);
-                                if (!success)
-                                {
-                                    OICFree(array);
-                                }
-                            }
-                            break;
-                        case cJSON_String:
-                            {
-                                char **array = (char **) OICCalloc(dimTotal, sizeof(char*));
-                                if (!array)
-                                {
-                                    success = false;
-                                    break;
-                                }
-                                cJSON *element = json->child;
-                                for (size_t i = 0; i < dimTotal; ++i)
-                                {
-                                    array[i] = OICStrdup(element->valuestring);
-                                    if (!array[i])
-                                    {
-                                        success = false;
-                                        break;
-                                    }
-                                    element = element->next;
-                                }
-                                if (success)
-                                {
-                                    success = OCRepPayloadSetStringArrayAsOwner(outPayload,
-                                            json->string, array, dim);
-                                }
-                                if (!success)
-                                {
-                                    for (size_t i = 0; i < dimTotal; ++i)
-                                    {
-                                        OICFree(array[i]);
-                                    }
-                                    OICFree(array);
-                                }
-                            }
-                            break;
-                        case cJSON_Object:
-                            {
-                                OCRepPayload **array = (OCRepPayload **) OICCalloc(dimTotal,
-                                        sizeof(OCRepPayload*));
-                                if (!array)
-                                {
-                                    success = false;
-                                    break;
-                                }
-                                cJSON *element = json->child;
-                                for (size_t i = 0; i < dimTotal; ++i)
-                                {
-                                    array[i] = OCRepPayloadCreate();
-                                    if (!array[i])
-                                    {
-                                        success = false;
-                                        break;
-                                    }
-                                    OCStackResult result = ParseJsonItem(array[i], element->child);
-                                    if (result != OC_STACK_OK)
-                                    {
-                                        success = false;
-                                        break;
-                                    }
-                                    element = element->next;
-                                }
-                                if (success)
-                                {
-                                    success = OCRepPayloadSetPropObjectArrayAsOwner(outPayload,
-                                            json->string, array, dim);
-                                }
-                                if (!success)
-                                {
-                                    for (size_t i = 0; i < dimTotal; ++i)
-                                    {
-                                        OCRepPayloadDestroy(array[i]);
-                                    }
-                                    OICFree(array);
-                                }
-                            }
-                            break;
-                        default:
-                            /* Only number, string, and object arrays are supported for now */
-                            assert(0);
-                            success = false;
-                            break;
-                    }
+                    child = NULL;
                 }
                 break;
-            case cJSON_Object:
+            case OCREP_PROP_OBJECT:
+                child = OCRepPayloadCreate();
+                success = child &&
+                        SetPropertiesSchema(child, value->obj) &&
+                        OCRepPayloadSetPropObjectAsOwner(property, "properties", child) &&
+                        OCRepPayloadSetPropString(property, "type", "object");
+                if (success)
                 {
-                    OCRepPayload *objPayload = OCRepPayloadCreate();
-                    if (!objPayload)
+                    child = NULL;
+                }
+                break;
+            case OCREP_PROP_ARRAY:
+                success = true;
+                array = property;
+                for (size_t i = 0; success && (i < MAX_REP_ARRAY_DEPTH) && value->arr.dimensions[i];
+                     ++i)
+                {
+                    child = OCRepPayloadCreate();
+                    success = child &&
+                            OCRepPayloadSetPropObjectAsOwner(array, "items", child) &&
+                            OCRepPayloadSetPropString(array, "type", "array");
+                    if (success)
                     {
-                        success = false;
-                        break;
+                        array = child;
+                        child = NULL;
                     }
-                    cJSON *obj = json->child;
-                    OCStackResult result = ParseJsonItem(objPayload, obj);
-                    if (result != OC_STACK_OK)
-                    {
-                        success = false;
-                        break;
-                    }
-                    success = OCRepPayloadSetPropObjectAsOwner(outPayload, json->string, objPayload);
+                }
+                if (success)
+                {
+                    success = SetPropertiesSchema(array, value->arr.type, value->arr.objArray[0]);
                 }
                 break;
         }
-        json = json->next;
-    }
-    return success ? OC_STACK_OK : OC_STACK_ERROR;
-}
+        if (!success)
+        {
+            goto exit;
+        }
 
-static OCStackResult ParseJsonPayload(OCPayload** outPayload, const char* payload)
-{
-    OCStackResult result = OC_STACK_INVALID_PARAM;
-    cJSON *json;
+        if (!OCRepPayloadSetPropObjectAsOwner(parent, value->name, property))
+        {
+            success = false;
+            goto exit;
+        }
+        property = NULL;
+    }
+    success = true;
 
-    *outPayload = NULL;
-    json = cJSON_Parse(payload);
-    if (!json)
-    {
-        goto exit;
-    }
-    if (json->type != cJSON_Object)
-    {
-        goto exit;
-    }
-    *outPayload = (OCPayload *) OCRepPayloadCreate();
-    if (!*outPayload)
-    {
-        goto exit;
-    }
-    result = ParseJsonItem((OCRepPayload *) *outPayload, json->child);
 exit:
-    if (json)
-    {
-        cJSON_Delete(json);
-    }
-    if (result != OC_STACK_OK)
-    {
-        OCRepPayloadDestroy((OCRepPayload *) *outPayload);
-        *outPayload = NULL;
-    }
-    return result;
+    OCRepPayloadDestroy(child);
+    OCRepPayloadDestroy(property);
+    return success;
 }
 
-OCStackResult ParsePayload(OCPayload** outPayload, OCPayloadFormat format, OCPayloadType type,
-        const uint8_t* payload, size_t payloadSize)
+OCRepPayload *IntrospectDefinition(OCRepPayload *payload, std::string resourceType,
+        std::vector<std::string> &interfaces)
 {
-    (void) type;
-    (void) payloadSize;
-    OCStackResult result;
-
-    switch (format)
+    OCRepPayload *definition = NULL;
+    OCRepPayload *properties = NULL;
+    OCRepPayload *rt = NULL;
+    size_t rtsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    size_t dimTotal;
+    char **rts = NULL;
+    std::vector<std::string>::iterator ifIt;
+    OCRepPayload *itf = NULL;
+    OCRepPayload *items = NULL;
+    size_t itfsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    char **itfs = NULL;
+    definition = OCRepPayloadCreate();
+    if (!definition)
     {
-        case OC_FORMAT_JSON:
-            result = ParseJsonPayload(outPayload, (const char *) payload);
-            break;
-        default:
-            result = OC_STACK_INVALID_PARAM;
-            break;
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
     }
+    if (!OCRepPayloadSetPropString(definition, "type", "object"))
+    {
+        goto error;
+    }
+    properties = OCRepPayloadCreate();
+    if (!properties)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    rt = OCRepPayloadCreate();
+    if (!rt)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropBool(rt, "readOnly", true) ||
+            !OCRepPayloadSetPropString(rt, "type", "array"))
+    {
+        goto error;
+    }
+    rtsDim[0] = 1;
+    dimTotal = calcDimTotal(rtsDim);
+    rts = (char**) OICCalloc(dimTotal, sizeof(char*));
+    if (!rts)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    rts[0] = OICStrdup(resourceType.c_str());
+    if (!OCRepPayloadSetStringArrayAsOwner(rt, "default", rts, rtsDim))
+    {
+        goto error;
+    }
+    rts = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(properties, "rt", rt))
+    {
+        goto error;
+    }
+    rt = NULL;
+    itf = OCRepPayloadCreate();
+    if (!itf)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropBool(itf, "readOnly", true) ||
+            !OCRepPayloadSetPropString(itf, "type", "array"))
+    {
+        goto error;
+    }
+    items = OCRepPayloadCreate();
+    if (!items)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(items, "type", "string"))
+    {
+        goto error;
+    }
+    itfsDim[0] = interfaces.size();
+    dimTotal = calcDimTotal(itfsDim);
+    itfs = (char **) OICCalloc(dimTotal, sizeof(char *));
+    if (!itfs)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    ifIt = interfaces.begin();
+    for (size_t i = 0; i < dimTotal; ++i, ++ifIt)
+    {
+        itfs[i] = OICStrdup(ifIt->c_str());
+    }
+    if (!OCRepPayloadSetStringArrayAsOwner(items, "enum", itfs, itfsDim))
+    {
+        goto error;
+    }
+    itfs = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(itf, "items", items))
+    {
+        goto error;
+    }
+    items = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(properties, "if", itf))
+    {
+        goto error;
+    }
+    itf = NULL;
+    if (!SetPropertiesSchema(properties, payload))
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetPropObjectAsOwner(definition, "properties", properties))
+    {
+        goto error;
+    }
+    properties = NULL;
+    return definition;
 
-    return result;
+error:
+    OCRepPayloadDestroy(items);
+    OCRepPayloadDestroy(itf);
+    if (itfs)
+    {
+        dimTotal = calcDimTotal(itfsDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OICFree(itfs[i]);
+        }
+        OICFree(itfs);
+    }
+    if (rts)
+    {
+        dimTotal = calcDimTotal(rtsDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OICFree(rts[i]);
+        }
+        OICFree(rts);
+    }
+    OCRepPayloadDestroy(rt);
+    OCRepPayloadDestroy(properties);
+    OCRepPayloadDestroy(definition);
+    return NULL;
+}
+
+OCRepPayload *IntrospectPath(std::vector<std::string> &resourceTypes,
+        std::vector<std::string> &interfaces)
+{
+    OCRepPayload *path = NULL;
+    OCRepPayload *method = NULL;
+    size_t dimTotal;
+    size_t parametersDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    OCRepPayload **parameters = NULL;
+    size_t itfsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    char **itfs = NULL;
+    OCRepPayload *responses = NULL;
+    OCRepPayload *code = NULL;
+    OCRepPayload *schema = NULL;
+    size_t oneOfDim[MAX_REP_ARRAY_DEPTH] = { 0 };
+    OCRepPayload **oneOf = NULL;
+    std::string ref;
+    path = OCRepPayloadCreate();
+    if (!path)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    /* oic.if.baseline is mandatory and it supports post */
+    method = OCRepPayloadCreate();
+    if (!method)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    parametersDim[0] = 2;
+    dimTotal = calcDimTotal(parametersDim);
+    parameters = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload*));
+    if (!parameters)
+    {
+        LOG(LOG_ERR, "Failed to allocate object array");
+        goto error;
+    }
+    parameters[0] = OCRepPayloadCreate();
+    if (!parameters[0])
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(parameters[0], "name", "if") ||
+            !OCRepPayloadSetPropString(parameters[0], "in", "query") ||
+            !OCRepPayloadSetPropString(parameters[0], "type", "string"))
+    {
+        goto error;
+    }
+    itfs = (char **) OICCalloc(interfaces.size(), sizeof(char *));
+    if (!itfs)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    itfsDim[0] = 0;
+    for (size_t i = 0; i < interfaces.size(); ++i)
+    {
+        /* Filter out read-only interfaces from post method */
+        std::string &itf = interfaces[i];
+        if (itf == "oic.if.ll" || itf == "oic.if.r" || itf == "oic.if.s")
+        {
+            continue;
+        }
+        itfs[itfsDim[0]++] = OICStrdup(itf.c_str());
+    }
+    if (!OCRepPayloadSetStringArrayAsOwner(parameters[0], "enum", itfs, itfsDim))
+    {
+        goto error;
+    }
+    itfs = NULL;
+    parameters[1] = OCRepPayloadCreate();
+    if (!parameters[1])
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(parameters[1], "name", "body") ||
+            !OCRepPayloadSetPropString(parameters[1], "in", "body"))
+    {
+        goto error;
+    }
+    schema = OCRepPayloadCreate();
+    if (!schema)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    oneOfDim[0] = resourceTypes.size();
+    dimTotal = calcDimTotal(oneOfDim);
+    oneOf = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload*));
+    if (!oneOf)
+    {
+        LOG(LOG_ERR, "Failed to allocate object array");
+        goto error;
+    }
+    for (size_t i = 0; i < dimTotal; ++i)
+    {
+        oneOf[i] = OCRepPayloadCreate();
+        if (!oneOf[i])
+        {
+            LOG(LOG_ERR, "Failed to create payload");
+            goto error;
+        }
+        ref = std::string("#/definitions/") + resourceTypes[i];
+        if (!OCRepPayloadSetPropString(oneOf[i], "$ref", ref.c_str()))
+        {
+            goto error;
+        }
+    }
+    if (!OCRepPayloadSetPropObjectArrayAsOwner(schema, "oneOf", oneOf, oneOfDim))
+    {
+        goto error;
+    }
+    oneOf = NULL;
+    /* schema will be re-used in "responses" (so no ...AsOwner here) */
+    if (!OCRepPayloadSetPropObject(parameters[1], "schema", schema))
+    {
+        goto error;
+    }
+    /* parameters will be re-used in "get" (so no ...AsOwner here) */
+    if (!OCRepPayloadSetPropObjectArray(method, "parameters", (const OCRepPayload **)parameters,
+            parametersDim))
+    {
+        goto error;
+    }
+    responses = OCRepPayloadCreate();
+    if (!responses)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    code = OCRepPayloadCreate();
+    if (!code)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    if (!OCRepPayloadSetPropString(code, "description", ""))
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetPropObjectAsOwner(code, "schema", schema))
+    {
+        goto error;
+    }
+    schema = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(responses, "200", code))
+    {
+        goto error;
+    }
+    code = NULL;
+    /* responses will be re-used in "get" (so no ...AsOwner here) */
+    if (!OCRepPayloadSetPropObject(method, "responses", responses))
+    {
+        goto error;
+    }
+    if (!OCRepPayloadSetPropObjectAsOwner(path, "post", method))
+    {
+        goto error;
+    }
+    method = NULL;
+    method = OCRepPayloadCreate();
+    if (!method)
+    {
+        LOG(LOG_ERR, "Failed to create payload");
+        goto error;
+    }
+    itfs = (char **) OICCalloc(interfaces.size(), sizeof(char *));
+    if (!itfs)
+    {
+        LOG(LOG_ERR, "Failed to allocate string array");
+        goto error;
+    }
+    itfsDim[0] = 0;
+    for (size_t i = 0; i < interfaces.size(); ++i)
+    {
+        /* All interfaces support get method */
+        itfs[itfsDim[0]++] = OICStrdup(interfaces[i].c_str());
+    }
+    if (!OCRepPayloadSetStringArrayAsOwner(parameters[0], "enum", itfs, itfsDim))
+    {
+        goto error;
+    }
+    itfs = NULL;
+    parametersDim[0] = 1; /* only use "if" parameter */
+    if (!OCRepPayloadSetPropObjectArrayAsOwner(method, "parameters", parameters, parametersDim))
+    {
+        goto error;
+    }
+    parameters = NULL;
+    if (!OCRepPayloadSetPropObject(method, "responses", responses))
+    {
+        goto error;
+    }
+    responses = NULL;
+    if (!OCRepPayloadSetPropObjectAsOwner(path, "get", method))
+    {
+        goto error;
+    }
+    method = NULL;
+    return path;
+
+error:
+    if (oneOf)
+    {
+        dimTotal = calcDimTotal(oneOfDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(oneOf[i]);
+        }
+        OICFree(oneOf);
+    }
+    OCRepPayloadDestroy(schema);
+    OCRepPayloadDestroy(code);
+    if (parameters)
+    {
+        dimTotal = calcDimTotal(parametersDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OCRepPayloadDestroy(parameters[i]);
+        }
+        OICFree(parameters);
+    }
+    if (itfs)
+    {
+        dimTotal = calcDimTotal(itfsDim);
+        for (size_t i = 0; i < dimTotal; ++i)
+        {
+            OICFree(itfs[i]);
+        }
+        OICFree(itfs);
+    }
+    OCRepPayloadDestroy(responses);
+    OCRepPayloadDestroy(method);
+    OCRepPayloadDestroy(path);
+    return NULL;
 }

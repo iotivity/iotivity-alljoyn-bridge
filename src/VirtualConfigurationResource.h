@@ -26,27 +26,28 @@
 class VirtualConfigurationResource : public VirtualResource
 {
     public:
-        static VirtualResource *Create(Bridge* bridge, ajn::BusAttachment *bus,
-                                       const char *name, ajn::SessionId sessionId, const char *path,
-                                       const char *ajSoftwareVersion);
+        static VirtualConfigurationResource *Create(ajn::BusAttachment *bus, const char *name,
+                ajn::SessionId sessionId, const char *ajSoftwareVersion,
+                CreateCB createCb, void *createContext);
         virtual ~VirtualConfigurationResource();
+        void SetAboutData(ajn::AboutData *aboutData);
 
     private:
-        std::map<std::string, std::string> m_appNames;
+        OCResourceHandle m_deviceConfigurationHandle;
+        OCResourceHandle m_platformConfigurationHandle;
+        OCResourceHandle m_maintenanceHandle;
+        ajn::AboutData m_aboutData;
         bool m_fr;
         bool m_rb;
 
-        VirtualConfigurationResource(Bridge *bridge, ajn::BusAttachment *bus,
-                                     const char *name, ajn::SessionId sessionId, const char *path,
-                                     const char *ajSoftwareVersion);
+        VirtualConfigurationResource(ajn::BusAttachment *bus, const char *name,
+                ajn::SessionId sessionId, const char *ajSoftwareVersion,
+                CreateCB createCb, void *createContext);
 
         OCStackResult Create();
         void IntrospectCB(QStatus status, ProxyBusObject *obj, void *context);
-        void GetSupportedLanguagesCB(ajn::Message &msg, void *ctx);
-        void GetAppNameCB(ajn::Message &msg, void *ctx);
         void GetConfigurationsCB(ajn::Message &msg, void *ctx);
         struct MethodCallContext;
-        QStatus UpdateAppNames(MethodCallContext *context);
         void UpdateConfigurationsCB(ajn::Message &msg, void *ctx);
         static OCEntityHandlerResult ConfigurationHandlerCB(OCEntityHandlerFlag flag,
                 OCEntityHandlerRequest *request,

@@ -21,53 +21,61 @@
 #ifndef _VIRTUALBUSOBJECT_H
 #define _VIRTUALBUSOBJECT_H
 
+#include "Resource.h"
+#include "octypes.h"
 #include <inttypes.h>
 #include <alljoyn/BusObject.h>
-#include "octypes.h"
 #include <condition_variable>
 #include <mutex>
 #include <set>
 #include <vector>
 
+class VirtualBusAttachment;
+
 class VirtualBusObject : public ajn::BusObject
 {
     public:
-        VirtualBusObject(ajn::BusAttachment *bus, const char *uri,
-                const std::vector<OCDevAddr> &devAddrs);
+        VirtualBusObject(VirtualBusAttachment *bus, Resource &resource);
         virtual ~VirtualBusObject();
+        void AddResource(Resource &resource);
         QStatus AddInterface(const char *ifaceName, bool createEmptyInterface = false);
         virtual void Observe();
         virtual void CancelObserve();
         virtual void Stop();
 
     protected:
-        typedef void (VirtualBusObject::*DoResourceHandler)(ajn::Message &msg, OCRepPayload *payload);
+        typedef void (VirtualBusObject::*DoResourceHandler)(ajn::Message &msg,
+                OCRepPayload *payload, void *context);
 
         std::mutex m_mutex;
+        VirtualBusAttachment *m_bus;
+        std::vector<Resource> m_resources;
 
-        void DoResource(OCMethod method, const char *uri, OCRepPayload *payload, ajn::Message &msg,
-                DoResourceHandler cb);
+        VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource);
+        void Observe(Resource &resource);
+        virtual void GetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
+        virtual void SetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
+        virtual void GetAllProps(const ajn::InterfaceDescription::Member *member,
+                ajn::Message &msg);
+        void DoResource(OCMethod method, std::string uri, std::vector<OCDevAddr> addrs,
+                OCRepPayload *payload, ajn::Message &msg, DoResourceHandler cb,
+                void *context = NULL);
 
     private:
         class DoResourceContext;
         class ObserveContext;
 
         std::condition_variable m_cond;
-        ajn::BusAttachment *m_bus;
-        std::vector<OCDevAddr> m_devAddrs;
-        std::vector<const ajn::InterfaceDescription *> m_ifaces;
         std::set<ObserveContext *> m_observes;
         size_t m_pending;
 
-        virtual void GetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
-        virtual void SetProp(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
-        virtual void GetAllProps(const ajn::InterfaceDescription::Member *member, ajn::Message &msg);
-        void GetPropCB(ajn::Message &msg, OCRepPayload *payload);
-        void SetPropCB(ajn::Message &msg, OCRepPayload *payload);
-        void GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload);
+        void GetPropCB(ajn::Message &msg, OCRepPayload *payload, void *context);
+        void SetPropCB(ajn::Message &msg, OCRepPayload *payload, void *context);
+        void GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload, void *context);
         static OCStackApplicationResult DoResourceCB(void *ctx, OCDoHandle handle,
                 OCClientResponse *response);
-        static OCStackApplicationResult ObserveCB(void *ctx, OCDoHandle handle, OCClientResponse *response);
+        static OCStackApplicationResult ObserveCB(void *ctx, OCDoHandle handle,
+                OCClientResponse *response);
 };
 
 #endif

@@ -19,6 +19,7 @@
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 #include "Bridge.h"
+#include "Log.h"
 #include "Plugin.h"
 #include "ocstack.h"
 #include "rd_client.h"
@@ -28,8 +29,10 @@
 #include <signal.h>
 #include <sstream>
 #include <stdlib.h>
+#include <thread>
 
 static volatile sig_atomic_t sQuitFlag = false;
+static volatile sig_atomic_t sResetSecurityFlag = false;
 static const char *gPSPrefix = "AllJoynBridge_";
 static const char *sUUID = NULL;
 static const char *sSender = NULL;
@@ -40,10 +43,102 @@ static bool sSecureMode = true;
 static bool sSecureMode = false;
 #endif
 
+static const char routerConfig[] =
+    "<busconfig>"
+    "  <type>alljoyn_bundled</type>"
+    "  <listen>tcp:iface=*,port=0</listen>"
+    "  <listen>udp:iface=*,port=0</listen>"
+    "  <limit name=\"auth_timeout\">20000</limit>"
+    "  <limit name=\"max_incomplete_connections\">48</limit>"
+    "  <limit name=\"max_completed_connections\">64</limit>"
+    "  <limit name=\"max_remote_clients_tcp\">48</limit>"
+    "  <limit name=\"max_remote_clients_udp\">48</limit>"
+    "  <property name=\"router_power_source\">Battery powered and chargeable</property>"
+    "  <property name=\"router_mobility\">Intermediate mobility</property>"
+    "  <property name=\"router_availability\">3-6 hr</property>"
+    "  <property name=\"router_node_connection\">Wireless</property>"
+    "</busconfig>";
+
+class OC
+{
+public:
+    bool Start()
+    {
+        m_thread = std::thread(OC::Process);
+        return true;
+    }
+    void Stop()
+    {
+        if (sSender)
+        {
+            bool done = false;
+            OCCallbackData cbData;
+            cbData.cb = OC::RDDeleteCB;
+            cbData.context = &done;
+            cbData.cd = NULL;
+            OCStackResult result = OCRDDelete(NULL, gRD.c_str(), CT_DEFAULT, NULL, 0, &cbData,
+                    OC_HIGH_QOS);
+            while (!done)
+            {
+                result = OCProcess();
+                if (result != OC_STACK_OK)
+                {
+                    break;
+                }
+#ifdef _WIN32
+                Sleep(1);
+#else
+                usleep(1 * 1000);
+#endif
+            }
+        }
+        else
+        {
+            OCRDStop();
+        }
+        OCStop();
+        m_thread.join();
+    }
+private:
+    std::thread m_thread;
+    static void Process()
+    {
+        while (!sQuitFlag)
+        {
+            OCStackResult result = OCProcess();
+            if (result != OC_STACK_OK)
+            {
+                fprintf(stderr, "OCProcess - %d\n", result);
+                break;
+            }
+#ifdef _WIN32
+            Sleep(1);
+#else
+            usleep(1 * 1000);
+#endif
+        }
+    }
+    static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
+            OCClientResponse *response)
+    {
+        bool *done = (bool *) ctx;
+        (void) handle;
+        LOG(LOG_INFO, "response=%p,response->result=%d", response, response ? response->result : 0);
+        *done = true;
+        return OC_STACK_DELETE_TRANSACTION;
+    }
+};
+
 static void SigIntCB(int sig)
 {
     (void) sig;
     sQuitFlag = true;
+}
+
+static void SigUsr1CB(int sig)
+{
+    (void) sig;
+    sResetSecurityFlag = true;
 }
 
 static std::string GetFilename(const char *uuid, const char *suffix)
@@ -114,21 +209,10 @@ static OCStackApplicationResult DiscoverResourceDirectoryCB(void *ctx, OCDoHandl
     }
 }
 
-static OCStackApplicationResult RDDeleteCB(void *ctx, OCDoHandle handle,
-        OCClientResponse *response)
-{
-    bool *done = (bool *) ctx;
-    (void) handle;
-    LOG(LOG_INFO, "response=%p,response->result=%d",
-        response, response ? response->result : 0);
-    *done = true;
-    return OC_STACK_DELETE_TRANSACTION;
-}
-
-static void ExecCB(const char *uuid, const char *sender, bool isVirtual)
+static void ExecCB(const char *uuid, const char *sender, bool secureMode, bool isVirtual)
 {
     printf("exec --ps %s --uuid %s --sender %s --rd %s --secureMode %s %s\n", gPSPrefix, uuid,
-            sender, OCGetServerInstanceIDString(), sSecureMode ? "true" : "false",
+            sender, OCGetServerInstanceIDString(), secureMode ? "true" : "false",
             isVirtual ? "--virtual" : "");
     fflush(stdout);
 }
@@ -170,6 +254,7 @@ int main(int argc, char **argv)
 {
     int ret = EXIT_FAILURE;
     Bridge *bridge = NULL;
+    OC *oc = NULL;
     std::string dbFilename;
     OCStackResult result;
     OCPersistentStorage ps = { PSOpenCB, fread, fwrite, fclose, unlink };
@@ -236,6 +321,9 @@ int main(int argc, char **argv)
     }
 
     signal(SIGINT, SigIntCB);
+#ifdef SIGUSR1
+    signal(SIGUSR1, SigUsr1CB);
+#endif
 
     QStatus status = AllJoynInit();
     if (status != ER_OK)
@@ -243,7 +331,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "AllJoynInit - %s\n", QCC_StatusText(status));
         goto exit;
     }
-    status = AllJoynRouterInit();
+    status = AllJoynRouterInitWithConfig(routerConfig);
     if (status != ER_OK)
     {
         fprintf(stderr, "AllJoynRouterInit - %s\n", QCC_StatusText(status));
@@ -277,11 +365,12 @@ int main(int argc, char **argv)
             fprintf(stderr, "OCStopMulticastServer - %d\n", result);
             goto exit;
         }
+        OCDoHandle handle;
         OCCallbackData cbData;
         cbData.cb = DiscoverResourceDirectoryCB;
         cbData.context = NULL;
         cbData.cd = NULL;
-        result = OCDoResource(NULL, OC_REST_DISCOVER, "/oic/res?rt=oic.wk.rd", NULL, 0,
+        result = OCDoResource(&handle, OC_REST_DISCOVER, "/oic/res?rt=oic.wk.rd", NULL, 0,
                 CT_DEFAULT, OC_HIGH_QOS, &cbData, NULL, 0);
         if (result != OC_STACK_OK)
         {
@@ -318,21 +407,27 @@ int main(int argc, char **argv)
         bridge = new Bridge(gPSPrefix, (Bridge::Protocol) protocols);
         bridge->SetProcessCB(ExecCB, KillCB, GetSeenStateCB);
     }
+    bridge->SetDeviceName("AllJoyn Bridge");
+    bridge->SetManufacturerName("IoTivity");
     bridge->SetSecureMode(sSecureMode);
     if (!bridge->Start())
     {
         goto exit;
     }
+    oc = new OC();
+    if (!oc->Start())
+    {
+        goto exit;
+    }
     while (!sQuitFlag)
     {
+        if (sResetSecurityFlag)
+        {
+            sResetSecurityFlag = false;
+            bridge->ResetSecurity();
+        }
         if (!bridge->Process())
         {
-            goto exit;
-        }
-        OCStackResult result = OCProcess();
-        if (result != OC_STACK_OK)
-        {
-            fprintf(stderr, "OCProcess - %d\n", result);
             goto exit;
         }
 #ifdef _WIN32
@@ -349,34 +444,15 @@ exit:
         bridge->Stop();
         delete bridge;
     }
-    if (sSender)
+    if (oc)
     {
-        bool done = false;
-        OCCallbackData cbData;
-        cbData.cb = RDDeleteCB;
-        cbData.context = &done;
-        cbData.cd = NULL;
-        result = OCRDDelete(NULL, gRD.c_str(), CT_DEFAULT, NULL, 0, &cbData, OC_HIGH_QOS);
-        while (!done)
+        oc->Stop();
+        if (sSender)
         {
-            result = OCProcess();
-            if (result != OC_STACK_OK)
-            {
-                break;
-            }
-#ifdef _WIN32
-            Sleep(1);
-#else
-            usleep(1 * 1000);
-#endif
+            remove(seenPath.c_str());
         }
-        remove(seenPath.c_str());
+        delete oc;
     }
-    else
-    {
-        OCRDStop();
-    }
-    OCStop();
     AllJoynRouterShutdown();
     AllJoynShutdown();
     return ret;

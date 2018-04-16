@@ -24,6 +24,7 @@
 #include "cacommon.h"
 #include <inttypes.h>
 #include <alljoyn/AboutObj.h>
+#include <alljoyn/ApplicationStateListener.h>
 #include <alljoyn/AuthListener.h>
 #include <alljoyn/PermissionConfigurationListener.h>
 #include <stddef.h>
@@ -37,8 +38,9 @@ class AllJoynSecurity : public ajn::DefaultECDHEAuthListener,
             CONSUMER,
             PRODUCER
         } Role;
-        AllJoynSecurity(ajn::BusAttachment *bus, Role role);
-        virtual ~AllJoynSecurity() { }
+        AllJoynSecurity(ajn::BusAttachment *bus, Role role,
+                ajn::ApplicationStateListener *appStateListener = NULL);
+        virtual ~AllJoynSecurity();
 
         bool IsClaimed();
         QStatus SetClaimable();
@@ -46,6 +48,7 @@ class AllJoynSecurity : public ajn::DefaultECDHEAuthListener,
     private:
         ajn::BusAttachment *m_bus;
         Role m_role;
+        ajn::ApplicationStateListener *m_appStateListener;
 
         virtual void SecurityViolation(QStatus status, const ajn::Message &msg);
         virtual void AuthenticationComplete(const char *authMechanism, const char *peerName,
@@ -60,6 +63,7 @@ class OCSecurity
 {
     public:
         bool Init();
+        void Reset();
 
     private:
         static void DisplayPinCB(char *pin, size_t pinSize, void *context);

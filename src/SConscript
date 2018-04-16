@@ -20,12 +20,21 @@
 
 Import('env')
 
-iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
+iotivity_alljoyn_bridge_cpp = ['AboutData.cpp',
+                               'Bridge.cpp',
+                               'DeviceConfigurationResource.cpp',
+                               'DeviceResource.cpp',
+                               'Hash.cpp',
+                               'Interfaces.cpp',
                                'Introspection.cpp',
+                               'IntrospectionParse.cpp',
                                'Name.cpp',
                                'Payload.cpp',
+                               'PlatformConfigurationResource.cpp',
+                               'PlatformResource.cpp',
                                'Presence.cpp',
                                'Resource.cpp',
+                               'SecureModeResource.cpp',
                                'Security.cpp',
                                'Signature.cpp',
                                'VirtualBusAttachment.cpp',
@@ -33,7 +42,8 @@ iotivity_alljoyn_bridge_cpp = ['Bridge.cpp',
                                'VirtualConfigBusObject.cpp',
                                'VirtualDevice.cpp',
                                'VirtualConfigurationResource.cpp',
-                               'VirtualResource.cpp']
+                               'VirtualResource.cpp',
+                               '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborencoder.c']
 alljoynplugin_lib = env.StaticLibrary('AlljoynPlugin', iotivity_alljoyn_bridge_cpp)
 
 Return('alljoynplugin_lib')

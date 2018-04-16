@@ -29,5 +29,6 @@ QStatus ParseCompleteType(const char *&sigPtr);
 uint8_t CountCompleteTypes(const char *signature);
 
 void CreateSignature(char *sig, OCRepPayloadValue *value);
+void CreateSignature(char *sig, OCRepPayloadValueArray *arr, uint8_t di = 0);
 
 #endif

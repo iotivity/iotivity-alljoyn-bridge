@@ -21,24 +21,29 @@
 #include "VirtualResource.h"
 
 #include "Bridge.h"
+#include "Interfaces.h"
 #include "Introspection.h"
+#include "Log.h"
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
+#include "Resource.h"
 #include <alljoyn/AllJoynStd.h>
 #include <alljoyn/BusAttachment.h>
 #include "Signature.h"
 #include "ocpayload.h"
 #include "ocstack.h"
 #include "oic_malloc.h"
+#include "oic_string.h"
 #include <algorithm>
 #include <assert.h>
 
-VirtualResource *VirtualResource::Create(Bridge *bridge, ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
+VirtualResource *VirtualResource::Create(ajn::BusAttachment *bus, const char *name,
+        ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        CreateCB createCb, void *createContext)
 {
-    VirtualResource *resource = new VirtualResource(bridge, bus, name, sessionId, path,
-            ajSoftwareVersion);
+    VirtualResource *resource = new VirtualResource(bus, name, sessionId, path, ajSoftwareVersion,
+            createCb, createContext);
     OCStackResult result = resource->Create();
     if (result != OC_STACK_OK)
     {
@@ -48,23 +53,27 @@ VirtualResource *VirtualResource::Create(Bridge *bridge, ajn::BusAttachment *bus
     return resource;
 }
 
-VirtualResource::VirtualResource(Bridge *bridge, ajn::BusAttachment *bus, const char *name,
-        ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion)
-    : ajn::ProxyBusObject(*bus, name, path, sessionId)
-    , m_bridge(bridge)
-    , m_bus(bus)
-    , m_ajSoftwareVersion(ajSoftwareVersion)
+VirtualResource::VirtualResource(ajn::BusAttachment *bus, const char *name,
+        ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        CreateCB createCb, void *createContext)
+    : ajn::ProxyBusObject(*bus, name, path, sessionId), m_bus(bus), m_createCb(createCb),
+    m_createContext(createContext), m_ajSoftwareVersion(ajSoftwareVersion),
+    m_hasSessionlessSignals(false)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s",
-        this, bus, name, sessionId, path, ajSoftwareVersion);
+    LOG(LOG_INFO, "[%p] bus=%p,name=%s,sessionId=%d,path=%s,ajSoftwareVersion=%s", this, bus, name,
+            sessionId, path, ajSoftwareVersion);
 }
 
 VirtualResource::~VirtualResource()
 {
-    LOG(LOG_INFO, "[%p] name=%s,path=%s", this,
-        GetUniqueName().c_str(), GetPath().c_str());
+    LOG(LOG_INFO, "[%p] name=%s,path=%s", this, GetUniqueName().c_str(), GetPath().c_str());
 
-    DestroyResource(GetPath().c_str());
+    OCResourceHandle handle;
+    while ((handle = OCGetResourceHandleFromCollection(m_handle, 0)))
+    {
+        OCUnBindResource(m_handle, handle);
+        OCDeleteResource(handle);
+    }
 }
 
 OCStackResult VirtualResource::Create()
@@ -72,18 +81,17 @@ OCStackResult VirtualResource::Create()
     std::lock_guard<std::mutex> lock(m_mutex);
 
     const ajn::InterfaceDescription *iface = m_bus->GetInterface(
-                ::ajn::org::allseen::Introspectable::InterfaceName);
+        ::ajn::org::freedesktop::DBus::Introspectable::InterfaceName);
     assert(iface);
     AddInterface(*iface);
-    const ajn::InterfaceDescription::Member *member = iface->GetMember("IntrospectWithDescription");
+    const ajn::InterfaceDescription::Member *member = iface->GetMember("Introspect");
     assert(member);
-    ajn::MsgArg arg("s", "");
-    QStatus status = MethodCallAsync(*member,
-                                     this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::IntrospectCB),
-                                     &arg, 1, NULL);
+    QStatus status = MethodCallAsync(*member, this,
+            static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::IntrospectCB), NULL, 0,
+            NULL);
     if (status != ER_OK)
     {
-        LOG(LOG_ERR, "IntrospectWithDescription - %s", QCC_StatusText(status));
+        LOG(LOG_ERR, "Introspect - %s", QCC_StatusText(status));
         return OC_STACK_ERROR;
     }
     return OC_STACK_OK;
@@ -92,8 +100,7 @@ OCStackResult VirtualResource::Create()
 void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
 {
     (void) ctx;
-    LOG(LOG_INFO, "[%p]",
-        this);
+    LOG(LOG_INFO, "[%p]", this);
 
     OCStackResult result;
     {
@@ -102,6 +109,7 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
         {
             case ajn::MESSAGE_METHOD_RET:
                 {
+                    LOG(LOG_INFO, "[%p] %s", this, msg->GetArg(0)->ToString().c_str());
                     QStatus status = ParseXml(msg->GetArg(0)->v_string.str);
                     if (status != ER_OK)
                     {
@@ -125,29 +133,98 @@ void VirtualResource::IntrospectCB(ajn::Message &msg, void *ctx)
     }
     if (result == OC_STACK_OK)
     {
-        m_bridge->RDPublish();
+        m_createCb(m_createContext);
     }
+}
+
+OCStackResult VirtualResource::CreateResource(OCResourceHandle *handle, std::string path,
+        uint8_t props)
+{
+    std::map<std::string, ResourceType>::iterator rt;
+    /* Determine interfaces supported by matching resource types */
+    uint8_t access = NONE;
+    for (rt = m_rts.begin(); rt != m_rts.end(); ++rt)
+    {
+        if (rt->second.m_props != props)
+        {
+            continue;
+        }
+        access |= rt->second.m_access;
+    }
+    /* Add the resource */
+    for (rt = m_rts.begin(); rt != m_rts.end(); ++rt)
+    {
+        if (rt->second.m_props != props)
+        {
+            continue;
+        }
+        break;
+    }
+    if (rt == m_rts.end())
+    {
+        return OC_STACK_OK;
+    }
+    OCStackResult result = ::CreateResource(handle, ToUri(path).c_str(), rt->first.c_str(),
+            (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
+            VirtualResource::EntityHandlerCB, this, props);
+    /*
+     * Note that rt is not incremented before calling OCBindResourceTypeToResource.  This is to
+     * enable binding new resource types to existing resources (such as binding "oic.d.foo" to
+     * "/oic/d").
+     */
+    for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
+    {
+        if (rt->second.m_props != props)
+        {
+            continue;
+        }
+        result = OCBindResourceTypeToResource(*handle, rt->first.c_str());
+    }
+    if ((access & (READ | READWRITE)) == (READ | READWRITE))
+    {
+        result = OCBindResourceInterfaceToResource(*handle, OC_RSRVD_INTERFACE_READ_WRITE);
+    }
+    if (result == OC_STACK_OK)
+    {
+        LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, OCGetResourceUri(*handle));
+        uint8_t n = 0;
+        OCGetNumberOfResourceTypes(*handle, &n);
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            LOG(LOG_INFO, "[%p]     rt=%s", this, OCGetResourceTypeName(*handle, i));
+        }
+        OCGetNumberOfResourceInterfaces(*handle, &n);
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            LOG(LOG_INFO, "[%p]     if=%s", this, OCGetResourceInterfaceName(*handle, i));
+        }
+    }
+    else
+    {
+        LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
+    }
+    return result;
 }
 
 OCStackResult VirtualResource::CreateResources()
 {
     OCStackResult result;
-    uint8_t resourceProps = OC_DISCOVERABLE | OC_OBSERVABLE;
-    if (IsSecure())
-    {
-        resourceProps |= OC_SECURE;
-    }
-    uint8_t access = NONE;
     size_t numIfaces = GetInterfaces(NULL, 0);
     const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
     GetInterfaces(ifaces, numIfaces);
     for (size_t i = 0; i < numIfaces; ++i)
     {
         const char *ifaceName = ifaces[i]->GetName();
-        LOG(LOG_INFO, "%s ifaceName=%s", GetPath().c_str(), ifaceName);
         if (!TranslateInterface(ifaceName))
         {
             continue;
+        }
+        uint8_t secure = 0;
+        ajn::InterfaceSecurityPolicy secPolicy = ifaces[i]->GetSecurityPolicy();
+        if (IsSecure() || (secPolicy == ajn::AJ_IFC_SECURITY_REQUIRED) ||
+                (IsSecure() && (secPolicy != ajn::AJ_IFC_SECURITY_OFF)))
+        {
+            secure = OC_SECURE;
         }
         size_t numProps = ifaces[i]->GetProperties(NULL, 0);
         const ajn::InterfaceDescription::Property **props = new const
@@ -158,17 +235,24 @@ OCStackResult VirtualResource::CreateResources()
             qcc::String value = (props[j]->name == "Version") ? "const" : "false";
             props[j]->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, value);
             std::string rt = GetResourceTypeName(ifaces[i], value);
+            if (value == "true" || value == "invalidates")
+            {
+                m_rts[rt].m_props |= (OC_OBSERVABLE | secure);
+            }
+            else
+            {
+                m_rts[rt].m_props |= secure;
+            }
             switch (props[j]->access)
             {
                 case ajn::PROP_ACCESS_RW:
                 case ajn::PROP_ACCESS_WRITE:
-                    m_rts[rt] |= READWRITE;
+                    m_rts[rt].m_access |= READWRITE;
                     break;
                 case ajn::PROP_ACCESS_READ:
-                    m_rts[rt] |= READ;
+                    m_rts[rt].m_access |= READ;
                     break;
             }
-            access |= m_rts[rt];
         }
         delete[] props;
         size_t numMembers = ifaces[i]->GetMembers(NULL, 0);
@@ -180,13 +264,17 @@ OCStackResult VirtualResource::CreateResources()
             std::string rt = GetResourceTypeName(ifaces[i], members[j]->name);
             if (members[j]->memberType == ajn::MESSAGE_METHOD_CALL)
             {
-                m_rts[rt] |= READWRITE;
-                access |= m_rts[rt];
+                m_rts[rt].m_access |= READWRITE;
+                m_rts[rt].m_props |= secure;
             }
             else if (members[j]->memberType == ajn::MESSAGE_SIGNAL)
             {
-                m_rts[rt] |= READ;
-                access |= m_rts[rt];
+                if (members[j]->isSessionlessSignal)
+                {
+                    m_hasSessionlessSignals = true;
+                }
+                m_rts[rt].m_access |= READ;
+                m_rts[rt].m_props |= (OC_OBSERVABLE | secure);
                 m_bus->RegisterSignalHandler(this,
                         static_cast<ajn::MessageReceiver::SignalHandler>(&VirtualResource::SignalCB),
                         members[j], GetPath().c_str());
@@ -223,13 +311,8 @@ OCStackResult VirtualResource::CreateResources()
         if (!numProps && !numMembers)
         {
             std::string rt = GetResourceTypeName(ifaceName);
-            m_rts[rt] |= READ;
-        }
-        ajn::InterfaceSecurityPolicy secPolicy = ifaces[i]->GetSecurityPolicy();
-        if ((secPolicy == ajn::AJ_IFC_SECURITY_REQUIRED) ||
-                (IsSecure() && (secPolicy != ajn::AJ_IFC_SECURITY_OFF)))
-        {
-            resourceProps |= OC_SECURE;
+            m_rts[rt].m_access |= READ;
+            m_rts[rt].m_props |= secure;
         }
     }
     delete[] ifaces;
@@ -248,80 +331,83 @@ OCStackResult VirtualResource::CreateResources()
             static_cast<ajn::MessageReceiver::SignalHandler>(&VirtualResource::SignalCB),
             signal, GetPath().c_str());
 
-    std::map<std::string, uint8_t>::iterator rt = m_rts.begin();
-    result = CreateResource(GetPath().c_str(), rt->first.c_str(),
-            (access & READ) ? OC_RSRVD_INTERFACE_READ : OC_RSRVD_INTERFACE_READ_WRITE,
-            VirtualResource::EntityHandlerCB, this, resourceProps);
-    for (; (rt != m_rts.end()) && (result == OC_STACK_OK); ++rt)
+    /* First see if we need more than one resource to translate this object */
+    std::map<std::string, ResourceType>::iterator rt = m_rts.begin();
+    uint8_t props = rt->second.m_props;
+    for (; rt != m_rts.end(); ++rt)
     {
-        result = AddResourceType(GetPath().c_str(), rt->first.c_str());
+        if (rt->second.m_props != props)
+        {
+            /* Need multiple resources */
+            break;
+        }
     }
-    if ((access & (READ | READWRITE)) == (READ | READWRITE))
+    /* Next create the resource(s) */
+    if (rt == m_rts.end())
     {
-        result = ::AddInterface(GetPath().c_str(), OC_RSRVD_INTERFACE_READ_WRITE);
-    }
-    if (result == OC_STACK_OK)
-    {
-        LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s",
-                this, GetPath().c_str());
+        result = CreateResource(&m_handle, GetPath(), OC_DISCOVERABLE | props);
     }
     else
     {
-        LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
+        result = ::CreateResource(&m_handle, ToUri(GetPath()).c_str(), "oic.r.alljoynobject", OC_RSRVD_INTERFACE_LL,
+                NULL, this, OC_DISCOVERABLE | OC_OBSERVABLE);
+        if (result == OC_STACK_OK)
+        {
+            result = OCBindResourceTypeToResource(m_handle, OC_RSRVD_RESOURCE_TYPE_COLLECTION);
+        }
+#ifdef __WITH_DTLS__
+        static const uint8_t ps[] = { OC_DISCOVERABLE,
+                                      OC_DISCOVERABLE | OC_OBSERVABLE,
+                                      OC_DISCOVERABLE | OC_SECURE,
+                                      OC_DISCOVERABLE | OC_OBSERVABLE | OC_SECURE,
+                                    };
+#else
+        static const uint8_t ps[] = { OC_DISCOVERABLE,
+                                      OC_DISCOVERABLE | OC_OBSERVABLE,
+                                    };
+#endif
+        for (size_t i = 0; (result == OC_STACK_OK) && (i < (sizeof(ps) / sizeof(ps[0]))); ++i)
+        {
+            OCResourceHandle handle;
+            std::string path = GetPath() + "/" + std::to_string(ps[i]);
+            result = CreateResource(&handle, path, ps[i]);
+            if (result == OC_STACK_OK)
+            {
+                result = OCBindResource(m_handle, handle);
+            }
+        }
+        if (result == OC_STACK_OK)
+        {
+            LOG(LOG_INFO, "[%p] Created VirtualResource uri=%s", this, OCGetResourceUri(m_handle));
+        }
+        else
+        {
+            LOG(LOG_ERR, "[%p] Create VirtualResource - %d", this, result);
+        }
     }
     return result;
 }
 
-static std::map<std::string, std::string> ParseQuery(const char *query)
+static std::string GetResourceType(OCResourceHandle resource,
+        std::map<std::string, std::string> &query)
 {
-    std::map<std::string, std::string> queryMap;
-    if (query)
-    {
-        std::string queryStr = query;
-        std::string::size_type beg, end = 0;
-        beg = 0;
-        while (end != std::string::npos)
-        {
-            std::string key, value;
-            end = queryStr.find('=', beg);
-            if (end == std::string::npos)
-            {
-                key = queryStr.substr(beg);
-            }
-            else
-            {
-                key = queryStr.substr(beg, end - beg);
-                beg = end + 1;
-                end = queryStr.find_first_of("&;", beg);
-                if (end == std::string::npos)
-                {
-                    value = queryStr.substr(beg);
-                }
-                else
-                {
-                    value = queryStr.substr(beg, end - beg);
-                    beg = end + 1;
-                }
-            }
-            queryMap[key] = value;
-        }
-    }
-    return queryMap;
-}
-
-static std::string GetResourceType(std::map<std::string, std::string> &query,
-                                   std::string defaultResourceType)
-{
-    std::string rt = defaultResourceType;
+    std::string rt;
     if (query.find(OC_RSRVD_RESOURCE_TYPE) != query.end())
     {
         rt = query[OC_RSRVD_RESOURCE_TYPE];
     }
+    else
+    {
+        uint8_t n = 0;
+        if ((OCGetNumberOfResourceTypes(resource, &n) == OC_STACK_OK) && (n == 1))
+        {
+            rt = OCGetResourceTypeName(resource, 0);
+        }
+    }
     return rt;
 }
 
-static uint8_t GetAccess(std::map<std::string, std::string> &query,
-                         uint8_t accessFlags)
+static uint8_t GetAccess(std::map<std::string, std::string> &query)
 {
     uint8_t access = NONE;
     if (query.find(OC_RSRVD_INTERFACE) != query.end())
@@ -339,26 +425,13 @@ static uint8_t GetAccess(std::map<std::string, std::string> &query,
             access = READ;
         }
     }
-    else
-    {
-        if (accessFlags & READ)
-        {
-            access = READ;
-        }
-        else if (accessFlags & READWRITE)
-        {
-            access = READWRITE;
-        }
-    }
     return access;
 }
 
 /* Filter properties based on resource type and interface requested. */
-static bool ToFilteredOCPayload(OCRepPayload *payload,
-                                const std::string ajSoftwareVersion,
-                                const ajn::InterfaceDescription *iface,
-                                const char *emitsChangedValue, uint8_t access,
-                                const ajn::MsgArg *dict)
+static bool ToFilteredOCPayload(OCRepPayload *payload, const std::string ajSoftwareVersion,
+        const ajn::InterfaceDescription *iface, const char *emitsChangedValue, uint8_t access,
+        const ajn::MsgArg *dict)
 {
     bool success = true;
     size_t numEntries = dict->v_array.GetNumElements();
@@ -369,13 +442,13 @@ static bool ToFilteredOCPayload(OCRepPayload *payload,
         const ajn::InterfaceDescription::Property *property = iface->GetProperty(key);
         if (property)
         {
-            if ((access == READWRITE) &&
-                (property->access == ajn::PROP_ACCESS_READ))
+            if ((access == READWRITE) && (property->access == ajn::PROP_ACCESS_READ))
             {
                 continue;
             }
             qcc::String emitsChanged = (property->name == "Version") ? "const" : "false";
-            property->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, emitsChanged);
+            property->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
+                    emitsChanged);
             if (strcmp(emitsChangedValue, emitsChanged.c_str()))
             {
                 continue;
@@ -390,9 +463,10 @@ static bool ToFilteredOCPayload(OCRepPayload *payload,
             {
                 property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
             }
-            qcc::String propName = GetPropName(iface, key);
-            success = ToOCPayload(payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val,
-                                  signature.c_str());
+            qcc::String propName = ToOCPropName(GetPropName(iface, emitsChanged + "." + key));
+            success = ToOCPayload(payload, propName.c_str(),
+                    GetPropType(property, entry->v_dictEntry.val->v_variant.val),
+                    entry->v_dictEntry.val->v_variant.val, signature.c_str());
         }
     }
     return success;
@@ -426,13 +500,11 @@ struct VirtualResource::SetContext
     std::string m_ajSoftwareVersion;
     OCRepPayload *m_payload;
     OCRepPayloadValue *m_value;
-    const ajn::InterfaceDescription *m_iface;
     OCEntityHandlerResponse *m_response;
-    SetContext(std::string ajSoftwareVersion, OCEntityHandlerRequest *request,
-               const ajn::InterfaceDescription *iface)
+    SetContext(std::string ajSoftwareVersion, OCEntityHandlerRequest *request)
         : m_ajSoftwareVersion(ajSoftwareVersion),
           m_payload(OCRepPayloadClone((OCRepPayload *) request->payload)), m_value(m_payload->values),
-          m_iface(iface), m_response(NULL)
+          m_response(NULL)
     {
         m_response = (OCEntityHandlerResponse *) calloc(1, sizeof(OCEntityHandlerResponse));
         m_response->requestHandle = request->requestHandle;
@@ -445,26 +517,26 @@ struct VirtualResource::SetContext
     }
 };
 
-
-struct VirtualResource::GetAllBaselineContext
+struct VirtualResource::GetAllContext
 {
     std::string m_ajSoftwareVersion;
+    uint8_t m_access;
     const ajn::InterfaceDescription **m_ifaces;
     size_t m_numIfaces;
     size_t m_iface;
     OCRepPayload *m_payload;
     OCEntityHandlerResponse *m_response;
-    GetAllBaselineContext(std::string ajSoftwareVersion, const ajn::InterfaceDescription **ifaces,
-                          size_t numIfaces,
-                          OCRepPayload *payload, OCEntityHandlerRequest *request)
-        : m_ajSoftwareVersion(ajSoftwareVersion), m_ifaces(ifaces), m_numIfaces(numIfaces), m_iface(0),
-          m_payload(payload), m_response(NULL)
+    GetAllContext(std::string ajSoftwareVersion, uint8_t access,
+            const ajn::InterfaceDescription **ifaces, size_t numIfaces, OCRepPayload *payload,
+            OCEntityHandlerRequest *request)
+        : m_ajSoftwareVersion(ajSoftwareVersion), m_access(access), m_ifaces(ifaces),
+          m_numIfaces(numIfaces), m_iface(0), m_payload(payload), m_response(NULL)
     {
         m_response = (OCEntityHandlerResponse *) calloc(1, sizeof(OCEntityHandlerResponse));
         m_response->requestHandle = request->requestHandle;
         m_response->resourceHandle = request->resource;
     }
-    ~GetAllBaselineContext()
+    ~GetAllContext()
     {
         delete[] m_ifaces;
         OCRepPayloadDestroy(m_payload);
@@ -486,25 +558,34 @@ OCDiagnosticPayload *VirtualResource::CreatePayload(ajn::Message &msg,
         if (message.compare(0, ErrorPrefix.size(), ErrorPrefix) == 0)
         {
             message = message.substr(ErrorPrefix.size());
+            static const std::string CodePrefix = "Code";
+            if (message.compare(0, CodePrefix.size(), CodePrefix) == 0)
+            {
+                message = message.substr(CodePrefix.size());
+            }
             char *endptr = NULL;
             unsigned long code = strtoul(message.c_str(), &endptr, 10);
             if (*endptr == '\0')
             {
                 *ehResult = (OCEntityHandlerResult) code;
             }
+            message = description;
         }
-        message = message + ": " + description;
+        else
+        {
+            message = message + ": " + description;
+        }
         payload = OCDiagnosticPayloadCreate(message.c_str());
     }
     return payload;
 }
 
-OCRepPayload *VirtualResource::CreatePayload()
+OCRepPayload *VirtualResource::CreatePayload(const char *uri)
 {
     OCRepPayload *payload = OCRepPayloadCreate();
     if (payload)
     {
-        OCRepPayloadSetUri(payload, GetPath().c_str());
+        OCRepPayloadSetUri(payload, uri);
     }
     return payload;
 }
@@ -515,11 +596,13 @@ OCStackResult VirtualResource::SetMemberPayload(OCRepPayload *payload,
     const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
     if (!iface)
     {
+        LOG(LOG_INFO, "No such interface %s", ifaceName);
         return OC_STACK_ERROR;
     }
     const ajn::InterfaceDescription::Member *member = iface->GetMember(memberName);
     if (!member)
     {
+        LOG(LOG_INFO, "No such member %s.%s", ifaceName, memberName);
         return OC_STACK_ERROR;
     }
     qcc::String signature = member->signature + member->returnSignature;
@@ -529,7 +612,7 @@ OCStackResult VirtualResource::SetMemberPayload(OCRepPayload *payload,
     OCRepPayloadSetPropBool(payload, propName.c_str(), false);
     for (size_t i = 0; i < numArgs; ++i)
     {
-        propName = GetPropName(member, NextArgName(argNames, i));
+        propName = GetPropName(member, NextArgName(argNames), i);
         OCRepPayloadSetNull(payload, propName.c_str());
     }
     return OC_STACK_OK;
@@ -539,71 +622,92 @@ OCEntityHandlerResult VirtualResource::EntityHandlerCB(OCEntityHandlerFlag flag,
         OCEntityHandlerRequest *request,
         void *ctx)
 {
-    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
-        ctx, flag, request, ctx);
+    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p", ctx, flag, request, ctx);
+    if (!IsValidRequest(request))
+    {
+        LOG(LOG_INFO, "Invalid request received");
+        return OC_EH_BAD_REQ;
+    }
 
     VirtualResource *resource = reinterpret_cast<VirtualResource *>(ctx);
     std::lock_guard<std::mutex> lock(resource->m_mutex);
-    std::map<std::string, std::string> queryMap = ParseQuery(request->query);
-    std::string rt = GetResourceType(queryMap, resource->m_rts.begin()->first);
-    uint8_t access = GetAccess(queryMap, resource->m_rts[rt]);
-    if (!access)
-    {
-        LOG(LOG_INFO, "Unsupported interface requested - %s", queryMap[OC_RSRVD_INTERFACE].c_str());
-        return OC_EH_ERROR;
-    }
+    const char *uri = OCGetResourceUri(request->resource);
+    std::map<std::string, std::string> queryMap = ParseQuery(request->resource, request->query);
+    std::string rt = GetResourceType(request->resource, queryMap);
+    uint8_t access = GetAccess(queryMap);
+    LOG(LOG_INFO, "[%p] uri=%s,query=%s,rt=%s,access=%d", resource, uri, request->query, rt.c_str(),
+            access);
     if (flag & OC_OBSERVE_FLAG)
     {
         if (request->obsInfo.action == OC_OBSERVE_REGISTER)
         {
-            std::string ifaceName = ::GetInterface(rt);
-            const ajn::InterfaceDescription *iface = resource->GetInterface(ifaceName.c_str());
-            if (!iface)
+            Observation key(request->resource, request->query);
+            std::vector<OCObservationId>::iterator it = std::find(resource->m_observers[key].begin(),
+                    resource->m_observers[key].end(), request->obsInfo.obsId);
+            if (it == resource->m_observers[key].end())
             {
-                LOG(LOG_INFO, "[%p] Observe invalid iface %s", ifaceName.c_str());
-                return OC_EH_ERROR;
-            }
-            std::vector<OCObservationId>::iterator it = std::find(resource->m_observers[request->query].begin(),
-                    resource->m_observers[request->query].end(), request->obsInfo.obsId);
-            if (it == resource->m_observers[request->query].end())
-            {
-                LOG(LOG_INFO, "[%p] Register observer rt=%s %d", resource, rt.c_str(), request->obsInfo.obsId);
-                resource->m_observers[request->query].push_back(request->obsInfo.obsId);
+                LOG(LOG_INFO, "[%p] Register observer rt=%s,obsId=%d", resource, rt.c_str(),
+                        request->obsInfo.obsId);
+                resource->m_observers[key].push_back(request->obsInfo.obsId);
             }
             /* Add match rule for sessionless signal */
-            std::string memberName = GetMember(rt);
-            const ajn::InterfaceDescription::Member *signal = iface->GetSignal(memberName.c_str());
-            if (signal && signal->isSessionlessSignal)
+            if (resource->m_hasSessionlessSignals)
             {
-                std::string rule = "type='signal',sender='" + std::string(resource->GetUniqueName().c_str()) +
-                                   "',interface='" +
-                                   ifaceName + "',member='" + memberName + "',sessionless='t'";
-                QStatus status = resource->m_bus->AddMatchAsync(rule.c_str(), resource);
-                if (status == ER_OK)
+                std::string rule;
+                std::string ifaceName = ::GetInterface(rt);
+                std::string memberName = GetMember(rt);
+                if (memberName.empty())
                 {
-                    resource->m_matchRules[request->obsInfo.obsId] = rule;
+                    rule = "type='signal',sender='" +
+                            std::string(resource->GetUniqueName().c_str()) + "',sessionless='t'";
                 }
                 else
                 {
-                    LOG(LOG_ERR, "AddMatchAsync - %s", QCC_StatusText(status));
+                    const ajn::InterfaceDescription *iface = resource->GetInterface(ifaceName.c_str());
+                    if (!iface)
+                    {
+                        LOG(LOG_INFO, "[%p] Observe invalid iface %s", resource, ifaceName.c_str());
+                        return OC_EH_ERROR;
+                    }
+                    const ajn::InterfaceDescription::Member *signal = iface->GetSignal(memberName.c_str());
+                    if (signal && signal->isSessionlessSignal)
+                    {
+                        rule = "type='signal',sender='" +
+                                std::string(resource->GetUniqueName().c_str()) + "',interface='" +
+                                ifaceName + "',member='" + memberName + "',sessionless='t'";
+                    }
+                }
+                if (!rule.empty())
+                {
+                    QStatus status = resource->m_bus->AddMatchAsync(rule.c_str(), resource);
+                    if (status == ER_OK)
+                    {
+                        LOG(LOG_INFO, "AddMatchAsync(%s)", rule.c_str());
+                        resource->m_matchRules[request->obsInfo.obsId] = rule;
+                    }
+                    else
+                    {
+                        LOG(LOG_ERR, "AddMatchAsync - %s", QCC_StatusText(status));
+                    }
                 }
             }
         }
         else if (request->obsInfo.action == OC_OBSERVE_DEREGISTER)
         {
-            for (std::map<std::string, std::vector<OCObservationId>>::iterator it =
+            for (std::map<Observation, std::vector<OCObservationId>>::iterator it =
                      resource->m_observers.begin(); it != resource->m_observers.end(); ++it)
             {
-                for (std::vector<OCObservationId>::iterator jt = it->second.begin(); jt != it->second.end(); ++jt)
+                for (std::vector<OCObservationId>::iterator jt = it->second.begin();
+                     jt != it->second.end(); ++jt)
                 {
                     if (*jt == request->obsInfo.obsId)
                     {
-                        LOG(LOG_INFO, "[%p] Deregister observer %s %d", resource, it->first.c_str(),
-                            request->obsInfo.obsId);
+                        LOG(LOG_INFO, "[%p] Deregister observer %s %d", resource,
+                                it->first.m_query.c_str(), request->obsInfo.obsId);
                         if (!resource->m_matchRules[request->obsInfo.obsId].empty())
                         {
                             QStatus status = resource->m_bus->RemoveMatchAsync(
-                                                 resource->m_matchRules[request->obsInfo.obsId].c_str(), resource);
+                                resource->m_matchRules[request->obsInfo.obsId].c_str(), resource);
                             if (status != ER_OK)
                             {
                                 LOG(LOG_ERR, "RemoveMatchAsync - %s", QCC_StatusText(status));
@@ -626,21 +730,29 @@ handleRequest:
                 std::string memberName = GetMember(rt);
                 if (queryMap[OC_RSRVD_INTERFACE] == OC_RSRVD_INTERFACE_DEFAULT)
                 {
+                    /*
+                     * Reset access for baseline query so that we fetch all properties, not only
+                     * the readwrite ones.
+                     */
+                    access = READ;
+                }
+                if (memberName.empty())
+                {
                     size_t numIfaces = resource->GetInterfaces(NULL, 0);
-                    const ajn::InterfaceDescription **ifaces = new const ajn::InterfaceDescription*[numIfaces];
+                    const ajn::InterfaceDescription **ifaces =
+                            new const ajn::InterfaceDescription*[numIfaces];
                     resource->GetInterfaces(ifaces, numIfaces);
-                    OCRepPayload *payload = resource->CreatePayload();
-                    GetAllBaselineContext *context = new GetAllBaselineContext(resource->m_ajSoftwareVersion, ifaces,
-                            numIfaces,
-                            payload, request);
-                    QStatus status = resource->GetAllBaseline(context);
+                    OCRepPayload *payload = resource->CreatePayload(uri);
+                    GetAllContext *context = new GetAllContext(resource->m_ajSoftwareVersion, access,
+                            ifaces, numIfaces, payload, request);
+                    QStatus status = resource->GetAll(context);
                     if (status == ER_OK)
                     {
                         result = OC_EH_OK;
                     }
                     else
                     {
-                        LOG(LOG_ERR, "GetAllBaseline - %s", QCC_StatusText(status));
+                        LOG(LOG_ERR, "GetAll - %s", QCC_StatusText(status));
                         delete context;
                         result = OC_EH_ERROR;
                     }
@@ -654,11 +766,12 @@ handleRequest:
                     assert(iface);
                     const ajn::InterfaceDescription::Member *member = iface->GetMember("GetAll");
                     assert(member);
-                    MethodCallContext *context = new MethodCallContext(resource->m_ajSoftwareVersion, rt, access,
-                            member, request);
+                    MethodCallContext *context = new MethodCallContext(resource->m_ajSoftwareVersion,
+                            rt, access, member, request);
                     QStatus status = resource->MethodCallAsync(*member, resource,
                             static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::MethodReturnCB),
-                            &arg, 1, context, DefaultCallTimeout, resource->GetMethodCallFlags(ifaceName.c_str()));
+                            &arg, 1, context, DefaultCallTimeout,
+                            resource->GetMethodCallFlags(ifaceName.c_str()));
                     if (status == ER_OK)
                     {
                         result = OC_EH_OK;
@@ -676,7 +789,7 @@ handleRequest:
                     memset(&response, 0, sizeof(response));
                     response.requestHandle = request->requestHandle;
                     response.resourceHandle = request->resource;
-                    OCRepPayload *payload = resource->CreatePayload();
+                    OCRepPayload *payload = resource->CreatePayload(uri);
                     if (resource->SetMemberPayload(payload, ifaceName.c_str(), memberName.c_str()) != OC_STACK_OK)
                     {
                         result = OC_EH_ERROR;
@@ -685,10 +798,10 @@ handleRequest:
                     result = OC_EH_OK;
                     response.ehResult = result;
                     response.payload = reinterpret_cast<OCPayload *>(payload);
-                    OCStackResult doResult = DoResponse(&response);
+                    OCStackResult doResult = OCDoResponse(&response);
                     if (doResult != OC_STACK_OK)
                     {
-                        LOG(LOG_ERR, "DoResponse - %d", doResult);
+                        LOG(LOG_ERR, "OCDoResponse - %d", doResult);
                         OCRepPayloadDestroy(payload);
                     }
                 }
@@ -698,35 +811,29 @@ handleRequest:
             {
                 if ((access & READWRITE) == 0)
                 {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                std::string ifaceName = ::GetInterface(rt);
-                std::string memberName = GetMember(rt);
-                const ajn::InterfaceDescription *iface = resource->GetInterface(ifaceName.c_str());
-                if (!iface)
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                if (memberName == "const")
-                {
+                    LOG(LOG_INFO, "Read only access");
                     result = OC_EH_METHOD_NOT_ALLOWED;
+                    break;
                 }
-                else if (memberName == "true" || memberName == "false" || memberName == "invalidates")
+                std::string memberName = GetMember(rt);
+                if (memberName.empty() || memberName == "const" || memberName == "true" ||
+                        memberName == "false" || memberName == "invalidates")
                 {
                     if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
                     {
-                        result = OC_EH_ERROR;
+                        LOG(LOG_INFO, "Missing or unexpected payload type: %d",
+                                (request && request->payload) ? request->payload->type : PAYLOAD_TYPE_INVALID);
+                        result = OC_EH_BAD_REQ;
                         break;
                     }
                     OCRepPayload *payload = (OCRepPayload *) request->payload;
                     if (!payload->values)
                     {
-                        result = OC_EH_ERROR;
+                        LOG(LOG_INFO, "Missing payload values");
+                        result = OC_EH_BAD_REQ;
                         break;
                     }
-                    SetContext *context = new SetContext(resource->m_ajSoftwareVersion, request, iface);
+                    SetContext *context = new SetContext(resource->m_ajSoftwareVersion, request);
                     QStatus status = resource->Set(context);
                     if (status == ER_OK)
                     {
@@ -741,9 +848,22 @@ handleRequest:
                 }
                 else
                 {
+                    /*
+                     * We don't implement mixing of multiple method calls in one POST request, the
+                     * resource type must be specified.
+                     */
+                    std::string ifaceName = ::GetInterface(rt);
+                    const ajn::InterfaceDescription *iface = resource->GetInterface(ifaceName.c_str());
+                    if (!iface)
+                    {
+                        LOG(LOG_INFO, "No such interface %s", ifaceName.c_str());
+                        result = OC_EH_BAD_REQ;
+                        break;
+                    }
                     const ajn::InterfaceDescription::Member *member = iface->GetMethod(memberName.c_str());
                     if (!member)
                     {
+                        LOG(LOG_INFO, "No such member %s.%s", ifaceName.c_str(), memberName.c_str());
                         result = OC_EH_ERROR;
                         break;
                     }
@@ -755,6 +875,8 @@ handleRequest:
                         args = new ajn::MsgArg[numArgs];
                         if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
                         {
+                            LOG(LOG_INFO, "Missing or unexpected payload type: %d",
+                                    (request && request->payload) ? request->payload->type : PAYLOAD_TYPE_INVALID);
                             result = OC_EH_ERROR;
                             break;
                         }
@@ -767,6 +889,7 @@ handleRequest:
                         {
                             if (propName == value->name && (value->type != OCREP_PROP_BOOL || !value->b))
                             {
+                                LOG(LOG_INFO, "Invalid %s", propName.c_str());
                                 success = false;
                                 break;
                             }
@@ -780,12 +903,12 @@ handleRequest:
                         ParseCompleteType(signature);
                         qcc::String sig(argSignature, signature - argSignature);
                         argSignature = signature;
-                        std::string argName = NextArgName(argNames, i);
+                        std::string argName = NextArgName(argNames);
                         if (resource->m_ajSoftwareVersion >= "v16.10.00")
                         {
                             member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                         }
-                        qcc::String propName = GetPropName(member, argName);
+                        qcc::String propName = GetPropName(member, argName, i);
                         assert(payload);
                         for (OCRepPayloadValue *value = payload->values; value; value = value->next)
                         {
@@ -800,9 +923,9 @@ handleRequest:
                     {
                         MethodCallContext *context = new MethodCallContext(resource->m_ajSoftwareVersion, rt, access,
                                 member, request);
-                        QStatus status = resource->MethodCallAsync(*member,
-                                         resource, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::MethodReturnCB),
-                                         args, numArgs, context);
+                        QStatus status = resource->MethodCallAsync(*member, resource,
+                                static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::MethodReturnCB),
+                                args, numArgs, context);
                         if (status == ER_OK)
                         {
                             result = OC_EH_OK;
@@ -831,17 +954,17 @@ handleRequest:
 
 void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] ctx=%p", this, ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     MethodCallContext *context = reinterpret_cast<MethodCallContext *>(ctx);
+    const char *uri = OCGetResourceUri(context->m_response->resourceHandle);
     OCStackResult result = OC_STACK_ERROR;
     OCPayload *payload = NULL;
     switch (msg->GetType())
     {
         case ajn::MESSAGE_METHOD_RET:
-            payload = (OCPayload*) CreatePayload();
+            payload = (OCPayload*) CreatePayload(uri);
             bool success;
             if (!strcmp(context->m_member->iface->GetName(),
                         ajn::org::freedesktop::DBus::Properties::InterfaceName) &&
@@ -850,10 +973,8 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                 const ajn::InterfaceDescription *iface =
                         m_bus->GetInterface(::GetInterface(context->m_rt).c_str());
                 assert(iface);
-                success = ToFilteredOCPayload((OCRepPayload *) payload,
-                                              m_ajSoftwareVersion, iface,
-                                              GetMember(context->m_rt).c_str(), context->m_access,
-                                              msg->GetArg(0));
+                success = ToFilteredOCPayload((OCRepPayload *) payload, m_ajSoftwareVersion, iface,
+                        GetMember(context->m_rt).c_str(), context->m_access, msg->GetArg(0));
             }
             else
             {
@@ -866,7 +987,7 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                 const char *argNames = context->m_member->argNames.c_str();
                 for (size_t i = 0; i < numInArgs; ++i)
                 {
-                    NextArgName(argNames, i);
+                    NextArgName(argNames);
                 }
                 success = true;
                 const char *signature = context->m_member->returnSignature.c_str();
@@ -876,15 +997,16 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
                     ParseCompleteType(signature);
                     qcc::String sig(argSignature, signature - argSignature);
                     argSignature = signature;
-                    std::string argName = NextArgName(argNames, numInArgs + i);
+                    std::string argName = NextArgName(argNames);
                     if (context->m_ajSoftwareVersion >= "v16.10.00")
                     {
                         context->m_member->GetArgAnnotation(argName.c_str(),
                                 "org.alljoyn.Bus.Type.Name", sig);
                     }
-                    propName = GetPropName(context->m_member, argName);
-                    success = ToOCPayload((OCRepPayload *) payload, propName.c_str(), &outArgs[i],
-                            sig.c_str());
+                    propName = GetPropName(context->m_member, argName, numInArgs + i);
+                    success = ToOCPayload((OCRepPayload *) payload, propName.c_str(),
+                            GetPropType(context->m_member, argName.c_str(), &outArgs[i]),
+                            &outArgs[i], sig.c_str());
                 }
             }
             if (success)
@@ -906,10 +1028,10 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
             break;
     }
     context->m_response->payload = payload;
-    result = DoResponse(context->m_response);
+    result = OCDoResponse(context->m_response);
     if (result != OC_STACK_OK)
     {
-        LOG(LOG_ERR, "DoResponse - %d", result);
+        LOG(LOG_ERR, "OCDoResponse - %d", result);
         OCPayloadDestroy(payload);
     }
     delete context;
@@ -918,21 +1040,63 @@ void VirtualResource::MethodReturnCB(ajn::Message &msg, void *ctx)
 /* Called with m_mutex held. */
 QStatus VirtualResource::Set(SetContext *context)
 {
-    LOG(LOG_INFO, "[%p] context=%p",
-        this, context);
+    LOG(LOG_INFO, "[%p] context=%p name=%s", this, context, context->m_value->name);
 
+    /*
+     * OC value name may have '.' in the property name portion before translation.  This occurs when
+     * the AllJoyn bus object has a property named e.g. "one_dtwo".  The loop below tries to locate
+     * the interface component of names of this form.
+     */
+    const ajn::InterfaceDescription *iface = NULL;
+    const ajn::InterfaceDescription::Property *property = NULL;
     std::string valueName = context->m_value->name;
-    std::string propName = GetMember(valueName);
-    size_t numArgs = 3;
-    ajn::MsgArg args[3];
-    args[0].Set("s", context->m_iface->GetName());
-    args[1].Set("s", propName.c_str());
-    const ajn::InterfaceDescription::Property *property = context->m_iface->GetProperty(
-                propName.c_str());
+    for (size_t pos = valueName.rfind('.'); pos != std::string::npos;
+            pos = valueName.rfind('.', pos - 1))
+    {
+        std::string ifaceName = ToAJName(valueName.substr(0, pos));
+        iface = GetInterface(ifaceName.c_str());
+        if (!iface)
+        {
+            continue;
+        }
+        size_t dot = valueName.find('.', pos + 1);
+        if (dot == std::string::npos)
+        {
+            continue;
+        }
+        std::string prefix = valueName.substr(pos + 1, dot - (pos + 1));
+        std::string propName = valueName.substr(dot + 1);
+        propName = ToAJPropName(propName);
+        property = iface->GetProperty(propName.c_str());
+        if (!property)
+        {
+            continue;
+        }
+        qcc::String emitsChangedValue = (property->name == "Version") ? "const" : "false";
+        property->GetAnnotation(::ajn::org::freedesktop::DBus::AnnotateEmitsChanged, emitsChangedValue);
+        if (emitsChangedValue != prefix)
+        {
+            property = NULL;
+            continue;
+        }
+        break;
+    }
+    if (!iface)
+    {
+        return ER_BUS_NO_SUCH_INTERFACE;
+    }
     if (!property)
     {
         return ER_BUS_NO_SUCH_PROPERTY;
     }
+    if (property->access == ajn::PROP_ACCESS_READ)
+    {
+        return ER_BUS_PROPERTY_ACCESS_DENIED;
+    }
+    size_t numArgs = 3;
+    ajn::MsgArg args[3];
+    args[0].Set("s", iface->GetName());
+    args[1].Set("s", property->name.c_str());
     qcc::String signature = property->signature;
     if (context->m_ajSoftwareVersion >= "v16.10.00")
     {
@@ -946,16 +1110,16 @@ QStatus VirtualResource::Set(SetContext *context)
     args[2].Set("v", &value);
     return MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName, "Set", this,
             static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::SetCB), args, numArgs,
-            context, DefaultCallTimeout, GetMethodCallFlags(context->m_iface->GetName()));
+            context, DefaultCallTimeout, GetMethodCallFlags(iface->GetName()));
 }
 
 void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] msg={type=%d},ctx=%p", this, msg->GetType(), ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     SetContext *context = reinterpret_cast<SetContext *>(ctx);
+    const char *uri = OCGetResourceUri(context->m_response->resourceHandle);
     OCStackResult result = OC_STACK_ERROR;
     OCRepPayload *payload = NULL;
     switch (msg->GetType())
@@ -964,10 +1128,10 @@ void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
             context->m_value = context->m_value->next;
             if (!context->m_value)
             {
-                payload = CreatePayload();
+                payload = CreatePayload(uri);
                 context->m_response->ehResult = OC_EH_OK;
                 context->m_response->payload = reinterpret_cast<OCPayload *>(payload);
-                result = DoResponse(context->m_response);
+                result = OCDoResponse(context->m_response);
                 delete context;
                 break;
             }
@@ -976,14 +1140,15 @@ void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
                 QStatus status = Set(context);
                 if (status == ER_OK)
                 {
+                    result = OC_STACK_OK;
                     break;
                 }
-                /* FALLTHROUGH */
             }
+            /* FALLTHROUGH */
         case ajn::MESSAGE_ERROR:
             context->m_response->payload = (OCPayload *) CreatePayload(msg,
                     &context->m_response->ehResult);
-            result = DoResponse(context->m_response);
+            result = OCDoResponse(context->m_response);
             delete context;
             break;
         default:
@@ -992,16 +1157,22 @@ void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
     }
     if (result != OC_STACK_OK)
     {
-        LOG(LOG_ERR, "DoResponse - %d", result);
+        LOG(LOG_ERR, "OCDoResponse - %d", result);
         OCRepPayloadDestroy(payload);
     }
 }
 
+struct VirtualResource::GetAllInvalidatedContext
+{
+    const ajn::InterfaceDescription *m_iface;
+    GetAllInvalidatedContext(const ajn::InterfaceDescription *iface)
+        : m_iface(iface) { }
+};
+
 void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, const char *path,
                                ajn::Message &msg)
 {
-    LOG(LOG_INFO, "[%p] member=%p,path=%s",
-        this, member, path);
+    LOG(LOG_INFO, "[%p] member=%p,path=%s", this, member, path);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_observers.empty())
@@ -1012,61 +1183,42 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
     if (!strcmp(msg->GetInterface(), ajn::org::freedesktop::DBus::Properties::InterfaceName) &&
         !strcmp(msg->GetMemberName(), "PropertiesChanged"))
     {
+        const char *ifaceName = msg->GetArg(0)->v_string.str;
+        const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+        assert(iface);
         if (msg->GetArg(2)->v_array.GetNumElements())
         {
             /* Get the values of the invalidated properties */
+            GetAllInvalidatedContext *context = new GetAllInvalidatedContext(iface);
             QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName,
                     "GetAll", this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllInvalidatedCB),
-                    msg->GetArg(0), 1, NULL, DefaultCallTimeout, GetMethodCallFlags(msg->GetArg(0)->v_string.str));
+                    msg->GetArg(0), 1, context, DefaultCallTimeout, GetMethodCallFlags(ifaceName));
             if (status != ER_OK)
             {
                 LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                delete context;
             }
         }
         else
         {
-            for (std::map<std::string, std::vector<OCObservationId>>::iterator it = m_observers.begin();
-                 it != m_observers.end(); ++it)
-            {
-                OCRepPayload *payload = CreatePayload();
-                std::map<std::string, std::string> queryMap = ParseQuery(it->first.c_str());
-                std::string rt = GetResourceType(queryMap, m_rts.begin()->first);
-                uint8_t access = GetAccess(queryMap, m_rts[rt]);
-                const ajn::InterfaceDescription *iface = m_bus->GetInterface(::GetInterface(rt).c_str());
-                assert(iface);
-                bool success = ToFilteredOCPayload(payload,
-                                                   m_ajSoftwareVersion, iface,
-                                                   GetMember(rt).c_str(), access,
-                                                   msg->GetArg(1));
-                if (success && payload->values)
-                {
-                    OCStackResult result = NotifyListOfObservers(GetPath().c_str(),
-                                           &it->second[0], it->second.size(),
-                                           payload);
-                    if (result == OC_STACK_OK)
-                    {
-                        LOG(LOG_INFO, "[%p] Notify observers rt=%s", this, it->first.c_str());
-                    }
-                    else
-                    {
-                        LOG(LOG_ERR, "[%p] Notify observers - %d", this, result);
-                        OCRepPayloadDestroy(payload);
-                    }
-                }
-            }
+            const ajn::MsgArg *dict = msg->GetArg(1);
+            NotifyPropertiesChangedObservers(iface, dict);
         }
     }
     else
     {
         std::string rt = GetResourceTypeName(msg->GetInterface(), msg->GetMemberName());
-        for (std::map<std::string, std::vector<OCObservationId>>::iterator it = m_observers.begin();
+        for (std::map<Observation, std::vector<OCObservationId>>::iterator it = m_observers.begin();
              it != m_observers.end(); ++it)
         {
-            std::map<std::string, std::string> queryMap = ParseQuery(it->first.c_str());
-            if (rt != GetResourceType(queryMap, m_rts.begin()->first))
+            std::map<std::string, std::string> queryMap = ParseQuery(it->first.m_resource,
+                    it->first.m_query.c_str());
+            std::string rtQuery = GetResourceType(it->first.m_resource, queryMap);
+            if (!rtQuery.empty() && rtQuery != rt)
             {
                 continue;
             }
+            const char *uri = OCGetResourceUri(it->first.m_resource);
             const ajn::InterfaceDescription *iface = GetInterface(msg->GetInterface());
             assert(iface);
             const ajn::InterfaceDescription::Member *member = iface->GetMember(msg->GetMemberName());
@@ -1076,7 +1228,7 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
             const ajn::MsgArg *args;
             msg->GetArgs(numArgs, args);
             std::string propName = GetPropName(member, "validity");
-            OCRepPayload *payload = CreatePayload();
+            OCRepPayload *payload = CreatePayload(uri);
             OCRepPayloadSetPropBool(payload, propName.c_str(), true);
             bool success = true;
             const char *signature = member->signature.c_str();
@@ -1086,22 +1238,22 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
                 ParseCompleteType(signature);
                 qcc::String sig(argSignature, signature - argSignature);
                 argSignature = signature;
-                std::string argName = NextArgName(argNames, i);
+                std::string argName = NextArgName(argNames);
                 if (m_ajSoftwareVersion >= "v16.10.00")
                 {
                     member->GetArgAnnotation(argName.c_str(), "org.alljoyn.Bus.Type.Name", sig);
                 }
-                propName = GetPropName(member, argName);
-                success = ToOCPayload(payload, propName.c_str(), &args[i], sig.c_str());
+                propName = GetPropName(member, argName, i);
+                success = ToOCPayload(payload, propName.c_str(),
+                        GetPropType(member, argName.c_str(), &args[i]), &args[i], sig.c_str());
             }
             if (success)
             {
-                OCStackResult result = NotifyListOfObservers(GetPath().c_str(),
-                                       &it->second[0], it->second.size(),
-                                       payload);
+                OCStackResult result = OCNotifyListOfObservers(it->first.m_resource, &it->second[0],
+                        it->second.size(), payload, OC_HIGH_QOS);
                 if (result == OC_STACK_OK)
                 {
-                    LOG(LOG_INFO, "[%p] Notify observers rt=%s", this, it->first.c_str());
+                    LOG(LOG_INFO, "[%p] Notify observers rt=%s", this, it->first.m_query.c_str());
                 }
                 else
                 {
@@ -1119,31 +1271,48 @@ void VirtualResource::SignalCB(const ajn::InterfaceDescription::Member *member, 
 
 void VirtualResource::GetAllInvalidatedCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] ctx=%p", this, ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    for (std::map<std::string, std::vector<OCObservationId>>::iterator it = m_observers.begin();
+    GetAllInvalidatedContext *context = reinterpret_cast<GetAllInvalidatedContext *>(ctx);
+    const ajn::MsgArg *dict = msg->GetArg(0);
+    NotifyPropertiesChangedObservers(context->m_iface, dict);
+    delete context;
+}
+
+void VirtualResource::NotifyPropertiesChangedObservers(const ajn::InterfaceDescription *iface,
+        const ajn::MsgArg *dict)
+{
+    for (std::map<Observation, std::vector<OCObservationId>>::iterator it = m_observers.begin();
          it != m_observers.end(); ++it)
     {
-        OCRepPayload *payload = CreatePayload();
-        std::map<std::string, std::string> queryMap = ParseQuery(it->first.c_str());
-        std::string rt = GetResourceType(queryMap, m_rts.begin()->first);
-        uint8_t access = GetAccess(queryMap, m_rts[rt]);
-        const ajn::InterfaceDescription *iface = m_bus->GetInterface(::GetInterface(rt).c_str());
-        assert(iface);
-        bool success = ToFilteredOCPayload(payload,
-                                           m_ajSoftwareVersion, iface,
-                                           GetMember(rt).c_str(), access,
-                                           msg->GetArg(0));
+        const char *uri = OCGetResourceUri(it->first.m_resource);
+        OCRepPayload *payload = CreatePayload(uri);
+        std::map<std::string, std::string> queryMap = ParseQuery(it->first.m_resource,
+                it->first.m_query.c_str());
+        std::string rt = GetResourceType(it->first.m_resource, queryMap);
+        uint8_t access = GetAccess(queryMap);
+        std::string memberName = GetMember(rt);
+        bool success;
+        if (memberName.empty())
+        {
+            success = ToFilteredOCPayload(payload, m_ajSoftwareVersion, iface, "true",
+                    access, dict) &&
+                    ToFilteredOCPayload(payload, m_ajSoftwareVersion, iface, "invalidates",
+                            access, dict);
+        }
+        else
+        {
+            success = ToFilteredOCPayload(payload, m_ajSoftwareVersion, iface,
+                    memberName.c_str(), access, dict);
+        }
         if (success && payload->values)
         {
-            OCStackResult result = NotifyListOfObservers(GetPath().c_str(),
-                                   &it->second[0], it->second.size(),
-                                   payload);
+            OCStackResult result = OCNotifyListOfObservers(it->first.m_resource,
+                    &it->second[0], it->second.size(), payload, OC_HIGH_QOS);
             if (result == OC_STACK_OK)
             {
-                LOG(LOG_INFO, "[%p] Notify observers rt=%s", this, it->first.c_str());
+                LOG(LOG_INFO, "[%p] Notify observers rt=%s", this, it->first.m_query.c_str());
             }
             else
             {
@@ -1159,10 +1328,9 @@ void VirtualResource::GetAllInvalidatedCB(ajn::Message &msg, void *ctx)
 }
 
 /* Called with m_mutex held. */
-QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
+QStatus VirtualResource::GetAll(GetAllContext *context)
 {
-    LOG(LOG_INFO, "[%p] context=%p",
-        this, context);
+    LOG(LOG_INFO, "[%p] context=%p", this, context);
 
     for (; (context->m_iface < context->m_numIfaces)
          && (context->m_response->ehResult == OC_EH_OK); ++context->m_iface)
@@ -1177,7 +1345,7 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
         {
             ajn::MsgArg arg("s", ifaceName);
             QStatus status = MethodCallAsync(::ajn::org::freedesktop::DBus::Properties::InterfaceName,
-                    "GetAll", this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllBaselineCB),
+                    "GetAll", this, static_cast<ajn::MessageReceiver::ReplyHandler>(&VirtualResource::GetAllCB),
                     &arg, 1, context, DefaultCallTimeout, GetMethodCallFlags(ifaceName));
             if (status != ER_OK)
             {
@@ -1191,6 +1359,8 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
     {
         if (context->m_response->ehResult == OC_EH_OK)
         {
+            bool observable = OCGetResourceProperties(context->m_response->resourceHandle) &
+                    OC_OBSERVABLE;
             for (size_t i = 0; (i < context->m_numIfaces) && (context->m_response->ehResult == OC_EH_OK); ++i)
             {
                 const char *ifaceName = context->m_ifaces[i]->GetName();
@@ -1204,63 +1374,23 @@ QStatus VirtualResource::GetAllBaseline(GetAllBaselineContext *context)
                 context->m_ifaces[i]->GetMembers(members, numMembers);
                 for (size_t j = 0; (j < numMembers) && (context->m_response->ehResult == OC_EH_OK); ++j)
                 {
-                    if (SetMemberPayload(context->m_payload, ifaceName, members[j]->name.c_str()) != OC_STACK_OK)
+                    if ((observable && (members[j]->memberType == ajn::MESSAGE_SIGNAL)) ||
+                            (!observable && (members[j]->memberType == ajn::MESSAGE_METHOD_CALL)))
                     {
-                        context->m_response->ehResult = OC_EH_ERROR;
+                        if (SetMemberPayload(context->m_payload, ifaceName, members[j]->name.c_str()) != OC_STACK_OK)
+                        {
+                            context->m_response->ehResult = OC_EH_ERROR;
+                        }
                     }
                 }
                 delete[] members;
             }
         }
         /* Common properties */
-        const char **rts = NULL;
-        const char **ifs = NULL;
         if (context->m_response->ehResult == OC_EH_OK)
         {
-            size_t dim[MAX_REP_ARRAY_DEPTH] = {0, 0, 0};
-            uint8_t nrts = 0;
-            OCStackResult result = OCGetNumberOfResourceTypes(context->m_response->resourceHandle, &nrts);
-            if (result != OC_STACK_OK)
-            {
-                context->m_response->ehResult = OC_EH_ERROR;
-                goto exit;
-            }
-            dim[0] = nrts;
-            rts = (const char **)OICMalloc(sizeof(const char *) * nrts);
-            if (rts == NULL)
-            {
-                context->m_response->ehResult = OC_EH_ERROR;
-                goto exit;
-            }
-            for (size_t i = 0; i < nrts; ++i)
-            {
-                rts[i] = OCGetResourceTypeName(context->m_response->resourceHandle, i);
-            }
-            if (!OCRepPayloadSetStringArray(context->m_payload, OC_RSRVD_RESOURCE_TYPE, (const char **)rts,
-                                            dim))
-            {
-                context->m_response->ehResult = OC_EH_ERROR;
-                goto exit;
-            }
-            uint8_t nifs = 0;
-            result = OCGetNumberOfResourceInterfaces(context->m_response->resourceHandle, &nifs);
-            if (result != OC_STACK_OK)
-            {
-                context->m_response->ehResult = OC_EH_ERROR;
-                goto exit;
-            }
-            dim[0] = nifs;
-            ifs = (const char **)OICMalloc(sizeof(const char *) * nifs);
-            if (ifs == NULL)
-            {
-                context->m_response->ehResult = OC_EH_ERROR;
-                goto exit;
-            }
-            for (size_t i = 0; i < nifs; ++i)
-            {
-                ifs[i] = OCGetResourceInterfaceName(context->m_response->resourceHandle, i);
-            }
-            if (!OCRepPayloadSetStringArray(context->m_payload, OC_RSRVD_INTERFACE, (const char **)ifs, dim))
+            if (!SetResourceTypes(context->m_payload, context->m_response->resourceHandle) ||
+                    !SetInterfaces(context->m_payload, context->m_response->resourceHandle))
             {
                 context->m_response->ehResult = OC_EH_ERROR;
                 goto exit;
@@ -1271,25 +1401,22 @@ exit:
         {
             context->m_response->payload = reinterpret_cast<OCPayload *>(context->m_payload);
         }
-        OCStackResult doResult = DoResponse(context->m_response);
+        OCStackResult doResult = OCDoResponse(context->m_response);
         if (doResult != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "DoResponse - %d", doResult);
+            LOG(LOG_ERR, "OCDoResponse - %d", doResult);
         }
-        OICFree(ifs);
-        OICFree(rts);
         delete context;
     }
     return ER_OK;
 }
 
-void VirtualResource::GetAllBaselineCB(ajn::Message &msg, void *ctx)
+void VirtualResource::GetAllCB(ajn::Message &msg, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] ctx=%p",
-        this, ctx);
+    LOG(LOG_INFO, "[%p] ctx=%p", this, ctx);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    GetAllBaselineContext *context = reinterpret_cast<GetAllBaselineContext *>(ctx);
+    GetAllContext *context = reinterpret_cast<GetAllContext *>(ctx);
     switch (msg->GetType())
     {
         case ajn::MESSAGE_METHOD_RET:
@@ -1297,28 +1424,19 @@ void VirtualResource::GetAllBaselineCB(ajn::Message &msg, void *ctx)
                 const ajn::InterfaceDescription *iface = context->m_ifaces[context->m_iface];
                 const ajn::MsgArg *dict = msg->GetArg(0);
                 bool success = true;
-                size_t numEntries = dict->v_array.GetNumElements();
-                for (size_t i = 0; success && i < numEntries; ++i)
+                if (OCGetResourceProperties(context->m_response->resourceHandle) & OC_OBSERVABLE)
                 {
-                    const ajn::MsgArg *entry = &dict->v_array.GetElements()[i];
-                    const char *key = entry->v_dictEntry.key->v_string.str;
-                    const ajn::InterfaceDescription::Property *property = iface->GetProperty(key);
-                    if (property)
-                    {
-                        /*
-                         * Annotations prior to v16.10.00 are not guaranteed to
-                         * appear in the order they were specified, so are
-                         * unreliable.
-                         */
-                        qcc::String signature = property->signature;
-                        if (context->m_ajSoftwareVersion >= "v16.10.00")
-                        {
-                            property->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
-                        }
-                        qcc::String propName = GetPropName(iface, key);
-                        success = ToOCPayload(context->m_payload, propName.c_str(), entry->v_dictEntry.val->v_variant.val,
-                                              signature.c_str());
-                    }
+                    success = ToFilteredOCPayload(context->m_payload, context->m_ajSoftwareVersion,
+                            iface, "true", context->m_access, dict) &&
+                            ToFilteredOCPayload(context->m_payload, context->m_ajSoftwareVersion,
+                                    iface, "invalidates", context->m_access, dict);
+                }
+                else
+                {
+                    success = ToFilteredOCPayload(context->m_payload, context->m_ajSoftwareVersion,
+                            iface, "const", context->m_access, dict) &&
+                            ToFilteredOCPayload(context->m_payload, context->m_ajSoftwareVersion,
+                                    iface, "false", context->m_access, dict);
                 }
                 if (success)
                 {
@@ -1339,10 +1457,10 @@ void VirtualResource::GetAllBaselineCB(ajn::Message &msg, void *ctx)
             break;
     }
     ++context->m_iface;
-    QStatus status = GetAllBaseline(context);
+    QStatus status = GetAll(context);
     if (status != ER_OK)
     {
-        LOG(LOG_ERR, "GetAllBaseline - %s", QCC_StatusText(status));
+        LOG(LOG_ERR, "GetAll - %s", QCC_StatusText(status));
         delete context;
     }
 }

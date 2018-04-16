@@ -20,6 +20,7 @@
 
 #include "Payload.h"
 
+#include "Name.h"
 #include "Plugin.h"
 #include "Signature.h"
 #include "oic_malloc.h"
@@ -29,28 +30,92 @@
 #include <math.h>
 
 std::map<std::string, std::vector<Types::Field>> Types::m_structs;
+std::map<std::string, std::map<std::string, Types::Value>> Types::m_dicts;
+
+std::string Types::GenerateAnonymousName()
+{
+    static uint64_t i = 0;
+    return std::string("[Anon") + std::to_string(++i) + "]";
+}
+
+static bool GetVariantSignature(const ajn::MsgArg *arg, std::string &signature)
+{
+    if (arg->typeId == ajn::ALLJOYN_VARIANT)
+    {
+        return GetVariantSignature(arg->v_variant.val, signature);
+    }
+    else if (arg->typeId == ajn::ALLJOYN_ARRAY &&
+            arg->v_array.GetElemSig()[0] == ajn::ALLJOYN_VARIANT)
+    {
+        /* This could be an array or struct depending on the types of the elements */
+        if (!arg->v_array.GetNumElements())
+        {
+            /* No further type info */
+            signature = "av";
+            return true;
+        }
+        bool useStructSig = false;
+        std::string structSig = "(";
+        if (!GetVariantSignature(&arg->v_array.GetElements()[0], signature))
+        {
+            return false;
+        }
+        structSig += signature;
+        for (size_t i = 1; i < arg->v_array.GetNumElements(); ++i)
+        {
+            std::string elemSig;
+            if (!GetVariantSignature(&arg->v_array.GetElements()[i], elemSig))
+            {
+                return false;
+            }
+            if (elemSig != signature)
+            {
+                useStructSig = true;
+                structSig += elemSig;
+            }
+        }
+        structSig += ")";
+        if (useStructSig)
+        {
+            signature = structSig;
+        }
+        else
+        {
+            signature = "a" + signature;
+        }
+        return true;
+    }
+    else
+    {
+        signature = arg->Signature();
+        return true;
+    }
+}
 
 static bool calcDim(OCRepPayloadValueArray *arr,
                     uint8_t di, const ajn::MsgArg *arg, const char *signature)
 {
-    if (di >= MAX_REP_ARRAY_DEPTH)
-    {
-        return false;
-    }
     bool success = true;
     switch (signature[0])
     {
         case ajn::ALLJOYN_BOOLEAN:
+            arr->type = OCREP_PROP_BOOL;
+            break;
         case ajn::ALLJOYN_BYTE:
+            arr->type = OCREP_PROP_BYTE_STRING;
+            break;
         case ajn::ALLJOYN_INT16:
         case ajn::ALLJOYN_UINT16:
         case ajn::ALLJOYN_INT32:
         case ajn::ALLJOYN_UINT32:
         case ajn::ALLJOYN_INT64:
         case ajn::ALLJOYN_UINT64:
-        case ajn::ALLJOYN_DOUBLE:
-            assert(0); /* These types are contained in scalar arrays */
+            arr->type = OCREP_PROP_INT; // TODO loss of information for UINT64 if any values are out of range
             break;
+        case ajn::ALLJOYN_DOUBLE:
+            arr->type = OCREP_PROP_DOUBLE;
+            break;
+
         case ajn::ALLJOYN_HANDLE:
             success = false; /* Explicitly not supported */
             break;
@@ -62,6 +127,10 @@ static bool calcDim(OCRepPayloadValueArray *arr,
             break;
 
         case ajn::ALLJOYN_ARRAY:
+            if (di >= MAX_REP_ARRAY_DEPTH)
+            {
+                return false;
+            }
             switch (signature[1])
             {
                 case ajn::ALLJOYN_BOOLEAN:
@@ -85,7 +154,7 @@ static bool calcDim(OCRepPayloadValueArray *arr,
                 case ajn::ALLJOYN_UINT32:
                 case ajn::ALLJOYN_INT64:
                 case ajn::ALLJOYN_UINT64:
-                    arr->type = OCREP_PROP_INT;
+                    arr->type = OCREP_PROP_INT; // TODO loss of information for UINT64 if any values are out of range
                     if (arr->dimensions[di])
                     {
                         /* Only rectangular arrays are allowed */
@@ -111,11 +180,35 @@ static bool calcDim(OCRepPayloadValueArray *arr,
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
                     arr->type = OCREP_PROP_OBJECT;
                     break;
+                case ajn::ALLJOYN_VARIANT:
+                    {
+                        std::string variantSig;
+                        success = GetVariantSignature(arg, variantSig);
+                        if (variantSig[1] == ajn::ALLJOYN_BYTE)
+                        {
+                            /*
+                             * Drop the last dimension since a byte array is translated as a byte
+                             * string, not an array of bytes
+                             */
+                            arr->type = OCREP_PROP_BYTE_STRING;
+                        }
+                        else
+                        {
+                            arr->dimensions[di] = arg->v_array.GetNumElements();
+                            for (size_t i = 0; success && i < arr->dimensions[di]; ++i)
+                            {
+                                success = calcDim(arr, di + 1,
+                                        arg->v_array.GetElements()[i].v_variant.val, &variantSig[1]);
+                            }
+                        }
+                        break;
+                    }
                 default:
                     arr->dimensions[di] = arg->v_array.GetNumElements();
                     for (size_t i = 0; success && i < arr->dimensions[di]; ++i)
                     {
-                        success = calcDim(arr, di + 1, &arg->v_array.GetElements()[i], &signature[1]);
+                        success = calcDim(arr, di + 1, &arg->v_array.GetElements()[i],
+                                &signature[1]);
                     }
                     break;
             }
@@ -125,8 +218,6 @@ static bool calcDim(OCRepPayloadValueArray *arr,
             arr->type = OCREP_PROP_OBJECT;
             break;
         case ajn::ALLJOYN_VARIANT:
-            assert(0); /* No support for heterogenous arrays yet */
-            break;
         case ajn::ALLJOYN_DICT_ENTRY_OPEN:
             assert(0); /* Handled in ajn::ALLJOYN_ARRAY case above */
             break;
@@ -146,134 +237,437 @@ static bool calcDim(OCRepPayloadValueArray *arr,
     return success;
 }
 
-static bool CloneArray(OCRepPayloadValueArray *arr, size_t *ai, uint8_t di,
-                       const ajn::MsgArg *arg, const char *signature)
+static OCRepPayload *CloneObject(OCRepPayloadPropType type, const ajn::MsgArg *arg,
+        const char *signature)
+{
+    bool success = false;
+    OCRepPayload *obj = OCRepPayloadCreate();
+    if (!obj)
+    {
+        return NULL;
+    }
+    if ((arg->typeId == ajn::ALLJOYN_STRUCT) &&
+            (Types::m_structs.find(signature) != Types::m_structs.end()))
+    {
+        success = true;
+        for (size_t i = 0; success && i < arg->v_struct.numMembers; ++i)
+        {
+            assert(Types::m_structs.find(signature) != Types::m_structs.end());
+            assert(i < Types::m_structs[signature].size());
+            Types::Field &field = Types::m_structs[signature][i];
+            std::string ocName = ToOCPropName(field.m_name);
+            success = ToOCPayload(obj, ocName.c_str(), type, &arg->v_struct.members[i],
+                    field.m_signature.c_str());
+        }
+    }
+    else if ((arg->typeId == ajn::ALLJOYN_ARRAY) &&
+            (Types::m_dicts.find(signature) != Types::m_dicts.end()))
+    {
+        success = true;
+        for (size_t i = 0; success && i < arg->v_array.GetNumElements(); ++i)
+        {
+            const ajn::MsgArg *elem = &arg->v_array.GetElements()[i];
+            if ((elem->typeId != ajn::ALLJOYN_DICT_ENTRY) ||
+                    (elem->v_dictEntry.key->typeId != ajn::ALLJOYN_STRING) ||
+                    (elem->v_dictEntry.val->typeId != ajn::ALLJOYN_VARIANT))
+            {
+                success = false;
+                break;
+            }
+            const char *keyName = elem->v_dictEntry.key->v_string.str;
+            std::string valSig = Types::m_dicts[signature][keyName].m_signature;
+            OCRepPayloadPropType valType = Types::m_dicts[signature][keyName].m_type;
+            success = ToOCPayload(obj, keyName, valType,
+                    elem->v_dictEntry.val->v_variant.val, valSig.c_str());
+        }
+    }
+    if (success)
+    {
+        return obj;
+    }
+    else
+    {
+        OCRepPayloadDestroy(obj);
+        return NULL;
+    }
+}
+
+static bool CloneArray(OCRepPayloadValue *value, size_t *ai, uint8_t di, OCRepPayloadPropType type,
+        const ajn::MsgArg *arg, const char *signature)
 {
     bool success = true;
     switch (signature[0])
     {
         case ajn::ALLJOYN_BOOLEAN:
+            if (arg->typeId != ajn::ALLJOYN_BOOLEAN)
+            {
+                success = false;
+                break;
+            }
+            value->arr.bArray[(*ai)++] = arg->v_bool;
+            break;
         case ajn::ALLJOYN_BYTE:
+            assert(0); /* Handled in ajn::ALLJOYN_ARRAY case below */
+            break;
         case ajn::ALLJOYN_INT16:
+            if (arg->typeId != ajn::ALLJOYN_INT16)
+            {
+                success = false;
+                break;
+            }
+            value->arr.iArray[(*ai)++] = arg->v_int16;
+            break;
         case ajn::ALLJOYN_UINT16:
+            if (arg->typeId != ajn::ALLJOYN_UINT16)
+            {
+                success = false;
+                break;
+            }
+            value->arr.iArray[(*ai)++] = arg->v_uint16;
+            break;
         case ajn::ALLJOYN_INT32:
+            if (arg->typeId != ajn::ALLJOYN_INT32)
+            {
+                success = false;
+                break;
+            }
+            value->arr.iArray[(*ai)++] = arg->v_int32;
+            break;
         case ajn::ALLJOYN_UINT32:
+            if (arg->typeId != ajn::ALLJOYN_UINT32)
+            {
+                success = false;
+                break;
+            }
+            value->arr.iArray[(*ai)++] = arg->v_uint32;
+            break;
         case ajn::ALLJOYN_INT64:
+            if (arg->typeId != ajn::ALLJOYN_INT64)
+            {
+                success = false;
+                break;
+            }
+            value->arr.iArray[(*ai)++] = arg->v_int64;
+            break;
         case ajn::ALLJOYN_UINT64:
+            if (arg->typeId != ajn::ALLJOYN_UINT64)
+            {
+                success = false;
+                break;
+            }
+            value->arr.iArray[(*ai)++] = arg->v_uint64; // TODO loss of information for UINT64 if any values are out of range
+            break;
         case ajn::ALLJOYN_DOUBLE:
-            assert(0); /* These types are contained in scalar arrays */
+            if (arg->typeId != ajn::ALLJOYN_DOUBLE)
+            {
+                success = false;
+                break;
+            }
+            value->arr.dArray[(*ai)++] = arg->v_double;
             break;
         case ajn::ALLJOYN_HANDLE:
             success = false; /* Explicitly not supported */
             break;
 
         case ajn::ALLJOYN_STRING:
+            if (arg->typeId != ajn::ALLJOYN_STRING)
+            {
+                success = false;
+                break;
+            }
+            value->arr.strArray[(*ai)++] = OICStrdup(arg->v_objPath.str);
+            break;
         case ajn::ALLJOYN_OBJECT_PATH:
-            arr->strArray[(*ai)++] = OICStrdup(arg->v_string.str);
+            if (arg->typeId != ajn::ALLJOYN_OBJECT_PATH)
+            {
+                success = false;
+                break;
+            }
+            value->arr.strArray[(*ai)++] = OICStrdup(arg->v_string.str);
             break;
         case ajn::ALLJOYN_SIGNATURE:
-            arr->strArray[(*ai)++] = OICStrdup(arg->v_signature.sig);
+            if (arg->typeId != ajn::ALLJOYN_SIGNATURE)
+            {
+                success = false;
+                break;
+            }
+            value->arr.strArray[(*ai)++] = OICStrdup(arg->v_signature.sig);
             break;
 
         case ajn::ALLJOYN_ARRAY:
             switch (signature[1])
             {
                 case ajn::ALLJOYN_BOOLEAN:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    memcpy(&arr->bArray[(*ai)], arg->v_scalarArray.v_bool, arr->dimensions[di] * sizeof(bool));
-                    (*ai) += arr->dimensions[di];
+                    if (arg->typeId != ajn::ALLJOYN_BOOLEAN_ARRAY)
+                    {
+                        success = false;
+                        break;
+                    }
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    memcpy(&value->arr.bArray[(*ai)], arg->v_scalarArray.v_bool,
+                            value->arr.dimensions[di] * sizeof(bool));
+                    (*ai) += value->arr.dimensions[di];
                     break;
                 case ajn::ALLJOYN_BYTE:
                     {
-                        OCByteString value;
-                        value.len = arg->v_scalarArray.numElements;
-                        value.bytes = (uint8_t *) OICMalloc(value.len * sizeof(uint8_t));
-                        if (!value.bytes)
+                        if (arg->typeId != ajn::ALLJOYN_BYTE_ARRAY)
                         {
                             success = false;
                             break;
                         }
-                        memcpy(value.bytes, arg->v_scalarArray.v_byte, value.len);
-                        arr->ocByteStrArray[(*ai)++] = value;
+                        OCByteString byteString;
+                        byteString.len = arg->v_scalarArray.numElements;
+                        byteString.bytes = (uint8_t *) OICMalloc(byteString.len * sizeof(uint8_t));
+                        if (!byteString.bytes)
+                        {
+                            success = false;
+                            break;
+                        }
+                        memcpy(byteString.bytes, arg->v_scalarArray.v_byte, byteString.len);
+                        value->arr.ocByteStrArray[(*ai)++] = byteString;
                         break;
                     }
                 case ajn::ALLJOYN_INT16:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    for (size_t i = 0; i < arr->dimensions[di]; ++i)
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_INT16_ARRAY)
                     {
-                        arr->iArray[(*ai)++] = arg->v_scalarArray.v_int16[i];
+                        success = false;
+                        break;
+                    }
+                    for (size_t i = 0; i < value->arr.dimensions[di]; ++i)
+                    {
+                        value->arr.iArray[(*ai)++] = arg->v_scalarArray.v_int16[i];
                     }
                     break;
                 case ajn::ALLJOYN_UINT16:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    for (size_t i = 0; i < arr->dimensions[di]; ++i)
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_UINT16_ARRAY)
                     {
-                        arr->iArray[(*ai)++] = arg->v_scalarArray.v_uint16[i];
+                        success = false;
+                        break;
+                    }
+                    for (size_t i = 0; i < value->arr.dimensions[di]; ++i)
+                    {
+                        value->arr.iArray[(*ai)++] = arg->v_scalarArray.v_uint16[i];
                     }
                     break;
                 case ajn::ALLJOYN_INT32:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    for (size_t i = 0; i < arr->dimensions[di]; ++i)
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_INT32_ARRAY)
                     {
-                        arr->iArray[(*ai)++] = arg->v_scalarArray.v_int32[i];
+                        success = false;
+                        break;
+                    }
+                    for (size_t i = 0; i < value->arr.dimensions[di]; ++i)
+                    {
+                        value->arr.iArray[(*ai)++] = arg->v_scalarArray.v_int32[i];
                     }
                     break;
                 case ajn::ALLJOYN_UINT32:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    for (size_t i = 0; i < arr->dimensions[di]; ++i)
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_UINT32_ARRAY)
                     {
-                        arr->iArray[(*ai)++] = arg->v_scalarArray.v_uint32[i];
+                        success = false;
+                        break;
+                    }
+                    for (size_t i = 0; i < value->arr.dimensions[di]; ++i)
+                    {
+                        value->arr.iArray[(*ai)++] = arg->v_scalarArray.v_uint32[i];
                     }
                     break;
                 case ajn::ALLJOYN_INT64:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    memcpy(&arr->iArray[(*ai)], arg->v_scalarArray.v_int64, arr->dimensions[di] * sizeof(int64_t));
-                    (*ai) += arr->dimensions[di];
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_INT64_ARRAY)
+                    {
+                        success = false;
+                        break;
+                    }
+                    memcpy(&value->arr.iArray[(*ai)], arg->v_scalarArray.v_int64,
+                            value->arr.dimensions[di] * sizeof(int64_t));
+                    (*ai) += value->arr.dimensions[di];
                     break;
                 case ajn::ALLJOYN_UINT64:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    for (size_t i = 0; i < arr->dimensions[di]; ++i)
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_UINT64_ARRAY)
                     {
-                        arr->iArray[(*ai)++] = arg->v_scalarArray.v_uint64[i];
+                        success = false;
+                        break;
+                    }
+                    for (size_t i = 0; i < value->arr.dimensions[di]; ++i)
+                    {
+                        value->arr.iArray[(*ai)++] = arg->v_scalarArray.v_uint64[i];
                     }
                     break;
                 case ajn::ALLJOYN_DOUBLE:
-                    assert(arr->dimensions[di] == arg->v_scalarArray.numElements);
-                    memcpy(&arr->dArray[(*ai)], arg->v_scalarArray.v_double, arr->dimensions[di] * sizeof(double));
-                    (*ai) += arr->dimensions[di];
+                    assert(value->arr.dimensions[di] == arg->v_scalarArray.numElements);
+                    if (arg->typeId != ajn::ALLJOYN_DOUBLE_ARRAY)
+                    {
+                        success = false;
+                        break;
+                    }
+                    memcpy(&value->arr.dArray[(*ai)], arg->v_scalarArray.v_double,
+                            value->arr.dimensions[di] * sizeof(double));
+                    (*ai) += value->arr.dimensions[di];
                     break;
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
                     {
-                        OCRepPayload *value = OCRepPayloadCreate();
-                        if (!value)
+                        if (arg->typeId != ajn::ALLJOYN_ARRAY)
+                        {
+                            success = false;
+                            break;
+                        }
+                        OCRepPayload *obj = OCRepPayloadCreate();
+                        if (!obj)
                         {
                             success = false;
                             break;
                         }
                         for (size_t i = 0; success && i < arg->v_array.GetNumElements(); ++i)
                         {
-                            success = ToOCPayload(value, NULL, &arg->v_array.GetElements()[i], &signature[1]);
+                            success = ToOCPayload(obj, NULL, &arg->v_array.GetElements()[i],
+                                    &signature[1]);
                         }
                         if (success)
                         {
-                            arr->objArray[(*ai)++] = value;
+                            value->arr.objArray[(*ai)++] = obj;
                         }
                         else
                         {
-                            OCRepPayloadDestroy(value);
+                            OCRepPayloadDestroy(obj);
+                        }
+                        break;
+                    }
+                case ajn::ALLJOYN_VARIANT:
+                    {
+                        std::string variantSig;
+                        success = GetVariantSignature(arg, variantSig);
+                        if (variantSig[1] == ajn::ALLJOYN_BYTE)
+                        {
+                            if (arg->typeId != ajn::ALLJOYN_ARRAY)
+                            {
+                                success = false;
+                                break;
+                            }
+                            if (value->type == OCREP_PROP_ARRAY)
+                            {
+                                OCByteString byteString;
+                                byteString.len = arg->v_array.GetNumElements();
+                                byteString.bytes =
+                                        (uint8_t *) OICMalloc(byteString.len * sizeof(uint8_t));
+                                if (!byteString.bytes)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                for (size_t i = 0; i < byteString.len; ++i)
+                                {
+                                    const ajn::MsgArg *elem = &arg->v_array.GetElements()[i];
+                                    if ((elem->typeId != ajn::ALLJOYN_VARIANT) ||
+                                            (elem->v_variant.val->typeId != ajn::ALLJOYN_BYTE))
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    byteString.bytes[i] = elem->v_variant.val->v_byte;
+                                }
+                                if (success)
+                                {
+                                    value->arr.ocByteStrArray[(*ai)++] = byteString;
+                                }
+                                else
+                                {
+                                    OICFree(byteString.bytes);
+                                }
+                                break;
+                            }
+                            else
+                            {
+                                value->type = OCREP_PROP_BYTE_STRING;
+                                value->ocByteStr.len = arg->v_array.GetNumElements();
+                                value->ocByteStr.bytes = (uint8_t *) OICMalloc(value->ocByteStr.len
+                                        * sizeof(uint8_t));
+                                if (!value->ocByteStr.bytes)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                for (size_t i = 0; i < value->ocByteStr.len; ++i)
+                                {
+                                    const ajn::MsgArg *elem = &arg->v_array.GetElements()[i];
+                                    if (elem->typeId != ajn::ALLJOYN_VARIANT)
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    ajn::MsgArg *val = elem->v_variant.val;
+                                    while (val->typeId == ajn::ALLJOYN_VARIANT)
+                                    {
+                                        val = val->v_variant.val;
+                                    }
+                                    if (val->typeId != ajn::ALLJOYN_BYTE)
+                                    {
+                                        success = false;
+                                        break;
+                                    }
+                                    value->ocByteStr.bytes[i] = val->v_byte;
+                                }
+                                if (!success)
+                                {
+                                    OICFree(value->ocByteStr.bytes);
+                                    value->ocByteStr.bytes = NULL;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            for (size_t i = 0; success && i < value->arr.dimensions[di]; ++i)
+                            {
+                                if (arg->typeId != ajn::ALLJOYN_ARRAY)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                const ajn::MsgArg *elem = &arg->v_array.GetElements()[i];
+                                if (elem->typeId != ajn::ALLJOYN_VARIANT)
+                                {
+                                    success = false;
+                                    break;
+                                }
+                                ajn::MsgArg *val = elem->v_variant.val;
+                                while (val->typeId == ajn::ALLJOYN_VARIANT)
+                                {
+                                    val = val->v_variant.val;
+                                }
+                                assert(val->Signature() == &variantSig[1]);
+                                success = CloneArray(value, ai, di + 1, type, val, &variantSig[1]);
+                            }
                         }
                     }
+                    break;
                 default:
-                    for (size_t i = 0; success && i < arr->dimensions[di]; ++i)
+                    if (arg->typeId != ajn::ALLJOYN_ARRAY)
                     {
-                        success = CloneArray(arr, ai, di + 1, &arg->v_array.GetElements()[i], &signature[1]);
+                        success = false;
+                        break;
                     }
+                    value->type = OCREP_PROP_ARRAY;
+                    for (size_t i = 0; success && i < value->arr.dimensions[di]; ++i)
+                    {
+                        success = CloneArray(value, ai, di + 1, type,
+                                &arg->v_array.GetElements()[i], &signature[1]);
+                    }
+                    break;
             }
             break;
         case ajn::ALLJOYN_STRUCT_OPEN:
             {
-                OCRepPayload *value = OCRepPayloadCreate();
-                if (!value)
+                if (arg->typeId != ajn::ALLJOYN_STRUCT)
+                {
+                    success = false;
+                    break;
+                }
+                OCRepPayload *obj = OCRepPayloadCreate();
+                if (!obj)
                 {
                     success = false;
                     break;
@@ -287,21 +681,19 @@ static bool CloneArray(OCRepPayloadValueArray *arr, size_t *ai, uint8_t di,
                     fieldSignature = signature;
                     char name[16];
                     snprintf(name, 16, "%zu", i);
-                    success = ToOCPayload(value, name, &arg->v_struct.members[i], sig.c_str());
+                    success = ToOCPayload(obj, name, &arg->v_struct.members[i], sig.c_str());
                 }
                 if (success)
                 {
-                    arr->objArray[(*ai)++] = value;
+                    value->arr.objArray[(*ai)++] = obj;
                 }
                 else
                 {
-                    OCRepPayloadDestroy(value);
+                    OCRepPayloadDestroy(obj);
                 }
                 break;
             }
         case ajn::ALLJOYN_VARIANT:
-            assert(0); /* No support for heterogenous arrays yet */
-            break;
         case ajn::ALLJOYN_DICT_ENTRY_OPEN:
             assert(0); /* Handled in ajn::ALLJOYN_ARRAY case above */
             break;
@@ -320,27 +712,14 @@ static bool CloneArray(OCRepPayloadValueArray *arr, size_t *ai, uint8_t di,
 
         case '[':
             {
-                OCRepPayload *value = OCRepPayloadCreate();
-                if (!value)
+                OCRepPayload *obj = CloneObject(type, arg, signature);
+                if (obj)
                 {
-                    success = false;
-                    break;
-                }
-                for (size_t i = 0; success && i < arg->v_struct.numMembers; ++i)
-                {
-                    assert(Types::m_structs.find(signature) != Types::m_structs.end());
-                    assert(i < Types::m_structs[signature].size());
-                    Types::Field &field = Types::m_structs[signature][i];
-                    success = ToOCPayload(value, field.m_name.c_str(), &arg->v_struct.members[i],
-                                          field.m_signature.c_str());
-                }
-                if (success)
-                {
-                    arr->objArray[(*ai)++] = value;
+                    value->arr.objArray[(*ai)++] = obj;
                 }
                 else
                 {
-                    OCRepPayloadDestroy(value);
+                    success = false;
                 }
                 break;
             }
@@ -348,146 +727,244 @@ static bool CloneArray(OCRepPayloadValueArray *arr, size_t *ai, uint8_t di,
     return success;
 }
 
-static void DestroyArray(OCRepPayloadValueArray *arr)
+static void DestroyArray(OCRepPayloadValue *value)
 {
-    size_t dimTotal = calcDimTotal(arr->dimensions);
-    switch (arr->type)
+    if (value->type == OCREP_PROP_BYTE_STRING)
     {
-        case OCREP_PROP_INT:
-            OICFree(arr->iArray);
-            break;
-        case OCREP_PROP_DOUBLE:
-            OICFree(arr->dArray);
-            break;
-        case OCREP_PROP_BOOL:
-            OICFree(arr->bArray);
-            break;
-        case OCREP_PROP_STRING:
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OICFree(arr->strArray[i]);
-            }
-            OICFree(arr->strArray);
-            break;
-        case OCREP_PROP_BYTE_STRING:
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OICFree(arr->ocByteStrArray[i].bytes);
-            }
-            OICFree(arr->ocByteStrArray);
-            break;
-        case OCREP_PROP_OBJECT:
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                OICFree(arr->objArray[i]);
-            }
-            OICFree(arr->objArray);
-            break;
-        default:
-            break;
+        OICFree(value->ocByteStr.bytes);
+    }
+    else
+    {
+        size_t dimTotal = calcDimTotal(value->arr.dimensions);
+        switch (value->arr.type)
+        {
+            case OCREP_PROP_INT:
+                OICFree(value->arr.iArray);
+                break;
+            case OCREP_PROP_DOUBLE:
+                OICFree(value->arr.dArray);
+                break;
+            case OCREP_PROP_BOOL:
+                OICFree(value->arr.bArray);
+                break;
+            case OCREP_PROP_STRING:
+                for (size_t i = 0; i < dimTotal; ++i)
+                {
+                    OICFree(value->arr.strArray[i]);
+                }
+                OICFree(value->arr.strArray);
+                break;
+            case OCREP_PROP_BYTE_STRING:
+                for (size_t i = 0; i < dimTotal; ++i)
+                {
+                    OICFree(value->arr.ocByteStrArray[i].bytes);
+                }
+                OICFree(value->arr.ocByteStrArray);
+                break;
+            case OCREP_PROP_OBJECT:
+                for (size_t i = 0; i < dimTotal; ++i)
+                {
+                    OICFree(value->arr.objArray[i]);
+                }
+                OICFree(value->arr.objArray);
+                break;
+            default:
+                break;
+        }
     }
 }
 
-static bool SetPropArray(OCRepPayload *payload, const char *name, const ajn::MsgArg *arg,
-                         const char *signature)
+static bool SetPropArray(OCRepPayload *payload, const char *name, OCRepPayloadPropType type,
+        const ajn::MsgArg *arg, const char *signature)
 {
-    OCRepPayloadValueArray arr;
-    memset(&arr, 0, sizeof(arr));
-    if (!calcDim(&arr, 0, arg, signature))
+    OCRepPayloadValue value;
+    memset(&value, 0, sizeof(value));
+    if (!calcDim(&value.arr, 0, arg, signature))
     {
         return false;
     }
-    size_t dimTotal = calcDimTotal(arr.dimensions);
-    switch (arr.type)
+    size_t dimTotal = calcDimTotal(value.arr.dimensions);
+    switch (value.arr.type)
     {
-        case OCREP_PROP_INT: arr.iArray = (int64_t *) OICCalloc(dimTotal, sizeof(int64_t)); break;
-        case OCREP_PROP_DOUBLE: arr.dArray = (double *) OICCalloc(dimTotal, sizeof(double)); break;
-        case OCREP_PROP_BOOL: arr.bArray = (bool *) OICCalloc(dimTotal, sizeof(bool)); break;
-        case OCREP_PROP_STRING: arr.strArray = (char **) OICCalloc(dimTotal, sizeof(char *)); break;
-        case OCREP_PROP_BYTE_STRING: arr.ocByteStrArray = (OCByteString *) OICCalloc(dimTotal,
-                    sizeof(OCByteString)); break;
-        case OCREP_PROP_OBJECT: arr.objArray = (OCRepPayload **) OICCalloc(dimTotal,
-                                                   sizeof(OCRepPayload *)); break;
-        case OCREP_PROP_NULL: break; /* Explicitly not supported */
-        case OCREP_PROP_ARRAY: assert(0); break; /* Not used as an array value type */
+        case OCREP_PROP_INT:
+            value.arr.iArray = (int64_t *) OICCalloc(dimTotal, sizeof(int64_t));
+            break;
+        case OCREP_PROP_DOUBLE:
+            value.arr.dArray = (double *) OICCalloc(dimTotal, sizeof(double));
+            break;
+        case OCREP_PROP_BOOL:
+            value.arr.bArray = (bool *) OICCalloc(dimTotal, sizeof(bool));
+            break;
+        case OCREP_PROP_STRING:
+            value.arr.strArray = (char **) OICCalloc(dimTotal, sizeof(char *));
+            break;
+        case OCREP_PROP_BYTE_STRING:
+            value.arr.ocByteStrArray = (OCByteString *) OICCalloc(dimTotal, sizeof(OCByteString));
+            break;
+        case OCREP_PROP_OBJECT:
+            value.arr.objArray = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload *));
+            break;
+        case OCREP_PROP_NULL:
+            /* Explicitly not supported, except that this is an empty array (see IOT-2457) */
+            break;
+        case OCREP_PROP_ARRAY:
+            /* Not used as an array value type */
+            assert(0);
+            break;
     }
-    if (!arr.iArray)   /* Array pointers are in a union so it's sufficient to only check one */
+    /* Array pointers are in a union so it's sufficient to only check one */
+    if (dimTotal && !value.arr.iArray)
     {
         return false;
     }
     size_t i = 0;
-    bool success = CloneArray(&arr, &i, 0, arg, signature);
+    bool success = CloneArray(&value, &i, 0, type, arg, signature);
     if (success)
     {
-        switch (arr.type)
+        if (value.type == OCREP_PROP_BYTE_STRING)
         {
-            case OCREP_PROP_INT: success = OCRepPayloadSetIntArrayAsOwner(payload, name, arr.iArray,
-                                               arr.dimensions); break;
-            case OCREP_PROP_DOUBLE: success = OCRepPayloadSetDoubleArrayAsOwner(payload, name, arr.dArray,
-                                                  arr.dimensions); break;
-            case OCREP_PROP_BOOL: success = OCRepPayloadSetBoolArrayAsOwner(payload, name, arr.bArray,
-                                                arr.dimensions); break;
-            case OCREP_PROP_STRING: success = OCRepPayloadSetStringArrayAsOwner(payload, name, arr.strArray,
-                                                  arr.dimensions); break;
-            case OCREP_PROP_BYTE_STRING: success = OCRepPayloadSetByteStringArrayAsOwner(payload, name,
-                                                       arr.ocByteStrArray, arr.dimensions); break;
-            case OCREP_PROP_OBJECT: success = OCRepPayloadSetPropObjectArrayAsOwner(payload, name, arr.objArray,
-                                                  arr.dimensions); break;
-            case OCREP_PROP_NULL: success = false; break; /* Explicitly not supported */
-            case OCREP_PROP_ARRAY: assert(0); break; /* Not used as an array value type */
+            success = OCRepPayloadSetPropByteStringAsOwner(payload, name, &value.ocByteStr);
+        }
+        else
+        {
+            switch (value.arr.type)
+            {
+                case OCREP_PROP_INT:
+                    success = OCRepPayloadSetIntArrayAsOwner(payload, name, value.arr.iArray,
+                            value.arr.dimensions);
+                    break;
+                case OCREP_PROP_DOUBLE:
+                    success = OCRepPayloadSetDoubleArrayAsOwner(payload, name, value.arr.dArray,
+                            value.arr.dimensions);
+                    break;
+                case OCREP_PROP_BOOL:
+                    success = OCRepPayloadSetBoolArrayAsOwner(payload, name, value.arr.bArray,
+                            value.arr.dimensions);
+                    break;
+                case OCREP_PROP_STRING:
+                    success = OCRepPayloadSetStringArrayAsOwner(payload, name, value.arr.strArray,
+                            value.arr.dimensions);
+                    break;
+                case OCREP_PROP_BYTE_STRING:
+                    success = OCRepPayloadSetByteStringArrayAsOwner(payload, name,
+                            value.arr.ocByteStrArray, value.arr.dimensions);
+                    break;
+                case OCREP_PROP_OBJECT:
+                    success = OCRepPayloadSetPropObjectArrayAsOwner(payload, name,
+                            value.arr.objArray, value.arr.dimensions);
+                    break;
+                case OCREP_PROP_NULL:
+                    /* Explicitly not supported, except that this is an empty array (see IOT-2457) */
+                    success = true;
+                    break;
+                case OCREP_PROP_ARRAY:
+                    /* Not used as an array value type */
+                    assert(0);
+                    break;
+            }
         }
     }
     if (!success)
     {
-        DestroyArray(&arr);
+        DestroyArray(&value);
     }
     return success;
 }
 
-bool ToOCPayload(OCRepPayload *payload,
-                 const char *name, const ajn::MsgArg *arg, const char *signature)
+bool ToOCPayload(OCRepPayload *payload, const char *name, const ajn::MsgArg *arg,
+        const char *signature)
+{
+    return ToOCPayload(payload, name, OCREP_PROP_NULL, arg, signature);
+}
+
+bool ToOCPayload(OCRepPayload *payload, const char *name, OCRepPayloadPropType type,
+        const ajn::MsgArg *arg, const char *signature)
 {
     bool success = false;
     switch (signature[0])
     {
         case ajn::ALLJOYN_BOOLEAN:
-            success = OCRepPayloadSetPropBool(payload, name, arg->v_bool);
+            success = (arg->typeId == ajn::ALLJOYN_BOOLEAN) &&
+                    OCRepPayloadSetPropBool(payload, name, arg->v_bool);
             break;
 
         case ajn::ALLJOYN_BYTE:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_byte);
+            success = (arg->typeId == ajn::ALLJOYN_BYTE) &&
+                    OCRepPayloadSetPropInt(payload, name, arg->v_byte);
             break;
         case ajn::ALLJOYN_INT16:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_int16);
+            success = (arg->typeId == ajn::ALLJOYN_INT16) &&
+                    OCRepPayloadSetPropInt(payload, name, arg->v_int16);
             break;
         case ajn::ALLJOYN_UINT16:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_uint16);
+            success = (arg->typeId == ajn::ALLJOYN_UINT16) &&
+                    OCRepPayloadSetPropInt(payload, name, arg->v_uint16);
             break;
         case ajn::ALLJOYN_INT32:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_int32);
+            success = (arg->typeId == ajn::ALLJOYN_INT32) &&
+                    OCRepPayloadSetPropInt(payload, name, arg->v_int32);
             break;
         case ajn::ALLJOYN_UINT32:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_uint32);
+            success = (arg->typeId == ajn::ALLJOYN_UINT32) &&
+                    OCRepPayloadSetPropInt(payload, name, arg->v_uint32);
             break;
         case ajn::ALLJOYN_INT64:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_int64);
+            if (arg->typeId != ajn::ALLJOYN_INT64)
+            {
+                break;
+            }
+            if (type == OCREP_PROP_STRING)
+            {
+                char buf[20];
+                success = snprintf(buf, 20, "%" PRId64, arg->v_int64) <= 20;
+                if (success)
+                {
+                    success = OCRepPayloadSetPropString(payload, name, buf);
+                }
+            }
+            else
+            {
+                success = OCRepPayloadSetPropInt(payload, name, arg->v_int64);
+            }
             break;
         case ajn::ALLJOYN_UINT64:
-            success = OCRepPayloadSetPropInt(payload, name, arg->v_uint64);
+            if (arg->typeId != ajn::ALLJOYN_UINT64)
+            {
+                break;
+            }
+            if (type == OCREP_PROP_STRING)
+            {
+                char buf[20];
+                success = snprintf(buf, 20, "%" PRIu64, arg->v_uint64) <= 20;
+                if (success)
+                {
+                    success = OCRepPayloadSetPropString(payload, name, buf);
+                }
+            }
+            else if (type == OCREP_PROP_INT || arg->v_uint64 <= INT64_MAX)
+            {
+                success = OCRepPayloadSetPropInt(payload, name, arg->v_uint64);
+            }
             break;
         case ajn::ALLJOYN_DOUBLE:
-            success = OCRepPayloadSetPropDouble(payload, name, arg->v_double);
+            success = (arg->typeId == ajn::ALLJOYN_DOUBLE) &&
+                    OCRepPayloadSetPropDouble(payload, name, arg->v_double);
             break;
         case ajn::ALLJOYN_HANDLE:
             success = false; /* Explicitly not supported */
             break;
 
         case ajn::ALLJOYN_STRING:
+            success = (arg->typeId == ajn::ALLJOYN_STRING) &&
+                    OCRepPayloadSetPropString(payload, name, arg->v_string.str);
+            break;
         case ajn::ALLJOYN_OBJECT_PATH:
-            success = OCRepPayloadSetPropString(payload, name, arg->v_string.str);
+            success = (arg->typeId == ajn::ALLJOYN_OBJECT_PATH) &&
+                    OCRepPayloadSetPropString(payload, name, arg->v_objPath.str);
             break;
         case ajn::ALLJOYN_SIGNATURE:
-            success = OCRepPayloadSetPropString(payload, name, arg->v_signature.sig);
+            success = (arg->typeId == ajn::ALLJOYN_SIGNATURE) &&
+                    OCRepPayloadSetPropString(payload, name, arg->v_signature.sig);
             break;
 
         case ajn::ALLJOYN_ARRAY:
@@ -495,20 +972,35 @@ bool ToOCPayload(OCRepPayload *payload,
             {
                 case ajn::ALLJOYN_BYTE:
                     {
-                        OCByteString value;
-                        value.len = arg->v_scalarArray.numElements;
-                        value.bytes = (uint8_t *) OICMalloc(value.len * sizeof(uint8_t));
-                        if (!value.bytes)
+                        if (arg->typeId != ajn::ALLJOYN_BYTE_ARRAY)
                         {
-                            success = false;
                             break;
                         }
-                        memcpy(value.bytes, arg->v_scalarArray.v_byte, value.len);
+                        OCByteString value;
+                        value.len = arg->v_scalarArray.numElements;
+                        if (value.len)
+                        {
+                            value.bytes = (uint8_t *) OICMalloc(value.len * sizeof(uint8_t));
+                            if (!value.bytes)
+                            {
+                                success = false;
+                                break;
+                            }
+                            memcpy(value.bytes, arg->v_scalarArray.v_byte, value.len);
+                        }
+                        else
+                        {
+                            value.bytes = NULL;
+                        }
                         success = OCRepPayloadSetPropByteStringAsOwner(payload, name, &value);
                         break;
                     }
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
                     {
+                        if (arg->typeId != ajn::ALLJOYN_ARRAY)
+                        {
+                            break;
+                        }
                         OCRepPayload *value = OCRepPayloadCreate();
                         if (!value)
                         {
@@ -517,7 +1009,8 @@ bool ToOCPayload(OCRepPayload *payload,
                         success = true;
                         for (size_t i = 0; success && i < arg->v_array.GetNumElements(); ++i)
                         {
-                            success = ToOCPayload(value, NULL, &arg->v_array.GetElements()[i], &signature[1]);
+                            success = ToOCPayload(value, NULL, type, &arg->v_array.GetElements()[i],
+                                    &signature[1]);
                         }
                         if (success)
                         {
@@ -529,13 +1022,63 @@ bool ToOCPayload(OCRepPayload *payload,
                         }
                         break;
                     }
+                case ajn::ALLJOYN_VARIANT:
+                    {
+                        std::string variantSig;
+                        success = GetVariantSignature(arg, variantSig);
+                        if (!success)
+                        {
+                            break;
+                        }
+                        if (variantSig[0] == ajn::ALLJOYN_STRUCT_OPEN)
+                        {
+                            if (arg->typeId != ajn::ALLJOYN_ARRAY ||
+                                    arg->v_array.GetElemSig()[0] != ajn::ALLJOYN_VARIANT)
+                            {
+                                break;
+                            }
+                            OCRepPayload *value = OCRepPayloadCreate();
+                            if (!value)
+                            {
+                                break;
+                            }
+                            success = true;
+                            const char *vsig = variantSig.c_str();
+                            ++vsig;
+                            const char *fieldSignature = vsig;
+                            for (size_t i = 0; success && i < arg->v_array.GetNumElements(); ++i)
+                            {
+                                ParseCompleteType(vsig);
+                                std::string sig(fieldSignature, vsig - fieldSignature);
+                                fieldSignature = vsig;
+                                char name[16];
+                                snprintf(name, 16, "%zu", i);
+                                success = ToOCPayload(value, name, type,
+                                        arg->v_array.GetElements()[i].v_variant.val, sig.c_str());
+                            }
+                            if (success)
+                            {
+                                success = OCRepPayloadSetPropObjectAsOwner(payload, name, value);
+                            }
+                            else
+                            {
+                                OCRepPayloadDestroy(value);
+                            }
+                            break;
+                        }
+                    }
+                    /* FALLTHROUGH */
                 default:
-                    success = SetPropArray(payload, name, arg, signature);
+                    success = SetPropArray(payload, name, type, arg, signature);
                     break;
             }
             break;
         case ajn::ALLJOYN_STRUCT_OPEN:
             {
+                if (arg->typeId != ajn::ALLJOYN_STRUCT)
+                {
+                    break;
+                }
                 OCRepPayload *value = OCRepPayloadCreate();
                 if (!value)
                 {
@@ -551,7 +1094,7 @@ bool ToOCPayload(OCRepPayload *payload,
                     fieldSignature = signature;
                     char name[16];
                     snprintf(name, 16, "%zu", i);
-                    success = ToOCPayload(value, name, &arg->v_struct.members[i], sig.c_str());
+                    success = ToOCPayload(value, name, type, &arg->v_struct.members[i], sig.c_str());
                 }
                 if (success)
                 {
@@ -564,10 +1107,16 @@ bool ToOCPayload(OCRepPayload *payload,
                 break;
             }
         case ajn::ALLJOYN_VARIANT:
-            success = ToOCPayload(payload, name, arg->v_variant.val, arg->v_variant.val->Signature().c_str());
+            success = (arg->typeId == ajn::ALLJOYN_VARIANT) &&
+                    ToOCPayload(payload, name, type, arg->v_variant.val,
+                            arg->v_variant.val->Signature().c_str());
             break;
         case ajn::ALLJOYN_DICT_ENTRY_OPEN:
             {
+                if (arg->typeId != ajn::ALLJOYN_DICT_ENTRY)
+                {
+                    break;
+                }
                 const char *entrySig = &signature[1];
                 const char *keySignature = entrySig;
                 ParseCompleteType(entrySig);
@@ -576,43 +1125,59 @@ bool ToOCPayload(OCRepPayload *payload,
                 ParseCompleteType(entrySig);
                 std::string valSig(valSignature, entrySig - valSignature);
                 ajn::MsgArg *key = arg->v_dictEntry.key;
-                char keyNameBuf[64];
+                if (key->typeId != keySig[0])
+                {
+                    break;
+                }
+                static const int keyNameBufSize = 384;
+                char keyNameBuf[keyNameBufSize];
                 const char *keyName = keyNameBuf;
                 switch (keySig[0])
                 {
                     case ajn::ALLJOYN_BOOLEAN:
                         keyName = key->v_bool ? "true" : "false";
+                        success = true;
                         break;
                     case ajn::ALLJOYN_BYTE:
-                        sprintf(keyNameBuf, "%u", key->v_byte);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%u",
+                                key->v_byte) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_INT16:
-                        sprintf(keyNameBuf, "%d", key->v_int16);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%d",
+                                key->v_int16) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_UINT16:
-                        sprintf(keyNameBuf, "%u", key->v_uint16);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%u",
+                                key->v_uint16) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_INT32:
-                        sprintf(keyNameBuf, "%d", key->v_int32);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%d",
+                                key->v_int32) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_UINT32:
-                        sprintf(keyNameBuf, "%u", key->v_uint32);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%u",
+                                key->v_uint32) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_INT64:
-                        sprintf(keyNameBuf, "%" PRIi64, key->v_int64);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%" PRIi64,
+                                key->v_int64) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_UINT64:
-                        sprintf(keyNameBuf, "%" PRIu64, key->v_uint64);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%" PRIu64,
+                                key->v_uint64) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_DOUBLE:
-                        sprintf(keyNameBuf, "%f", key->v_double);
+                        success = snprintf(keyNameBuf, keyNameBufSize, "%f",
+                                key->v_double) <= keyNameBufSize;
                         break;
                     case ajn::ALLJOYN_STRING:
                     case ajn::ALLJOYN_OBJECT_PATH:
                         keyName = key->v_string.str;
+                        success = true;
                         break;
                     case ajn::ALLJOYN_SIGNATURE:
                         keyName = key->v_signature.sig;
+                        success = true;
                         break;
                     case ajn::ALLJOYN_HANDLE:
                         success = false; /* Explicitly not supported */
@@ -621,7 +1186,11 @@ bool ToOCPayload(OCRepPayload *payload,
                         success = false; /* Only basic types are allowed as keys */
                         break;
                 }
-                success = ToOCPayload(payload, keyName, arg->v_dictEntry.val, valSig.c_str());
+                if (success)
+                {
+                    success = ToOCPayload(payload, keyName, type, arg->v_dictEntry.val,
+                            valSig.c_str());
+                }
                 break;
             }
 
@@ -639,38 +1208,30 @@ bool ToOCPayload(OCRepPayload *payload,
 
         case '[':
             {
-                OCRepPayload *value = OCRepPayloadCreate();
-                if (!value)
+                OCRepPayload *obj = CloneObject(type, arg, signature);
+                if (obj)
                 {
-                    break;
+                    success = OCRepPayloadSetPropObjectAsOwner(payload, name, obj);
                 }
-                success = true;
-                for (size_t i = 0; success && i < arg->v_struct.numMembers; ++i)
-                {
-                    assert(Types::m_structs.find(signature) != Types::m_structs.end());
-                    assert(i < Types::m_structs[signature].size());
-                    Types::Field &field = Types::m_structs[signature][i];
-                    success = ToOCPayload(value, field.m_name.c_str(), &arg->v_struct.members[i],
-                                          field.m_signature.c_str());
-                }
-                if (success)
-                {
-                    success = OCRepPayloadSetPropObjectAsOwner(payload, name, value);
-                }
-                else
-                {
-                    OCRepPayloadDestroy(value);
-                }
-                break;
             }
             break;
     }
     return success;
 }
 
-static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
-                       OCRepPayloadValueArray *arr, size_t *ai, uint8_t di)
+static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature, OCRepPayloadValueArray *arr,
+        const char *arrSignature, size_t *ai, uint8_t di);
+
+static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature, OCRepPayloadValueArray *arr,
+        size_t *ai, uint8_t di)
 {
+    return ToAJMsgArg(arg, signature, arr, NULL, ai, di);
+}
+
+static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature, OCRepPayloadValueArray *arr,
+        const char *arrSignature, size_t *ai, uint8_t di)
+{
+    (void) arrSignature;
     bool success = true;
     switch (signature[0])
     {
@@ -695,9 +1256,9 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
             break;
         case ajn::ALLJOYN_ARRAY:
             if ((di >= MAX_REP_ARRAY_DEPTH) ||
-                (arr->dimensions[di] == 0) ||
-                (((di + 1) < MAX_REP_ARRAY_DEPTH) && (arr->dimensions[di + 1])
-                 && (signature[1] != ajn::ALLJOYN_ARRAY)))
+                    (((di + 1) < MAX_REP_ARRAY_DEPTH) && (arr->dimensions[di + 1]) &&
+                            (signature[1] != ajn::ALLJOYN_ARRAY) &&
+                            (signature[1] != ajn::ALLJOYN_VARIANT)))
             {
                 success = false;
                 break;
@@ -764,7 +1325,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                             switch (arr->type)
                             {
                                 case OCREP_PROP_INT:
-                                    success = (0 <= arr->iArray[(*ai)] && arr->iArray[(*ai)] <= UINT8_MAX);
+                                    success = (0 <= arr->iArray[(*ai)] &&
+                                            arr->iArray[(*ai)] <= UINT8_MAX);
                                     if (success)
                                     {
                                         v_byte[i] = arr->iArray[(*ai)];
@@ -774,7 +1336,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (0 <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= UINT8_MAX);
+                                        success = (0 <= arr->dArray[(*ai)] &&
+                                                arr->dArray[(*ai)] <= UINT8_MAX);
                                     }
                                     if (success)
                                     {
@@ -822,7 +1385,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                             switch (arr->type)
                             {
                                 case OCREP_PROP_INT:
-                                    success = (INT16_MIN <= arr->iArray[(*ai)] && arr->iArray[(*ai)] <= INT16_MAX);
+                                    success = (INT16_MIN <= arr->iArray[(*ai)] &&
+                                            arr->iArray[(*ai)] <= INT16_MAX);
                                     if (success)
                                     {
                                         v_int16[i] = arr->iArray[(*ai)];
@@ -832,7 +1396,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (INT16_MIN <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= INT16_MAX);
+                                        success = (INT16_MIN <= arr->dArray[(*ai)] &&
+                                                arr->dArray[(*ai)] <= INT16_MAX);
                                     }
                                     if (success)
                                     {
@@ -880,7 +1445,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                             switch (arr->type)
                             {
                                 case OCREP_PROP_INT:
-                                    success = (0 <= arr->iArray[(*ai)] && arr->iArray[(*ai)] <= UINT16_MAX);
+                                    success = (0 <= arr->iArray[(*ai)] &&
+                                            arr->iArray[(*ai)] <= UINT16_MAX);
                                     if (success)
                                     {
                                         v_uint16[i] = arr->iArray[(*ai)];
@@ -890,7 +1456,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (0 <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= UINT16_MAX);
+                                        success = (0 <= arr->dArray[(*ai)] &&
+                                                arr->dArray[(*ai)] <= UINT16_MAX);
                                     }
                                     if (success)
                                     {
@@ -938,7 +1505,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                             switch (arr->type)
                             {
                                 case OCREP_PROP_INT:
-                                    success = (INT32_MIN <= arr->iArray[(*ai)] && arr->iArray[(*ai)] <= INT32_MAX);
+                                    success = (INT32_MIN <= arr->iArray[(*ai)] &&
+                                            arr->iArray[(*ai)] <= INT32_MAX);
                                     if (success)
                                     {
                                         v_int32[i] = arr->iArray[(*ai)];
@@ -948,7 +1516,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (INT32_MIN <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= INT32_MAX);
+                                        success = (INT32_MIN <= arr->dArray[(*ai)] &&
+                                                arr->dArray[(*ai)] <= INT32_MAX);
                                     }
                                     if (success)
                                     {
@@ -996,7 +1565,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                             switch (arr->type)
                             {
                                 case OCREP_PROP_INT:
-                                    success = (0 <= arr->iArray[(*ai)] && arr->iArray[(*ai)] <= UINT32_MAX);
+                                    success = (0 <= arr->iArray[(*ai)] &&
+                                            arr->iArray[(*ai)] <= UINT32_MAX);
                                     if (success)
                                     {
                                         v_uint32[i] = arr->iArray[(*ai)];
@@ -1006,7 +1576,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (0 <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= UINT32_MAX);
+                                        success = (0 <= arr->dArray[(*ai)] && arr->dArray[(*ai)]
+                                                <= UINT32_MAX);
                                     }
                                     if (success)
                                     {
@@ -1060,7 +1631,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (MIN_SAFE_INTEGER <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= MAX_SAFE_INTEGER);
+                                        success = (MIN_SAFE_INTEGER <= arr->dArray[(*ai)] &&
+                                                arr->dArray[(*ai)] <= MAX_SAFE_INTEGER);
                                     }
                                     if (success)
                                     {
@@ -1118,7 +1690,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                     success = (floor(arr->dArray[(*ai)]) == arr->dArray[(*ai)]);
                                     if (success)
                                     {
-                                        success = (0 <= arr->dArray[(*ai)] && arr->dArray[(*ai)] <= MAX_SAFE_INTEGER);
+                                        success = (0 <= arr->dArray[(*ai)] &&
+                                                arr->dArray[(*ai)] <= MAX_SAFE_INTEGER);
                                     }
                                     if (success)
                                     {
@@ -1166,7 +1739,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                             switch (arr->type)
                             {
                                 case OCREP_PROP_INT:
-                                    success = (MIN_SAFE_INTEGER <= arr->iArray[(*ai)] && arr->iArray[(*ai)] <= MAX_SAFE_INTEGER);
+                                    success = (MIN_SAFE_INTEGER <= arr->iArray[(*ai)] &&
+                                            arr->iArray[(*ai)] <= MAX_SAFE_INTEGER);
                                     if (success)
                                     {
                                         arg->typeId = ajn::ALLJOYN_DOUBLE;
@@ -1218,28 +1792,53 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                 case ajn::ALLJOYN_VARIANT:
                     {
                         size_t numElems = arr->dimensions[di];
-                        ajn::MsgArg *elems = new ajn::MsgArg[numElems];
+                        ajn::MsgArg *elems = numElems ? new ajn::MsgArg[numElems] : NULL;
                         for (size_t i = 0; success && i < numElems; ++i, ++(*ai))
                         {
-                            OCRepPayloadValue arrValue;
-                            arrValue.type = arr->type;
-                            switch (arr->type)
+                            if ((di + 1) == MAX_REP_ARRAY_DEPTH || !arr->dimensions[di + 1])
                             {
-                                case OCREP_PROP_INT: arrValue.i = arr->iArray[(*ai)]; break;
-                                case OCREP_PROP_DOUBLE: arrValue.d = arr->dArray[(*ai)]; break;
-                                case OCREP_PROP_BOOL: arrValue.b = arr->bArray[(*ai)]; break;
-                                case OCREP_PROP_STRING: arrValue.str = arr->strArray[(*ai)]; break;
-                                case OCREP_PROP_BYTE_STRING: arrValue.ocByteStr = arr->ocByteStrArray[(*ai)]; break;
-                                case OCREP_PROP_OBJECT: arrValue.obj = arr->objArray[(*ai)]; break;
-                                case OCREP_PROP_NULL: break; /* Explicitly not supported */
-                                case OCREP_PROP_ARRAY: assert(0); break; /* Not used as an array value type */
+                                OCRepPayloadValue arrValue;
+                                arrValue.type = arr->type;
+                                switch (arr->type)
+                                {
+                                    case OCREP_PROP_INT:
+                                        arrValue.i = arr->iArray[(*ai)];
+                                        break;
+                                    case OCREP_PROP_DOUBLE:
+                                        arrValue.d = arr->dArray[(*ai)];
+                                        break;
+                                    case OCREP_PROP_BOOL:
+                                        arrValue.b = arr->bArray[(*ai)];
+                                        break;
+                                    case OCREP_PROP_STRING:
+                                        arrValue.str = arr->strArray[(*ai)];
+                                        break;
+                                    case OCREP_PROP_BYTE_STRING:
+                                        arrValue.ocByteStr = arr->ocByteStrArray[(*ai)];
+                                        break;
+                                    case OCREP_PROP_OBJECT:
+                                        arrValue.obj = arr->objArray[(*ai)];
+                                        break;
+                                    case OCREP_PROP_NULL:
+                                        /* Explicitly not supported */
+                                        break;
+                                    case OCREP_PROP_ARRAY:
+                                        /* Not used as an array value type */
+                                        assert(0);
+                                        break;
+                                }
+                                success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
                             }
-                            success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
+                            else
+                            {
+                                success = ToAJMsgArg(&elems[i], &signature[1], arr, ai, di + 1);
+                            }
                         }
                         if (success)
                         {
                             arg->typeId = ajn::ALLJOYN_ARRAY;
-                            success = (arg->v_array.SetElements(signature, numElems, elems) == ER_OK);
+                            success = (arg->v_array.SetElements(&signature[1], numElems, elems) ==
+                                    ER_OK);
                         }
                         if (success)
                         {
@@ -1257,12 +1856,38 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                         ajn::MsgArg *elems = new ajn::MsgArg[numElems];
                         for (size_t i = 0; success && i < numElems; ++i)
                         {
-                            success = ToAJMsgArg(&elems[i], &signature[1], arr, ai, di + 1);
+                            if (signature[2] == ajn::ALLJOYN_DICT_ENTRY_OPEN)
+                            {
+                                if (arr->type == OCREP_PROP_OBJECT)
+                                {
+                                    OCRepPayloadValue arrValue;
+                                    arrValue.type = arr->type;
+                                    arrValue.obj = arr->objArray[(*ai)++];
+                                    success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
+                                }
+                                else
+                                {
+                                    success = false;
+                                }
+                            }
+                            else if (arr->type == OCREP_PROP_BYTE_STRING &&
+                                    ((di + 1) == MAX_REP_ARRAY_DEPTH || !arr->dimensions[di + 1]))
+                            {
+                                OCRepPayloadValue arrValue;
+                                arrValue.type = arr->type;
+                                arrValue.ocByteStr = arr->ocByteStrArray[(*ai)++];
+                                success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
+                            }
+                            else
+                            {
+                                success = ToAJMsgArg(&elems[i], &signature[1], arr, ai, di + 1);
+                            }
                         }
                         if (success)
                         {
                             arg->typeId = ajn::ALLJOYN_ARRAY;
-                            success = (arg->v_array.SetElements(signature, numElems, elems) == ER_OK);
+                            success = (arg->v_array.SetElements(&signature[1], numElems, elems) ==
+                                    ER_OK);
                         }
                         if (success)
                         {
@@ -1298,7 +1923,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                 if (success)
                                 {
                                     arg->typeId = ajn::ALLJOYN_ARRAY;
-                                    success = (arg->v_array.SetElements(&signature[1], numElems, elems) == ER_OK);
+                                    success = (arg->v_array.SetElements(&signature[1], numElems,
+                                            elems) == ER_OK);
                                 }
                                 if (success)
                                 {
@@ -1326,34 +1952,9 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                         case OCREP_PROP_BOOL:
                         case OCREP_PROP_STRING:
                         case OCREP_PROP_BYTE_STRING:
+                        case OCREP_PROP_OBJECT:
                             success = false; /* Loss of information */
                             break;
-                        case OCREP_PROP_OBJECT:
-                            {
-                                size_t numElems = arr->dimensions[di];
-                                ajn::MsgArg *elems = new ajn::MsgArg[numElems];
-                                for (size_t i = 0; success && i < numElems; ++i, ++(*ai))
-                                {
-                                    OCRepPayloadValue arrValue;
-                                    arrValue.type = arr->type;
-                                    arrValue.obj = arr->objArray[(*ai)];
-                                    success = ToAJMsgArg(&elems[i], &signature[1], &arrValue);
-                                }
-                                if (success)
-                                {
-                                    arg->typeId = ajn::ALLJOYN_ARRAY;
-                                    success = (arg->v_array.SetElements(signature, numElems, elems) == ER_OK);
-                                }
-                                if (success)
-                                {
-                                    arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                                }
-                                else
-                                {
-                                    delete[] elems;
-                                }
-                                break;
-                            }
                         case OCREP_PROP_NULL:
                             success = false; /* Explicitly not supported */
                             break;
@@ -1387,13 +1988,15 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
                                 {
                                     arg->typeId = ajn::ALLJOYN_ARRAY;
                                     std::string elemSig = "(";
-                                    for (std::vector<Types::Field>::iterator field = Types::m_structs[&signature[1]].begin();
+                                    for (std::vector<Types::Field>::iterator field =
+                                                 Types::m_structs[&signature[1]].begin();
                                          field != Types::m_structs[&signature[1]].end(); ++field)
                                     {
                                         elemSig += field->m_signature;
                                     }
                                     elemSig += ")";
-                                    success = (arg->v_array.SetElements(elemSig.c_str(), numElems, elems) == ER_OK);
+                                    success = (arg->v_array.SetElements(elemSig.c_str(), numElems,
+                                            elems) == ER_OK);
                                 }
                                 if (success)
                                 {
@@ -1424,7 +2027,18 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
             success = false;
             break;
         case ajn::ALLJOYN_VARIANT:
-            success = ToAJMsgArg(arg, "av", arr, ai, di);
+            {
+                arg->typeId = ajn::ALLJOYN_VARIANT;
+                arg->v_variant.val = new ajn::MsgArg();
+                arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
+                char variantSig[256] = { 0 };
+                if (!arrSignature)
+                {
+                    CreateSignature(variantSig, arr, di);
+                    arrSignature = variantSig;
+                }
+                success = ToAJMsgArg(arg->v_variant.val, arrSignature, arr, ai, di);
+            }
             break;
         case ajn::ALLJOYN_DICT_ENTRY_OPEN:
             success = false; /* Loss of information */
@@ -1436,8 +2050,8 @@ static bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature,
     return success;
 }
 
-bool ToAJMsgArg(ajn::MsgArg *arg,
-                const char *signature, OCRepPayloadValue *value)
+bool ToAJMsgArg(ajn::MsgArg *arg, const char *signature, OCRepPayloadValue *value,
+        const char *valueSignature)
 {
     const char *argSignature = signature;
     ParseCompleteType(signature);
@@ -1446,7 +2060,16 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
     switch (value->type)
     {
         case OCREP_PROP_NULL:
-            success = false; /* Explicitly not supported */
+            /* Explicitly not supported, except that it may be an empty array (see IOT-2457) */
+            if (sig[0] == ajn::ALLJOYN_ARRAY)
+            {
+                size_t i = 0;
+                success = ToAJMsgArg(arg, sig.c_str(), &value->arr, valueSignature, &i, 0);
+            }
+            else
+            {
+                success = false;
+            }
             break;
         case OCREP_PROP_INT:
             switch (sig[0])
@@ -1471,7 +2094,7 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                     }
                     break;
                 case ajn::ALLJOYN_UINT16:
-                    success = (0 <= value->i && value->i < UINT16_MAX);
+                    success = (0 <= value->i && value->i <= UINT16_MAX);
                     if (success)
                     {
                         arg->typeId = ajn::ALLJOYN_UINT16;
@@ -1487,7 +2110,7 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                     }
                     break;
                 case ajn::ALLJOYN_UINT32:
-                    success = (0 <= value->i && value->i < UINT32_MAX);
+                    success = (0 <= value->i && value->i <= UINT32_MAX);
                     if (success)
                     {
                         arg->typeId = ajn::ALLJOYN_UINT32;
@@ -1529,13 +2152,20 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                     arg->typeId = ajn::ALLJOYN_VARIANT;
                     arg->v_variant.val = new ajn::MsgArg();
                     arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                    if (value->i < INT32_MIN || INT32_MAX < value->i)
+                    if (valueSignature)
                     {
-                        success = ToAJMsgArg(arg->v_variant.val, "x", value);
+                        success = ToAJMsgArg(arg->v_variant.val, valueSignature, value);
                     }
                     else
                     {
-                        success = ToAJMsgArg(arg->v_variant.val, "i", value);
+                        if (value->i < INT32_MIN || INT32_MAX < value->i)
+                        {
+                            success = ToAJMsgArg(arg->v_variant.val, "x", value);
+                        }
+                        else
+                        {
+                            success = ToAJMsgArg(arg->v_variant.val, "i", value);
+                        }
                     }
                     break;
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
@@ -1867,7 +2497,14 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                     arg->typeId = ajn::ALLJOYN_VARIANT;
                     arg->v_variant.val = new ajn::MsgArg();
                     arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                    success = ToAJMsgArg(arg->v_variant.val, "s", value);
+                    if (valueSignature)
+                    {
+                        success = ToAJMsgArg(arg->v_variant.val, valueSignature, value);
+                    }
+                    else
+                    {
+                        success = ToAJMsgArg(arg->v_variant.val, "s", value);
+                    }
                     break;
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
                     success = false; /* Loss of information */
@@ -2028,7 +2665,8 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                                 if (success)
                                 {
                                     arg->typeId = ajn::ALLJOYN_ARRAY;
-                                    success = (arg->v_array.SetElements("av", value->ocByteStr.len, elems) == ER_OK);
+                                    success = (arg->v_array.SetElements("v", value->ocByteStr.len,
+                                            elems) == ER_OK);
                                 }
                                 if (success)
                                 {
@@ -2117,6 +2755,8 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                             break;
                         case ajn::ALLJOYN_VARIANT:
                             {
+                                char s[256] = { 0 };
+                                CreateSignature(s, value);
                                 size_t numElems = 0;
                                 for (OCRepPayloadValue *v = value->obj->values; v; v = v->next)
                                 {
@@ -2125,30 +2765,42 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                                 ajn::MsgArg *elems = new ajn::MsgArg[numElems];
                                 ajn::MsgArg *elem = elems;
                                 bool success = true;
-                                for (OCRepPayloadValue *v = value->obj->values; success && v; v = v->next)
+                                for (OCRepPayloadValue *v = value->obj->values; success && v;
+                                     v = v->next)
                                 {
-                                    elem->typeId = ajn::ALLJOYN_VARIANT;
-                                    elem->v_variant.val = new ajn::MsgArg();
-                                    elem->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                                    OCRepPayloadValue k;
-                                    memset(&k, 0, sizeof(k));
-                                    k.type = OCREP_PROP_STRING;
-                                    k.str = v->name;
-                                    elem->v_variant.val->typeId = ajn::ALLJOYN_DICT_ENTRY;
-                                    elem->v_variant.val->v_dictEntry.key = new ajn::MsgArg();
-                                    elem->v_variant.val->v_dictEntry.val = new ajn::MsgArg();
-                                    elem->v_variant.val->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                                    success = ToAJMsgArg(elem->v_variant.val->v_dictEntry.key, "s", &k);
-                                    if (success)
+                                    if (s[0] == ajn::ALLJOYN_STRUCT_OPEN)
                                     {
-                                        success = ToAJMsgArg(elem->v_variant.val->v_dictEntry.val, "v", v);
+                                        success = ToAJMsgArg(elem, "v", v);
+                                    }
+                                    else
+                                    {
+                                        elem->typeId = ajn::ALLJOYN_VARIANT;
+                                        elem->v_variant.val = new ajn::MsgArg();
+                                        elem->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
+                                        OCRepPayloadValue k;
+                                        memset(&k, 0, sizeof(k));
+                                        k.type = OCREP_PROP_STRING;
+                                        k.str = v->name;
+                                        elem->v_variant.val->typeId = ajn::ALLJOYN_DICT_ENTRY;
+                                        elem->v_variant.val->v_dictEntry.key = new ajn::MsgArg();
+                                        elem->v_variant.val->v_dictEntry.val = new ajn::MsgArg();
+                                        elem->v_variant.val->SetOwnershipFlags(
+                                            ajn::MsgArg::OwnsArgs, false);
+                                        success = ToAJMsgArg(elem->v_variant.val->v_dictEntry.key,
+                                                "s", &k);
+                                        if (success)
+                                        {
+                                            success = ToAJMsgArg(
+                                                elem->v_variant.val->v_dictEntry.val, "v", v);
+                                        }
                                     }
                                     ++elem;
                                 }
                                 if (success)
                                 {
                                     arg->typeId = ajn::ALLJOYN_ARRAY;
-                                    success = (arg->v_array.SetElements("av", numElems, elems) == ER_OK);
+                                    success = (arg->v_array.SetElements("v", numElems, elems) ==
+                                            ER_OK);
                                 }
                                 if (success)
                                 {
@@ -2170,35 +2822,51 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                                 ParseCompleteType(entrySig);
                                 std::string valSig(valSignature, entrySig - valSignature);
                                 size_t numEntries = 0;
-                                for (OCRepPayloadValue *v = value->obj->values; v; v = v->next)
+                                ajn::MsgArg *entries = NULL;
+                                if (value->obj)
                                 {
-                                    ++numEntries;
-                                }
-                                ajn::MsgArg *entries = new ajn::MsgArg[numEntries];
-                                ajn::MsgArg *entry = entries;
-                                bool success = true;
-                                for (OCRepPayloadValue *v = value->obj->values; success && v; v = v->next)
-                                {
-                                    OCRepPayloadValue k;
-                                    memset(&k, 0, sizeof(k));
-                                    k.type = OCREP_PROP_STRING;
-                                    k.str = v->name;
-                                    entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
-                                    entry->v_dictEntry.key = new ajn::MsgArg();
-                                    entry->v_dictEntry.val = new ajn::MsgArg();
-                                    entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                                    success = ToAJMsgArg(entry->v_dictEntry.key, keySig.c_str(), &k);
-                                    if (success)
+                                    for (OCRepPayloadValue *v = value->obj->values; v; v = v->next)
                                     {
-                                        success = ToAJMsgArg(entry->v_dictEntry.val, valSig.c_str(), v);
+                                        ++numEntries;
                                     }
-                                    ++entry;
+                                    entries = new ajn::MsgArg[numEntries];
+                                    ajn::MsgArg *entry = entries;
+                                    success = true;
+                                    for (OCRepPayloadValue *v = value->obj->values; success && v;
+                                         v = v->next)
+                                    {
+                                        OCRepPayloadValue k;
+                                        memset(&k, 0, sizeof(k));
+                                        k.type = OCREP_PROP_STRING;
+                                        k.str = v->name;
+                                        std::string vSig;
+                                        if (valueSignature &&
+                                                (Types::m_dicts.find(valueSignature) != Types::m_dicts.end()) &&
+                                                (Types::m_dicts[valueSignature].find(k.str) != Types::m_dicts[valueSignature].end()))
+                                        {
+                                            vSig = Types::m_dicts[valueSignature][k.str].m_signature;
+                                        }
+                                        entry->typeId = ajn::ALLJOYN_DICT_ENTRY;
+                                        entry->v_dictEntry.key = new ajn::MsgArg();
+                                        entry->v_dictEntry.val = new ajn::MsgArg();
+                                        entry->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
+                                        success = ToAJMsgArg(entry->v_dictEntry.key, keySig.c_str(),
+                                                &k);
+                                        if (success)
+                                        {
+                                            success = ToAJMsgArg(entry->v_dictEntry.val,
+                                                    valSig.c_str(), v,
+                                                    !vSig.empty() ? vSig.c_str() : NULL);
+                                        }
+                                        ++entry;
+                                    }
                                 }
                                 if (success)
                                 {
                                     arg->typeId = ajn::ALLJOYN_ARRAY;
                                     std::string elemSig(&sig[1], entrySig + 1 - &sig[1]);
-                                    success = (arg->v_array.SetElements(elemSig.c_str(), numEntries, entries) == ER_OK);
+                                    success = (arg->v_array.SetElements(elemSig.c_str(), numEntries,
+                                            entries) == ER_OK);
                                 }
                                 if (success)
                                 {
@@ -2258,26 +2926,40 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                         break;
                     }
                 case ajn::ALLJOYN_VARIANT:
-                    arg->typeId = ajn::ALLJOYN_VARIANT;
-                    arg->v_variant.val = new ajn::MsgArg();
-                    arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
-                    success = ToAJMsgArg(arg->v_variant.val, "a{sv}", value);
-                    break;
+                    {
+                        arg->typeId = ajn::ALLJOYN_VARIANT;
+                        arg->v_variant.val = new ajn::MsgArg();
+                        arg->SetOwnershipFlags(ajn::MsgArg::OwnsArgs, false);
+                        if (valueSignature)
+                        {
+                            success = ToAJMsgArg(arg->v_variant.val, valueSignature, value);
+                        }
+                        else
+                        {
+                            char variantSig[256] = { 0 };
+                            CreateSignature(variantSig, value);
+                            success = ToAJMsgArg(arg->v_variant.val, variantSig, value);
+                        }
+                        break;
+                    }
                 case ajn::ALLJOYN_DICT_ENTRY_OPEN:
                     success = false; /* Loss of information */
                     break;
                 case '[':
+                    if (Types::m_structs.find(sig) != Types::m_structs.end())
                     {
                         size_t numMembers = Types::m_structs[sig].size();
                         ajn::MsgArg *members = new ajn::MsgArg[numMembers];
                         ajn::MsgArg *member = members;
-                        for (std::vector<Types::Field>::iterator field = Types::m_structs[sig].begin(); success
-                             && field != Types::m_structs[sig].end(); ++field)
+                        std::vector<Types::Field>::iterator field;
+                        for (field = Types::m_structs[sig].begin();
+                             success && field != Types::m_structs[sig].end(); ++field)
                         {
+                            std::string ocName = ToOCPropName(field->m_name);
                             success = false;
                             for (OCRepPayloadValue *v = value->obj->values; v; v = v->next)
                             {
-                                if (!strcmp(v->name, field->m_name.c_str()))
+                                if (ocName == v->name)
                                 {
                                     success = ToAJMsgArg(member, field->m_signature.c_str(), v);
                                     ++member;
@@ -2296,8 +2978,16 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
                         {
                             delete[] members;
                         }
-                        break;
                     }
+                    else if (Types::m_dicts.find(sig) != Types::m_dicts.end())
+                    {
+                        success = ToAJMsgArg(arg, "a{sv}", value, sig.c_str());
+                    }
+                    else
+                    {
+                        success = false;
+                    }
+                    break;
                 default:
                     success = false;
                     break;
@@ -2306,9 +2996,64 @@ bool ToAJMsgArg(ajn::MsgArg *arg,
         case OCREP_PROP_ARRAY:
             {
                 size_t i = 0;
-                success = ToAJMsgArg(arg, sig.c_str(), &value->arr, &i, 0);
+                success = ToAJMsgArg(arg, sig.c_str(), &value->arr, valueSignature, &i, 0);
                 break;
             }
     }
     return success;
+}
+
+static OCRepPayloadPropType GetPropType(const ajn::MsgArg *arg, const qcc::String &minValue,
+        const qcc::String &maxValue)
+{
+    OCRepPayloadPropType type = OCREP_PROP_NULL;
+    if (arg->typeId == ajn::ALLJOYN_INT64)
+    {
+        int64_t min = INT64_MIN;
+        int64_t max = INT64_MAX;
+        if (!minValue.empty() && sscanf(minValue.c_str(), "%" SCNd64, &min) != 1)
+        {
+            goto exit;
+        }
+        if (!maxValue.empty() && sscanf(maxValue.c_str(), "%" SCNd64, &max) != 1)
+        {
+            goto exit;
+        }
+        if (min < MIN_SAFE_INTEGER || MAX_SAFE_INTEGER < max)
+        {
+            type = OCREP_PROP_STRING;
+        }
+    }
+    else if (arg->typeId == ajn::ALLJOYN_UINT64)
+    {
+        uint64_t max = UINT64_MAX;
+        if (!maxValue.empty() && sscanf(maxValue.c_str(), "%" SCNu64, &max) != 1)
+        {
+            goto exit;
+        }
+        if (MAX_SAFE_INTEGER < max)
+        {
+            type = OCREP_PROP_STRING;
+        }
+    }
+exit:
+    return type;
+}
+
+OCRepPayloadPropType GetPropType(const ajn::InterfaceDescription::Property *prop,
+        const ajn::MsgArg *arg)
+{
+    qcc::String minValue, maxValue;
+    prop->GetAnnotation("org.alljoyn.Bus.Type.Min", minValue);
+    prop->GetAnnotation("org.alljoyn.Bus.Type.Max", maxValue);
+    return GetPropType(arg, minValue, maxValue);
+}
+
+OCRepPayloadPropType GetPropType(const ajn::InterfaceDescription::Member *member,
+        const char *argName, const ajn::MsgArg *arg)
+{
+    qcc::String minValue, maxValue;
+    member->GetArgAnnotation(argName, "org.alljoyn.Bus.Type.Min", minValue);
+    member->GetArgAnnotation(argName, "org.alljoyn.Bus.Type.Max", maxValue);
+    return GetPropType(arg, minValue, maxValue);
 }

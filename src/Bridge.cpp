@@ -20,12 +20,18 @@
 
 #include "Bridge.h"
 
+#include "DeviceConfigurationResource.h"
+#include "Hash.h"
+#include "Interfaces.h"
 #include "Introspection.h"
+#include "Log.h"
 #include "Name.h"
 #include "Payload.h"
+#include "PlatformConfigurationResource.h"
 #include "Plugin.h"
 #include "Presence.h"
 #include "Resource.h"
+#include "SecureModeResource.h"
 #include "Security.h"
 #include "VirtualBusAttachment.h"
 #include "VirtualBusObject.h"
@@ -43,7 +49,6 @@
 #include <assert.h>
 #include <deque>
 #include <iterator>
-#include <math.h>
 #include <sstream>
 #include <thread>
 
@@ -53,144 +58,6 @@
 #define SECURE_MODE_DEFAULT false
 #endif
 
-static bool TranslateResourceType(const char *type)
-{
-    return !(strcmp(type, OC_RSRVD_RESOURCE_TYPE_DEVICE) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_INTROSPECTION) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_PLATFORM) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RD) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RDPUBLISH) == 0 ||
-             strcmp(type, OC_RSRVD_RESOURCE_TYPE_RES) == 0 ||
-             strcmp(type, "oic.d.bridge") == 0 ||
-             strcmp(type, "oic.r.doxm") == 0 ||
-             strcmp(type, "oic.r.pstat") == 0 ||
-             strcmp(type, "oic.r.securemode") == 0);
-}
-
-std::vector<OCDevAddr> GetDevAddrs(OCDevAddr origin, const char *di, OCResourcePayload *resource)
-{
-    if (resource->secure)
-    {
-        origin.flags = (OCTransportFlags) (origin.flags | OC_FLAG_SECURE);
-        if (origin.adapter == OC_ADAPTER_IP)
-        {
-            origin.port = resource->port;
-        }
-#ifdef TCP_ADAPTER
-        else if (origin.adapter == OC_ADAPTER_TCP)
-        {
-            origin.port = resource->tcpPort;
-        }
-#endif
-    }
-    std::vector<OCDevAddr> addrs;
-    if (!resource->eps)
-    {
-        addrs.push_back(origin);
-    }
-    for (const OCEndpointPayload *ep = resource->eps; ep; ep = ep->next)
-    {
-        OCDevAddr addr;
-        if (!strcmp(ep->tps, "coap") || !strcmp(ep->tps, "coaps"))
-        {
-            addr.adapter = OC_ADAPTER_IP;
-        }
-        else if (!strcmp(ep->tps, "coap+tcp") || !strcmp(ep->tps, "coaps+tcp"))
-        {
-            addr.adapter = OC_ADAPTER_TCP;
-        }
-        addr.flags = ep->family;
-        addr.port = ep->port;
-        strncpy(addr.addr, ep->addr, MAX_ADDR_STR_SIZE);
-        addr.ifindex = 0;
-        addr.routeData[0] = '\0';
-        strncpy(addr.remoteId, di, MAX_IDENTITY_SIZE);
-        addrs.push_back(addr);
-    }
-    return addrs;
-}
-
-struct Resource
-{
-    std::string m_uri;
-    std::vector<std::string> m_ifs;
-    std::vector<std::string> m_rts;
-    bool m_isObservable;
-    std::vector<OCDevAddr> m_addrs;
-    Resource(OCDevAddr origin, const char *di, OCResourcePayload *resource)
-        : m_uri(resource->uri), m_isObservable(resource->bitmap & OC_OBSERVABLE)
-    {
-        for (OCStringLL *ifc = resource->interfaces; ifc; ifc = ifc->next)
-        {
-            m_ifs.push_back(ifc->value);
-        }
-        for (OCStringLL *type = resource->types; type; type = type->next)
-        {
-            m_rts.push_back(type->value);
-        }
-        m_addrs = GetDevAddrs(origin, di, resource);
-    }
-    bool IsSecure()
-    {
-        for (auto &addr : m_addrs)
-        {
-            if (addr.flags & OC_FLAG_SECURE)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-
-struct Device
-{
-    std::string m_di;
-    std::vector<Resource> m_resources;
-    Device(OCDevAddr origin, OCDiscoveryPayload *payload)
-        : m_di(payload->sid)
-    {
-        for (OCResourcePayload *resource = (OCResourcePayload *) payload->resources; resource;
-             resource = resource->next)
-        {
-            m_resources.push_back(Resource(origin, payload->sid, resource));
-        }
-    }
-    Resource *GetResourceUri(const char *uri)
-    {
-        for (auto &resource : m_resources)
-        {
-            if (resource.m_uri == uri)
-            {
-                return &resource;
-            }
-        }
-        return NULL;
-    }
-    Resource *GetResourceType(const char *rt)
-    {
-        for (auto &resource : m_resources)
-        {
-            if (std::find(resource.m_rts.begin(), resource.m_rts.end(), rt) !=
-                    resource.m_rts.end())
-            {
-                return &resource;
-            }
-        }
-        return NULL;
-    }
-    bool IsVirtual()
-    {
-        Resource *resource = GetResourceUri(OC_RSRVD_DEVICE_URI);
-        if (resource)
-        {
-            return std::find(resource->m_rts.begin(), resource->m_rts.end(), "oic.d.virtual") !=
-                    resource->m_rts.end();
-        }
-        return false;
-    }
-};
-
 struct Bridge::DiscoverContext
 {
     Bridge *m_bridge;
@@ -198,11 +65,20 @@ struct Bridge::DiscoverContext
     VirtualBusAttachment *m_bus;
     OCRepPayload *m_paths;
     OCRepPayload *m_definitions;
+    std::vector<Resource>::iterator m_rit;
     DiscoverContext(Bridge *bridge, OCDevAddr origin, OCDiscoveryPayload *payload)
         : m_bridge(bridge), m_device(origin, payload), m_bus(NULL), m_paths(NULL),
           m_definitions(NULL) { }
-    ~DiscoverContext() { OCRepPayloadDestroy(m_paths); OCRepPayloadDestroy(m_definitions);
-        delete m_bus; }
+    ~DiscoverContext()
+    {
+        OCRepPayloadDestroy(m_paths);
+        OCRepPayloadDestroy(m_definitions);
+        if (m_bus)
+        {
+            m_bus->Stop();
+            delete m_bus;
+        }
+    }
     std::vector<OCDevAddr> GetDevAddrs(const char *uri)
     {
         Resource *resource = m_device.GetResourceUri(uri);
@@ -213,6 +89,7 @@ struct Bridge::DiscoverContext
         return std::vector<OCDevAddr>();
     }
 
+    /* Each iteration returns a translatable resource and resource type pair. */
     struct Iterator
     {
         DiscoverContext *m_context;
@@ -241,7 +118,7 @@ struct Bridge::DiscoverContext
             m_r = m_context->m_device.m_resources.begin();
             while (m_r != m_context->m_device.m_resources.end())
             {
-                if (!m_context->m_bridge->m_secureMode || m_r->IsSecure())
+                if (!m_context->m_bridge->m_secureMode->GetSecureMode() || m_r->IsSecure())
                 {
                     m_rt = m_r->m_rts.begin();
                     while (m_rt != m_r->m_rts.end())
@@ -295,24 +172,26 @@ struct Bridge::DiscoverContext
 
 Bridge::Bridge(const char *name, Protocol protocols)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(protocols), m_sender(NULL),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(NULL),
       m_rdPublishTask(NULL), m_pending(0)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
-    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
+    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER, this);
     m_ocSecurity = new OCSecurity();
+    m_secureMode = new SecureModeResource(m_mutex, SECURE_MODE_DEFAULT);
 }
 
 Bridge::Bridge(const char *name, const char *sender)
     : m_execCb(NULL), m_sessionLostCb(NULL), m_protocols(AJ), m_sender(sender),
-      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(SECURE_MODE_DEFAULT),
+      m_discoverHandle(NULL), m_discoverNextTick(0), m_secureMode(NULL),
       m_rdPublishTask(NULL), m_pending(0)
 {
     m_bus = new ajn::BusAttachment(name, true);
     m_ajState = CREATED;
-    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER);
+    m_ajSecurity = new AllJoynSecurity(m_bus, AllJoynSecurity::CONSUMER, this);
     m_ocSecurity = new OCSecurity();
+    m_secureMode = new SecureModeResource(m_mutex, SECURE_MODE_DEFAULT);
 }
 
 Bridge::~Bridge()
@@ -357,6 +236,11 @@ Bridge::~Bridge()
     delete m_bus;
 }
 
+void Bridge::SetSecureMode(bool secureMode)
+{
+    m_secureMode->SetSecureMode(secureMode);
+}
+
 /* Called with m_mutex held. */
 void Bridge::Destroy(const char *id)
 {
@@ -380,6 +264,7 @@ void Bridge::Destroy(const char *id)
         VirtualBusAttachment *busAttachment = *vba;
         if (busAttachment->GetDi() == id)
         {
+            busAttachment->Stop();
             delete busAttachment;
             vba = m_virtualBusAttachments.erase(vba);
         }
@@ -442,18 +327,8 @@ bool Bridge::Start()
     }
     if (!m_sender)
     {
-        OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-        if (!handle)
-        {
-            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-            return false;
-        }
-        OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
-        if (result != OC_STACK_OK)
-        {
-            LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-            return false;
-        }
+        OCStackResult result;
+        OCResourceHandle handle;
         handle = OCGetResourceHandleAtUri(OC_RSRVD_WELL_KNOWN_URI);
         if (!handle)
         {
@@ -466,15 +341,55 @@ bool Bridge::Start()
             LOG(LOG_ERR, "OCSetResourceProperties() - %d", result);
             return false;
         }
-        result = CreateResource("/securemode", OC_RSRVD_RESOURCE_TYPE_SECURE_MODE,
-                                OC_RSRVD_INTERFACE_READ_WRITE,
-                                Bridge::EntityHandlerCB, this,
-                                OC_DISCOVERABLE | OC_OBSERVABLE);
+
+        result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DEVICE_NAME,
+                m_deviceName.c_str());
         if (result != OC_STACK_OK)
         {
-            LOG(LOG_ERR, "CreateResource() - %d", result);
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
             return false;
         }
+        result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_SPEC_VERSION, OC_SPEC_VERSION);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
+        result = OCSetPropertyValue(PAYLOAD_TYPE_DEVICE, OC_RSRVD_DATA_MODEL_VERSION,
+                DEVICE_DATA_MODEL_VERSION);
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
+        handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
+        if (!handle)
+        {
+            LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+            return false;
+        }
+        result = OCBindResourceTypeToResource(handle, "oic.d.bridge");
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+            return false;
+        }
+
+        result = OCSetPropertyValue(PAYLOAD_TYPE_PLATFORM, OC_RSRVD_MFG_NAME,
+                m_manufacturerName.c_str());
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "OCSetPropertyValue() - %d", result);
+            return false;
+        }
+
+        result = m_secureMode->Create();
+        if (result != OC_STACK_OK)
+        {
+            LOG(LOG_ERR, "SecureModeResource::Create() - %d", result);
+            return false;
+        }
+        SetIntrospectionData(NULL, NULL, "TITLE", "VERSION");
     }
     LOG(LOG_INFO, "di=%s", OCGetServerInstanceIDString());
 
@@ -504,7 +419,7 @@ bool Bridge::Stop()
     }
     if (m_discoverHandle)
     {
-        OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS);
+        OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "Cancel() - %d", result);
@@ -512,6 +427,16 @@ bool Bridge::Stop()
         m_discoverHandle = NULL;
     }
     return true;
+}
+
+void Bridge::ResetSecurity()
+{
+    LOG(LOG_INFO, "[%p]", this);
+
+    if (m_ocSecurity)
+    {
+        m_ocSecurity->Reset();
+    }
 }
 
 bool Bridge::Process()
@@ -558,7 +483,7 @@ bool Bridge::Process()
         {
             if (m_discoverHandle)
             {
-                OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS);
+                OCStackResult result = Cancel(m_discoverHandle, OC_LOW_QOS, NULL, 0);
                 if (result != OC_STACK_OK)
                 {
                     LOG(LOG_ERR, "Cancel() - %d", result);
@@ -573,12 +498,8 @@ bool Bridge::Process()
             size_t numOptions = 0;
             uint16_t format = COAP_MEDIATYPE_APPLICATION_VND_OCF_CBOR; // TODO retry with CBOR
             OCSetHeaderOption(options, &numOptions, CA_OPTION_ACCEPT, &format, sizeof(format));
-            OCStackResult result = ::DoResource(&m_discoverHandle, OC_REST_DISCOVER,
-                    OC_RSRVD_WELL_KNOWN_URI, NULL, 0, &cbData, options, numOptions);
-            if (result != OC_STACK_OK)
-            {
-                LOG(LOG_ERR, "DoResource(OC_REST_DISCOVER) - %d", result);
-            }
+            ::DoResource(&m_discoverHandle, OC_REST_DISCOVER, OC_RSRVD_WELL_KNOWN_URI, NULL, 0,
+                    &cbData, options, numOptions);
             m_discoverNextTick = time(NULL) + DISCOVER_PERIOD_SECS;
         }
     }
@@ -641,27 +562,42 @@ void Bridge::WhoImplements()
     {
         matchRule += ",sender='" + std::string(m_sender) + "'";
     }
-    QStatus status = m_bus->AddMatch(matchRule.c_str());
+    QStatus status = m_bus->AddMatchAsync(matchRule.c_str(), this);
     if (status != ER_OK)
     {
-        LOG(LOG_ERR, "AddMatch - %s", QCC_StatusText(status));
+        LOG(LOG_ERR, "[%p] AddMatchAsync - %s", this, QCC_StatusText(status));
     }
 }
 
-struct AnnouncedContext
+void Bridge::AddMatchCB(QStatus status, void *ctx)
+{
+    (void) ctx;
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "[%p] AddMatchCB - %s", this, QCC_StatusText(status));
+    }
+}
+
+struct Bridge::AnnouncedContext
 {
 public:
-    AnnouncedContext(VirtualDevice *device, const char *name,
+    AnnouncedContext(Bridge *bridge, VirtualDevice *device, const char *name, ajn::SessionPort port,
             const ajn::MsgArg &objectDescriptionArg, const ajn::MsgArg &aboutDataArg)
-        : m_device(device), m_name(name), m_objectDescriptionArg(objectDescriptionArg),
-          m_aboutDataArg(aboutDataArg), m_sessionId(0), m_aboutObj(NULL) { }
+        : m_bridge(bridge), m_device(device), m_name(name), m_port(port),
+          m_objectDescriptionArg(objectDescriptionArg), m_aboutData(aboutDataArg), m_sessionId(0),
+          m_isSecure(false), m_aboutObj(NULL) { }
     ~AnnouncedContext() { delete m_aboutObj; }
+    Bridge *m_bridge;
     ajn::BusAttachment *m_bus;
     VirtualDevice *m_device;
     std::string m_name;
+    ajn::SessionPort m_port;
     ajn::MsgArg m_objectDescriptionArg;
-    ajn::MsgArg m_aboutDataArg;
+    ajn::AboutData m_aboutData;
+    std::vector<std::string> m_langs;
+    std::vector<std::string>::iterator m_lang;
     ajn::SessionId m_sessionId;
+    bool m_isSecure;
     ajn::ProxyBusObject *m_aboutObj;
 };
 
@@ -672,7 +608,9 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
     AnnouncedContext *context;
     ajn::SessionOpts opts;
 
-    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u", this, name, version, port);
+    LOG(LOG_INFO, "[%p] name=%s,version=%u,port=%u,objectDescriptionArg=%s,aboutDataArg=%s", this,
+            name, version, port, objectDescriptionArg.ToString().c_str(),
+            aboutDataArg.ToString().c_str());
 
     m_mutex.lock();
     /* Ignore Announce from self */
@@ -697,12 +635,11 @@ void Bridge::Announced(const char *name, uint16_t version, ajn::SessionPort port
         }
     }
 
-    context = new AnnouncedContext(device, name, objectDescriptionArg, aboutDataArg);
+    context = new AnnouncedContext(this, device, name, port, objectDescriptionArg, aboutDataArg);
     if (device)
     {
         LOG(LOG_INFO, "[%p] Received updated Announce", this);
         m_mutex.unlock();
-        ajn::SessionOpts opts;
         JoinSessionCB(ER_OK, device->GetSessionId(), opts, context);
     }
     else
@@ -758,27 +695,51 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
 
     std::lock_guard<std::mutex> lock(m_mutex);
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
-    if (m_secureMode && (status != ER_OK))
+    context->m_isSecure = (status == ER_OK);
+
+    if (m_secureMode->GetSecureMode() && (status != ER_OK))
     {
         LOG(LOG_ERR, "SecureConnectionCB - %s", QCC_StatusText(status));
+        m_insecureAnnounced.insert(context);
+        status = m_bus->LeaveSessionAsync(context->m_sessionId, &m_insecureLeaveSessionCB, context);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "LeaveSessionAsync - %s", QCC_StatusText(status));
+            delete context;
+        }
+        return;
     }
-    else if (!m_sender)
+
+    if (!m_sender)
     {
         qcc::String peerGuid;
-        m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
-        ajn::AboutData aboutData(context->m_aboutDataArg);
-        OCUUIdentity piid;
-        GetPiid(&piid, peerGuid.c_str(), &aboutData);
-        char piidStr[UUID_STRING_SIZE];
-        OCConvertUuidToString(piid.id, piidStr);
+        /* Only use peer GUID when connection is secure */
+        if (context->m_isSecure)
+        {
+            m_bus->GetPeerGUID(context->m_name.c_str(), peerGuid);
+        }
+        char piid[UUID_STRING_SIZE];
+        GetProtocolIndependentId(piid, &context->m_aboutData,
+                peerGuid.empty() ? NULL : peerGuid.c_str());
 
         bool isVirtual = ajn::AboutObjectDescription(context->m_objectDescriptionArg)
                 .HasInterface("oic.d.virtual");
 
-        switch (GetSeenState(piidStr))
+        switch (GetSeenState(piid))
         {
             case NOT_SEEN:
-                m_execCb(piidStr, context->m_name.c_str(), isVirtual);
+                if (isVirtual)
+                {
+                    /* Delay creating virtual resources from a virtual Announce */
+                    LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
+                            this);
+                    m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
+                            piid, m_secureMode->GetSecureMode(), isVirtual));
+                }
+                else
+                {
+                    m_execCb(piid, context->m_name.c_str(), m_secureMode->GetSecureMode(), isVirtual);
+                }
                 break;
             case SEEN_NATIVE:
                 /* Do nothing */
@@ -790,11 +751,8 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
                 }
                 else
                 {
-                    /* Delay creating virtual resources from a virtual Announce */
-                    LOG(LOG_INFO, "[%p] Delaying creation of virtual resources from a virtual device",
-                            this);
-                    m_tasks.push_back(new AnnouncedTask(time(NULL) + 10, context->m_name.c_str(),
-                            piidStr, isVirtual));
+                    DestroyPiid(piid);
+                    m_execCb(piid, context->m_name.c_str(), m_secureMode->GetSecureMode(), isVirtual);
                 }
                 break;
         }
@@ -808,10 +766,9 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
         context->m_aboutObj->AddInterface(::ajn::org::alljoyn::About::InterfaceName);
         ajn::MsgArg arg("s", "");
         status = context->m_aboutObj->MethodCallAsync(::ajn::org::alljoyn::About::InterfaceName,
-                 "GetAboutData",
-                 this, static_cast<ajn::MessageReceiver::ReplyHandler>(&Bridge::GetAboutDataCB),
-                 &arg, 1,
-                 context);
+                "GetAboutData",
+                this, static_cast<ajn::MessageReceiver::ReplyHandler>(&Bridge::GetAboutDataCB),
+                &arg, 1, context);
         if (status != ER_OK)
         {
             LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
@@ -822,6 +779,7 @@ void Bridge::SecureConnectionCB(QStatus status, void *ctx)
         status = m_bus->LeaveSessionAsync(context->m_sessionId, this, context);
         if (status != ER_OK)
         {
+            LOG(LOG_ERR, "LeaveSessionAsync - %s", QCC_StatusText(status));
             delete context;
         }
     }
@@ -832,18 +790,21 @@ static bool ComparePath(const char *a, const char *b)
     return (strcmp(a, b) < 0);
 }
 
-VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus,
-        const char *name, ajn::SessionId sessionId, const char *path,
-        const char *ajSoftwareVersion)
+VirtualResource *Bridge::CreateVirtualResource(ajn::BusAttachment *bus, const char *name,
+        ajn::SessionId sessionId, const char *path, const char *ajSoftwareVersion,
+        ajn::AboutData *aboutData)
 {
     if (!strcmp(path, "/Config"))
     {
-        return VirtualConfigurationResource::Create(this, bus, name, sessionId, path,
-                ajSoftwareVersion);
+        VirtualConfigurationResource *resource = VirtualConfigurationResource::Create(bus, name,
+                sessionId, ajSoftwareVersion, RDPublish, this);
+        resource->SetAboutData(aboutData);
+        return resource;
     }
     else
     {
-        return VirtualResource::Create(this, bus, name, sessionId, path, ajSoftwareVersion);
+        return VirtualResource::Create(bus, name, sessionId, path, ajSoftwareVersion, RDPublish,
+                this);
     }
 }
 
@@ -855,30 +816,68 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
     AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
     if (msg->GetType() == ajn::MESSAGE_METHOD_RET)
     {
-        ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
         ajn::AboutData aboutData(*msg->GetArg(0));
-        char *ajSoftwareVersion = NULL;
-        QStatus status = aboutData.GetAJSoftwareVersion(&ajSoftwareVersion);
-        LOG(LOG_INFO, "[%p] %s AJSoftwareVersion=%s", this, QCC_StatusText(status),
-            ajSoftwareVersion ? ajSoftwareVersion : "unknown");
-        m_ajSoftwareVersion = ajSoftwareVersion;
-        if (context->m_device)
+        if (context->m_langs.empty())
         {
-            context->m_device->SetInfo(objectDescription, aboutData);
-            OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-            if (!handle)
+            context->m_aboutData = aboutData;
+
+            char *lang = NULL;
+            aboutData.GetDefaultLanguage(&lang);
+            context->m_langs.push_back(lang);
+            size_t numLangs = aboutData.GetSupportedLanguages();
+            const char **langs = new const char *[numLangs];
+            aboutData.GetSupportedLanguages(langs, numLangs);
+            for (size_t i = 0; i < numLangs; ++i)
             {
-                LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
+                if (strcmp(lang, langs[i]))
+                {
+                    context->m_langs.push_back(langs[i]);
+                }
             }
-            OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-            if (result != OC_STACK_OK)
+            delete[] langs;
+            context->m_lang = context->m_langs.begin();
+
+            char *ajSoftwareVersion = NULL;
+            QStatus status = aboutData.GetAJSoftwareVersion(&ajSoftwareVersion);
+            LOG(LOG_INFO, "[%p] %s AJSoftwareVersion=%s", this, QCC_StatusText(status),
+                    ajSoftwareVersion ? ajSoftwareVersion : "unknown");
+            m_ajSoftwareVersion = ajSoftwareVersion;
+        }
+        else
+        {
+            const char *lang = context->m_lang->c_str();
+            context->m_aboutData.CreatefromMsgArg(*msg->GetArg(0), lang);
+        }
+        if (++context->m_lang != context->m_langs.end())
+        {
+            ajn::MsgArg arg("s", context->m_lang->c_str());
+            QStatus status = context->m_aboutObj->MethodCallAsync(
+                ::ajn::org::alljoyn::About::InterfaceName, "GetAboutData",
+                this, static_cast<ajn::MessageReceiver::ReplyHandler>(&Bridge::GetAboutDataCB),
+                &arg, 1, context);
+            if (status != ER_OK)
             {
-                LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
+                LOG(LOG_ERR, "MethodCallAsync - %s", QCC_StatusText(status));
+                delete context;
             }
+        }
+        else
+        {
+            if (!context->m_device)
+            {
+                context->m_device = new VirtualDevice(m_bus, msg->GetSender(), msg->GetSessionId());
+                m_virtualDevices.push_back(context->m_device);
+                Presence *presence = new AllJoynPresence(m_bus, context->m_name);
+                m_presence.push_back(presence);
+            }
+
+            ajn::AboutObjectDescription objectDescription(context->m_objectDescriptionArg);
+            context->m_device->SetProperties(&objectDescription, &context->m_aboutData,
+                    context->m_isSecure);
+
             size_t n = objectDescription.GetPaths(NULL, 0);
             const char **pa = new const char *[n];
             objectDescription.GetPaths(pa, n);
-            std::sort(pa, pa + n, ComparePath);
             std::vector<const char *> pb;
             for (VirtualResource *resource : m_virtualResources)
             {
@@ -889,9 +888,8 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
             }
             std::sort(pb.begin(), pb.end(), ComparePath);
             std::vector<const char *> remove;
-            std::set_difference(pb.begin(), pb.end(),
-                                pa, pa + n,
-                                std::inserter(remove, remove.begin()), ComparePath);
+            std::set_difference(pb.begin(), pb.end(), pa, pa + n,
+                    std::inserter(remove, remove.begin()), ComparePath);
             for (size_t i = 0; i < remove.size(); ++i)
             {
                 for (std::vector<VirtualResource *>::iterator vr = m_virtualResources.begin();
@@ -899,7 +897,7 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
                 {
                     VirtualResource *resource = *vr;
                     if (resource->GetUniqueName() == context->m_name.c_str() &&
-                        resource->GetPath() == remove[i])
+                            resource->GetPath() == remove[i])
                     {
                         delete resource;
                         m_virtualResources.erase(vr);
@@ -908,62 +906,74 @@ void Bridge::GetAboutDataCB(ajn::Message &msg, void *ctx)
                 }
             }
             std::vector<const char *> add;
-            std::set_difference(pa, pa + n,
-                                pb.begin(), pb.end(),
-                                std::inserter(add, add.begin()), ComparePath);
+            std::set_difference(pa, pa + n, pb.begin(), pb.end(),
+                    std::inserter(add, add.begin()), ComparePath);
             for (size_t i = 0; i < add.size(); ++i)
             {
-                VirtualResource *resource = CreateVirtualResource(m_bus,
-                                            context->m_name.c_str(), msg->GetSessionId(), add[i],
-                                            ajSoftwareVersion);
+                VirtualResource *resource = CreateVirtualResource(m_bus, context->m_name.c_str(),
+                        msg->GetSessionId(), add[i], m_ajSoftwareVersion.c_str(),
+                        &context->m_aboutData);
                 if (resource)
                 {
                     m_virtualResources.push_back(resource);
                 }
             }
+            delete[] pa;
+            delete context;
         }
-        else
-        {
-            Presence *presence = new AllJoynPresence(m_bus, context->m_name);
-            m_presence.push_back(presence);
-            VirtualDevice *device = new VirtualDevice(m_bus, msg->GetSender(), msg->GetSessionId());
-            device->SetInfo(objectDescription, aboutData);
-            OCResourceHandle handle = OCGetResourceHandleAtUri(OC_RSRVD_DEVICE_URI);
-            if (!handle)
-            {
-                LOG(LOG_ERR, "OCGetResourceHandleAtUri(" OC_RSRVD_DEVICE_URI ") failed");
-            }
-            OCStackResult result = OCBindResourceTypeToResource(handle, "oic.d.virtual");
-            if (result != OC_STACK_OK)
-            {
-                LOG(LOG_ERR, "OCBindResourceTypeToResource() - %d", result);
-            }
-            m_virtualDevices.push_back(device);
-            size_t numPaths = objectDescription.GetPaths(NULL, 0);
-            const char **paths = new const char *[numPaths];
-            objectDescription.GetPaths(paths, numPaths);
-            for (size_t i = 0; i < numPaths; ++i)
-            {
-                VirtualResource *resource = CreateVirtualResource(m_bus,
-                                            context->m_name.c_str(), msg->GetSessionId(), paths[i],
-                                            ajSoftwareVersion);
-                if (resource)
-                {
-                    m_virtualResources.push_back(resource);
-                }
-            }
-            delete[] paths;
-            device->StartPresence();
-        }
-        delete context;
     }
     else if (msg->GetType() == ajn::MESSAGE_ERROR)
     {
+        qcc::String message;
+        const char *name = msg->GetErrorName(&message);
+        LOG(LOG_ERR, "%s: %s", name, message.c_str());
         QStatus status = m_bus->LeaveSessionAsync(context->m_sessionId, this, context);
         if (status != ER_OK)
         {
             delete context;
         }
+    }
+}
+
+void Bridge::InsecureLeaveSessionCB::LeaveSessionCB(QStatus status, void *ctx)
+{
+    LOG(LOG_INFO, "[%p] status=%s,ctx=%p", this, QCC_StatusText(status), ctx);
+    AnnouncedContext *context = reinterpret_cast<AnnouncedContext *>(ctx);
+    ajn::SessionId sessionId = context->m_sessionId;
+    /* context belongs to m_insecureAnnounced, so don't delete it here */
+    context->m_bridge->SessionLost(sessionId, ALLJOYN_SESSIONLOST_REASON_OTHER);
+}
+
+void Bridge::State(const char* busName, const qcc::KeyInfoNISTP256& publicKeyInfo,
+        ajn::PermissionConfigurator::ApplicationState state)
+{
+    (void) publicKeyInfo;
+    LOG(LOG_INFO, "[%p] busName=%s,state=%d", this, busName, state);
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (state != ajn::PermissionConfigurator::CLAIMED)
+    {
+        return;
+    }
+    auto it = std::find_if(m_insecureAnnounced.begin(), m_insecureAnnounced.end(),
+            [busName](AnnouncedContext *ctx) -> bool {return ctx->m_name == busName;});
+    if (it != m_insecureAnnounced.end())
+    {
+        LOG(LOG_INFO, "[%p] Found %s", this, busName);
+        AnnouncedContext *context = *it;
+        m_insecureAnnounced.erase(it);
+        ajn::SessionOpts opts;
+        QStatus status = m_bus->JoinSessionAsync(context->m_name.c_str(), context->m_port,
+                this, opts, this, context);
+        if (status != ER_OK)
+        {
+            LOG(LOG_ERR, "JoinSessionAsync - %s", QCC_StatusText(status));
+            delete context;
+        }
+    }
+    else
+    {
+        LOG(LOG_INFO, "[%p] Did not find %s", this, busName);
     }
 }
 
@@ -1009,7 +1019,7 @@ void Bridge::UpdatePresenceStatus(const OCDiscoveryPayload *payload)
 
 bool Bridge::IsSelf(const OCDiscoveryPayload *payload)
 {
-    return !strcmp(payload->sid, GetServerInstanceIDString());
+    return !strcmp(payload->sid, OCGetServerInstanceIDString());
 }
 
 bool Bridge::HasSeenBefore(const OCDiscoveryPayload *payload)
@@ -1051,7 +1061,7 @@ bool Bridge::HasTranslatableResource(OCDiscoveryPayload *payload)
 {
     for (OCResourcePayload *resource = payload->resources; resource; resource = resource->next)
     {
-        if (m_secureMode && !IsSecure(resource))
+        if (m_secureMode->GetSecureMode() && !IsSecure(resource))
         {
             continue;
         }
@@ -1073,12 +1083,7 @@ OCStackResult Bridge::DoResource(OCDoHandle *handle, OCMethod method, const char
     cbData.cb = cb;
     cbData.context = this;
     cbData.cd = NULL;
-    OCStackResult result = ::DoResource(handle, method, uri, addrs, NULL, &cbData, NULL, 0);
-    if (result != OC_STACK_OK)
-    {
-        LOG(LOG_ERR, "[%p] DoResource(method=%d,uri=%s) - %d", this, method, uri, result);
-    }
-    return result;
+    return ::DoResource(handle, method, uri, addrs, NULL, &cbData, NULL, 0);
 }
 
 OCStackResult Bridge::DoResource(OCDoHandle *handle, OCMethod method, const char *uri,
@@ -1091,14 +1096,13 @@ OCStackResult Bridge::DoResource(OCDoHandle *handle, OCMethod method, const char
 void Bridge::GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *response,
         DiscoverContext **context, OCRepPayload **payload)
 {
+    *context = NULL;
+    *payload = NULL;
+
     std::map<OCDoHandle, DiscoverContext *>::iterator it = m_discovered.find(handle);
     if (it != m_discovered.end())
     {
         *context = it->second;
-    }
-    else
-    {
-        *context = NULL;
     }
 
     if (response && response->result == OC_STACK_OK &&
@@ -1106,11 +1110,15 @@ void Bridge::GetContextAndRepPayload(OCDoHandle handle, OCClientResponse *respon
     {
         *payload = (OCRepPayload *) response->payload;
     }
+    else if (response)
+    {
+        LOG(LOG_INFO, "[%p] response={result=%d,resourceUri=%s,payload={type=%d}}",
+                this, response->result, response->resourceUri,
+                response->payload ? response->payload->type : PAYLOAD_TYPE_INVALID);
+    }
     else
     {
-        LOG(LOG_INFO, "[%p] Missing %s or unexpected payload type: %d", this, response->resourceUri,
-                (response && response->payload) ? response->payload->type : PAYLOAD_TYPE_INVALID);
-        *payload = NULL;
+        LOG(LOG_INFO, "[%p] response=%p", this, response);
     }
 }
 
@@ -1121,7 +1129,6 @@ OCStackResult Bridge::ContinueDiscovery(DiscoverContext *context, const char *ur
     OCStackResult result = DoResource(&cbHandle, OC_REST_GET, uri, addrs, cb);
     if (result == OC_STACK_OK)
     {
-        LOG(LOG_INFO, "Get(%s)", uri);
         m_discovered[cbHandle] = context;
     }
     return result;
@@ -1134,7 +1141,6 @@ OCStackResult Bridge::ContinueDiscovery(DiscoverContext *context, const char *ur
     OCStackResult result = DoResource(&cbHandle, OC_REST_GET, uri, addr, cb);
     if (result == OC_STACK_OK)
     {
-        LOG(LOG_INFO, "Get(%s)", uri);
         m_discovered[cbHandle] = context;
     }
     return result;
@@ -1204,8 +1210,20 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
     switch (thiz->GetSeenState(piid))
     {
         case NOT_SEEN:
-            context->m_bus = VirtualBusAttachment::Create(context->m_device.m_di.c_str(), piid,
-                    isVirtual);
+            if (isVirtual)
+            {
+                /* Delay creating virtual objects from a virtual device */
+                LOG(LOG_INFO, "[%p] Delaying creation of virtual objects from a virtual device",
+                        thiz);
+                thiz->m_tasks.push_back(new DiscoverTask(time(NULL) + 10, piid, payload, context));
+                context = NULL;
+                goto exit;
+            }
+            else
+            {
+                context->m_bus = VirtualBusAttachment::Create(context->m_device.m_di.c_str(), piid,
+                        isVirtual);
+            }
             break;
         case SEEN_NATIVE:
             /* Do nothing */
@@ -1217,19 +1235,17 @@ OCStackApplicationResult Bridge::GetDeviceCB(void *ctx, OCDoHandle handle,
             }
             else
             {
-                /* Delay creating virtual objects from a virtual device */
-                LOG(LOG_INFO, "[%p] Delaying creation of virtual objects from a virtual device",
-                        thiz);
-                thiz->m_tasks.push_back(new DiscoverTask(time(NULL) + 10, piid, payload, context));
-                context = NULL;
+                thiz->DestroyPiid(piid);
+                context->m_bus = VirtualBusAttachment::Create(context->m_device.m_di.c_str(), piid,
+                        isVirtual);
             }
-            goto exit;
+            break;
     }
     if (!context->m_bus)
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, payload);
+    context->m_bus->SetAboutData(payload);
     result = thiz->ContinueDiscovery(context, OC_RSRVD_PLATFORM_URI,
             context->GetDevAddrs(OC_RSRVD_PLATFORM_URI), Bridge::GetPlatformCB);
     if (result == OC_STACK_OK)
@@ -1251,35 +1267,26 @@ OCStackApplicationResult Bridge::GetPlatformCB(void *ctx, OCDoHandle handle,
     LOG(LOG_INFO, "[%p]", thiz);
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
-    Resource *resource;
+    OCStackResult result = OC_STACK_OK;
     DiscoverContext *context;
     OCRepPayload *payload;
+    Resource *resource;
     thiz->GetContextAndRepPayload(handle, response, &context, &payload);
     if (!context || !payload)
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_PLATFORM_URI, payload);
-    resource = context->m_device.GetResourceType(OC_RSRVD_RESOURCE_TYPE_INTROSPECTION);
-    OCStackResult result;
+    context->m_bus->SetAboutData(payload);
+
+    resource = context->m_device.GetResourceType(OC_RSRVD_RESOURCE_TYPE_DEVICE_CONFIGURATION);
     if (resource)
     {
-        result = thiz->ContinueDiscovery(context, resource->m_uri.c_str(),
-                resource->m_addrs, Bridge::GetIntrospectionCB);
+        result = thiz->ContinueDiscovery(context, resource->m_uri.c_str(), resource->m_addrs,
+                Bridge::GetDeviceConfigurationCB);
     }
     else
     {
-        LOG(LOG_INFO, "[%p] Missing introspection resource", thiz);
-        context->m_paths = OCRepPayloadCreate();
-        context->m_definitions = OCRepPayloadCreate();
-        if (!context->m_paths || !context->m_definitions)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        context->m_it = context->Begin();
-        result = thiz->ContinueDiscovery(context, context->m_it.GetUri().c_str(),
-                context->m_it.GetDevAddrs(), Bridge::GetCB);
+        result = thiz->GetPlatformConfiguration(context);
     }
     if (result == OC_STACK_OK)
     {
@@ -1290,6 +1297,180 @@ exit:
     delete context;
     thiz->m_discovered.erase(handle);
     return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackApplicationResult Bridge::GetDeviceConfigurationCB(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    LOG(LOG_INFO, "[%p]", thiz);
+
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    OCStackResult result = OC_STACK_OK;
+    DiscoverContext *context;
+    OCRepPayload *payload;
+    thiz->GetContextAndRepPayload(handle, response, &context, &payload);
+    if (!context || !payload)
+    {
+        goto exit;
+    }
+    context->m_bus->SetAboutData(payload);
+
+    result = thiz->GetPlatformConfiguration(context);
+    if (result == OC_STACK_OK)
+    {
+        context = NULL;
+    }
+
+exit:
+    delete context;
+    thiz->m_discovered.erase(handle);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackResult Bridge::GetPlatformConfiguration(DiscoverContext *context)
+{
+    OCStackResult result = OC_STACK_OK;
+    Resource *resource;
+    resource = context->m_device.GetResourceType(OC_RSRVD_RESOURCE_TYPE_PLATFORM_CONFIGURATION);
+    if (resource)
+    {
+        result = ContinueDiscovery(context, resource->m_uri.c_str(), resource->m_addrs,
+                Bridge::GetPlatformConfigurationCB);
+    }
+    else
+    {
+        result = GetCollection(context);
+    }
+    return result;
+}
+
+OCStackApplicationResult Bridge::GetPlatformConfigurationCB(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    LOG(LOG_INFO, "[%p]", thiz);
+
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    OCStackResult result = OC_STACK_OK;
+    DiscoverContext *context;
+    OCRepPayload *payload;
+    thiz->GetContextAndRepPayload(handle, response, &context, &payload);
+    if (!context)
+    {
+        goto exit;
+    }
+    context->m_bus->SetAboutData(payload);
+
+    result = thiz->GetCollection(context);
+    if (result == OC_STACK_OK)
+    {
+        context = NULL;
+    }
+
+exit:
+    delete context;
+    thiz->m_discovered.erase(handle);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackResult Bridge::GetCollection(DiscoverContext *context)
+{
+    OCStackResult result = OC_STACK_OK;
+    for (context->m_rit = context->m_device.m_resources.begin();
+         context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
+    {
+        Resource &r = *context->m_rit;
+        if (HasResourceType(r.m_rts, "oic.r.alljoynobject"))
+        {
+            result = ContinueDiscovery(context, r.m_uri.c_str(), r.m_addrs, Bridge::GetCollectionCB);
+            if (result == OC_STACK_OK)
+            {
+                context = NULL;
+            }
+            goto exit;
+        }
+    }
+    result = GetIntrospection(context);
+    if (result == OC_STACK_OK)
+    {
+        context = NULL;
+    }
+
+exit:
+    return result;
+}
+
+OCStackApplicationResult Bridge::GetCollectionCB(void *ctx, OCDoHandle handle,
+        OCClientResponse *response)
+{
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    LOG(LOG_INFO, "[%p]", thiz);
+
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    OCStackResult result = OC_STACK_OK;
+    DiscoverContext *context;
+    OCRepPayload *payload;
+    thiz->GetContextAndRepPayload(handle, response, &context, &payload);
+    if (!context || !payload)
+    {
+        goto exit;
+    }
+    if (!context->m_device.SetCollectionLinks(context->m_rit->m_uri, payload))
+    {
+        goto exit;
+    }
+    for (++context->m_rit; context->m_rit != context->m_device.m_resources.end(); ++context->m_rit)
+    {
+        Resource &r = *context->m_rit;
+        if (HasResourceType(r.m_rts, "oic.r.alljoynobject"))
+        {
+            result = thiz->ContinueDiscovery(context, r.m_uri.c_str(), r.m_addrs,
+                    Bridge::GetCollectionCB);
+            if (result == OC_STACK_OK)
+            {
+                context = NULL;
+            }
+            goto exit;
+        }
+    }
+    result = thiz->GetIntrospection(context);
+    if (result == OC_STACK_OK)
+    {
+        context = NULL;
+    }
+
+exit:
+    delete context;
+    thiz->m_discovered.erase(handle);
+    return OC_STACK_DELETE_TRANSACTION;
+}
+
+OCStackResult Bridge::GetIntrospection(DiscoverContext *context)
+{
+    OCStackResult result = OC_STACK_OK;
+    Resource *resource;
+    resource = context->m_device.GetResourceType(OC_RSRVD_RESOURCE_TYPE_INTROSPECTION);
+    if (resource)
+    {
+        result = ContinueDiscovery(context, resource->m_uri.c_str(),
+                resource->m_addrs, Bridge::GetIntrospectionCB);
+    }
+    else
+    {
+        LOG(LOG_INFO, "[%p] Missing introspection resource", this);
+        context->m_paths = OCRepPayloadCreate();
+        context->m_definitions = OCRepPayloadCreate();
+        if (!context->m_paths || !context->m_definitions)
+        {
+            LOG(LOG_ERR, "Failed to create payload");
+            return result;
+        }
+        context->m_it = context->Begin();
+        result = ContinueDiscovery(context, context->m_it.GetUri().c_str(),
+                context->m_it.GetDevAddrs(), Bridge::GetCB);
+    }
+    return result;
 }
 
 OCStackApplicationResult Bridge::GetIntrospectionCB(void *ctx, OCDoHandle handle,
@@ -1388,8 +1569,6 @@ OCStackApplicationResult Bridge::GetIntrospectionDataCB(void *ctx, OCDoHandle ha
 
     std::lock_guard<std::mutex> lock(thiz->m_mutex);
     OCStackResult result = OC_STACK_ERROR;
-    char *data = NULL;
-    OCPayload *outPayload = NULL;
     DiscoverContext *context;
     OCRepPayload *payload;
 
@@ -1398,20 +1577,10 @@ OCStackApplicationResult Bridge::GetIntrospectionDataCB(void *ctx, OCDoHandle ha
     {
         goto exit;
     }
-    if (!OCRepPayloadGetPropString(payload, OC_RSRVD_INTROSPECTION_DATA_NAME, &data))
+    if (thiz->ParseIntrospectionPayload(context, payload))
     {
-        goto exit;
+        result = OC_STACK_OK;
     }
-    result = ParsePayload(&outPayload, OC_FORMAT_JSON, PAYLOAD_TYPE_REPRESENTATION,
-            (const uint8_t*) data, strlen(data));
-    if (result != OC_STACK_OK)
-    {
-        goto exit;
-    }
-    OICFree(data);
-    data = NULL;
-
-    thiz->ParseIntrospectionPayload(context, (OCRepPayload *) outPayload);
 
 exit:
     if (context && (result != OC_STACK_OK))
@@ -1431,174 +1600,9 @@ exit:
             context = NULL;
         }
     }
-    OCPayloadDestroy(outPayload);
-    OICFree(data);
     delete context;
     thiz->m_discovered.erase(handle);
     return OC_STACK_DELETE_TRANSACTION;
-}
-
-static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj);
-
-static bool SetPropertiesSchema(OCRepPayload *property, OCRepPayloadPropType type,
-        OCRepPayload *obj)
-{
-    OCRepPayload *child = NULL;
-    bool success;
-
-    switch (type)
-    {
-        case OCREP_PROP_NULL:
-            success = false;
-            break;
-        case OCREP_PROP_INT:
-            success = OCRepPayloadSetPropString(property, "type", "integer");
-            break;
-        case OCREP_PROP_DOUBLE:
-            success = OCRepPayloadSetPropString(property, "type", "number");
-            break;
-        case OCREP_PROP_BOOL:
-            success = OCRepPayloadSetPropString(property, "type", "boolean");
-            break;
-        case OCREP_PROP_STRING:
-            success = OCRepPayloadSetPropString(property, "type", "string");
-            break;
-        case OCREP_PROP_BYTE_STRING:
-            child = OCRepPayloadCreate();
-            success = child &&
-                    OCRepPayloadSetPropString(child, "binaryEncoding", "base64") &&
-                    OCRepPayloadSetPropObjectAsOwner(property, "media", child) &&
-                    OCRepPayloadSetPropString(property, "type", "string");
-            if (success)
-            {
-                child = NULL;
-            }
-            break;
-        case OCREP_PROP_OBJECT:
-            child = OCRepPayloadCreate();
-            success = child &&
-                    SetPropertiesSchema(child, obj) &&
-                    OCRepPayloadSetPropObjectAsOwner(property, "properties", child) &&
-                    OCRepPayloadSetPropString(property, "type", "object");
-            if (success)
-            {
-                child = NULL;
-            }
-            break;
-        case OCREP_PROP_ARRAY:
-            success = false;
-            break;
-    }
-    if (!success)
-    {
-        goto exit;
-    }
-    success = true;
-
-exit:
-    OCRepPayloadDestroy(child);
-    return success;
-}
-
-static bool SetPropertiesSchema(OCRepPayload *parent, OCRepPayload *obj)
-{
-    OCRepPayload *property = NULL;
-    OCRepPayload *child = NULL;
-    bool success;
-
-    if (!obj)
-    {
-        success = true;
-        goto exit;
-    }
-    for (OCRepPayloadValue *value = obj->values; value; value = value->next)
-    {
-        property = OCRepPayloadCreate();
-        if (!property)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            success = false;
-            goto exit;
-        }
-        switch (value->type)
-        {
-            case OCREP_PROP_NULL:
-                success = false;
-                break;
-            case OCREP_PROP_INT:
-                success = OCRepPayloadSetPropString(property, "type", "integer");
-                break;
-            case OCREP_PROP_DOUBLE:
-                success = OCRepPayloadSetPropString(property, "type", "number");
-                break;
-            case OCREP_PROP_BOOL:
-                success = OCRepPayloadSetPropString(property, "type", "boolean");
-                break;
-            case OCREP_PROP_STRING:
-                success = OCRepPayloadSetPropString(property, "type", "string");
-                break;
-            case OCREP_PROP_BYTE_STRING:
-                child = OCRepPayloadCreate();
-                success = child &&
-                        OCRepPayloadSetPropString(child, "binaryEncoding", "base64") &&
-                        OCRepPayloadSetPropObjectAsOwner(property, "media", child) &&
-                        OCRepPayloadSetPropString(property, "type", "string");
-                if (success)
-                {
-                    child = NULL;
-                }
-                break;
-            case OCREP_PROP_OBJECT:
-                child = OCRepPayloadCreate();
-                success = child &&
-                        SetPropertiesSchema(child, value->obj) &&
-                        OCRepPayloadSetPropObjectAsOwner(property, "properties", child) &&
-                        OCRepPayloadSetPropString(property, "type", "object");
-                if (success)
-                {
-                    child = NULL;
-                }
-                break;
-            case OCREP_PROP_ARRAY:
-                success = true;
-                parent = property;
-                for (size_t i = 0; success && (i < MAX_REP_ARRAY_DEPTH) && value->arr.dimensions[i];
-                     ++i)
-                {
-                    child = OCRepPayloadCreate();
-                    success = child &&
-                            OCRepPayloadSetPropObjectAsOwner(parent, "items", child) &&
-                            OCRepPayloadSetPropString(parent, "type", "array");
-                    if (success)
-                    {
-                        parent = child;
-                        child = NULL;
-                    }
-                }
-                if (success)
-                {
-                    success = SetPropertiesSchema(parent, value->arr.type, value->arr.objArray[0]);
-                }
-                break;
-        }
-        if (!success)
-        {
-            goto exit;
-        }
-
-        if (!OCRepPayloadSetPropObjectAsOwner(parent, value->name, property))
-        {
-            success = false;
-            goto exit;
-        }
-        property = NULL;
-    }
-    success = true;
-
-exit:
-    OCRepPayloadDestroy(child);
-    OCRepPayloadDestroy(property);
-    return success;
 }
 
 OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
@@ -1612,25 +1616,7 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     OCRepPayload *payload;
     bool found;
     OCRepPayload *definition = NULL;
-    OCRepPayload *properties = NULL;
-    OCRepPayload *rt = NULL;
-    size_t rtsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    size_t dimTotal;
-    char **rts = NULL;
-    OCRepPayload *itf = NULL;
-    OCRepPayload *items = NULL;
-    size_t itfsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    char **itfs = NULL;
     OCRepPayload *path = NULL;
-    OCRepPayload *method = NULL;
-    size_t parametersDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    OCRepPayload **parameters = NULL;
-    OCRepPayload *responses = NULL;
-    OCRepPayload *code = NULL;
-    OCRepPayload *schema = NULL;
-    size_t oneOfDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    OCRepPayload **oneOf = NULL;
-    std::string ref;
     OCRepPayload *outPayload = NULL;
     thiz->GetContextAndRepPayload(handle, response, &context, &payload);
     if (!context)
@@ -1649,123 +1635,21 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     }
     if (!found)
     {
-        definition = OCRepPayloadCreate();
-        if (!definition)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropString(definition, "type", "object"))
-        {
-            goto exit;
-        }
-        properties = OCRepPayloadCreate();
-        if (!properties)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        rt = OCRepPayloadCreate();
-        if (!rt)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropBool(rt, "readOnly", true) ||
-                !OCRepPayloadSetPropString(rt, "type", "array"))
-        {
-            goto exit;
-        }
-        rtsDim[0] = 1;
-        dimTotal = calcDimTotal(rtsDim);
-        rts = (char**) OICCalloc(dimTotal, sizeof(char*));
-        if (!rts)
-        {
-            LOG(LOG_ERR, "Failed to allocate string array");
-            goto exit;
-        }
-        rts[0] = OICStrdup(context->m_it.GetResourceType().c_str());
-        if (!OCRepPayloadSetStringArrayAsOwner(rt, "default", rts, rtsDim))
-        {
-            goto exit;
-        }
-        rts = NULL;
-        if (!OCRepPayloadSetPropObjectAsOwner(properties, "rt", rt))
-        {
-            goto exit;
-        }
-        rt = NULL;
-        itf = OCRepPayloadCreate();
-        if (!itf)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropBool(itf, "readOnly", true) ||
-                !OCRepPayloadSetPropString(itf, "type", "array"))
-        {
-            goto exit;
-        }
-        items = OCRepPayloadCreate();
-        if (!items)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropString(items, "type", "string"))
-        {
-            goto exit;
-        }
+        std::string resourceType = context->m_it.GetResourceType();
         /* The definition of a resource type has the union of all possible interfaces listed */
         std::set<std::string> ifSet;
         for (DiscoverContext::Iterator it = context->Begin(); it != context->End(); ++it)
         {
             Resource &r = it.GetResource();
-            if (std::find(r.m_rts.begin(), r.m_rts.end(), context->m_it.GetResourceType()) !=
-                    r.m_rts.end())
+            if (HasResourceType(r.m_rts, resourceType))
             {
                 ifSet.insert(r.m_ifs.begin(), r.m_ifs.end());
             }
         }
-        itfsDim[0] = ifSet.size();
-        dimTotal = calcDimTotal(itfsDim);
-        itfs = (char **) OICCalloc(dimTotal, sizeof(char *));
-        if (!itfs)
-        {
-            LOG(LOG_ERR, "Failed to allocate string array");
-            goto exit;
-        }
-        auto ifIt = ifSet.begin();
-        for (size_t i = 0; i < dimTotal; ++i, ++ifIt)
-        {
-            itfs[i] = OICStrdup(ifIt->c_str());
-        }
-        if (!OCRepPayloadSetStringArrayAsOwner(items, "enum", itfs, itfsDim))
-        {
-            goto exit;
-        }
-        itfs = NULL;
-        if (!OCRepPayloadSetPropObjectAsOwner(itf, "items", items))
-        {
-            goto exit;
-        }
-        items = NULL;
-        if (!OCRepPayloadSetPropObjectAsOwner(properties, "if", itf))
-        {
-            goto exit;
-        }
-        itf = NULL;
-        if (!SetPropertiesSchema(properties, payload))
-        {
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropObjectAsOwner(definition, "properties", properties))
-        {
-            goto exit;
-        }
-        properties = NULL;
-        if (!OCRepPayloadSetPropObjectAsOwner(context->m_definitions,
-                context->m_it.GetResourceType().c_str(), definition))
+        std::vector<std::string> interfaces(ifSet.begin(), ifSet.end());
+        definition = IntrospectDefinition(payload, resourceType, interfaces);
+        if (!OCRepPayloadSetPropObjectAsOwner(context->m_definitions, resourceType.c_str(),
+                definition))
         {
             goto exit;
         }
@@ -1783,191 +1667,7 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
     }
     if (!found)
     {
-        path = OCRepPayloadCreate();
-        if (!path)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        /* oic.if.baseline is mandatory and it supports post */
-        method = OCRepPayloadCreate();
-        if (!method)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        parametersDim[0] = 2;
-        dimTotal = calcDimTotal(parametersDim);
-        parameters = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload*));
-        if (!parameters)
-        {
-            LOG(LOG_ERR, "Failed to allocate object array");
-            goto exit;
-        }
-        parameters[0] = OCRepPayloadCreate();
-        if (!parameters[0])
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropString(parameters[0], "name", "if") ||
-                !OCRepPayloadSetPropString(parameters[0], "in", "query") ||
-                !OCRepPayloadSetPropString(parameters[0], "type", "string"))
-        {
-            goto exit;
-        }
-        itfs = (char **) OICCalloc(context->m_it.GetResource().m_ifs.size(), sizeof(char *));
-        if (!itfs)
-        {
-            LOG(LOG_ERR, "Failed to allocate string array");
-            goto exit;
-        }
-        itfsDim[0] = 0;
-        for (size_t i = 0; i < context->m_it.GetResource().m_ifs.size(); ++i)
-        {
-            /* Filter out read-only interfaces from post method */
-            std::string &itf = context->m_it.GetResource().m_ifs[i];
-            if (itf == "oic.if.ll" || itf == "oic.if.r" || itf == "oic.if.s")
-            {
-                continue;
-            }
-            itfs[itfsDim[0]++] = OICStrdup(itf.c_str());
-        }
-        if (!OCRepPayloadSetStringArrayAsOwner(parameters[0], "enum", itfs, itfsDim))
-        {
-            goto exit;
-        }
-        itfs = NULL;
-        parameters[1] = OCRepPayloadCreate();
-        if (!parameters[1])
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropString(parameters[1], "name", "body") ||
-                !OCRepPayloadSetPropString(parameters[1], "in", "body"))
-        {
-            goto exit;
-        }
-        schema = OCRepPayloadCreate();
-        if (!schema)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        oneOfDim[0] = context->m_it.GetResource().m_rts.size();
-        dimTotal = calcDimTotal(oneOfDim);
-        oneOf = (OCRepPayload **) OICCalloc(dimTotal, sizeof(OCRepPayload*));
-        if (!oneOf)
-        {
-            LOG(LOG_ERR, "Failed to allocate object array");
-            goto exit;
-        }
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            oneOf[i] = OCRepPayloadCreate();
-            if (!oneOf[i])
-            {
-                LOG(LOG_ERR, "Failed to create payload");
-                goto exit;
-            }
-            ref = std::string("#/definitions/") + context->m_it.GetResource().m_rts[i];
-            if (!OCRepPayloadSetPropString(oneOf[i], "$ref", ref.c_str()))
-            {
-                goto exit;
-            }
-        }
-        if (!OCRepPayloadSetPropObjectArrayAsOwner(schema, "oneOf", oneOf, oneOfDim))
-        {
-            goto exit;
-        }
-        oneOf = NULL;
-        /* schema will be re-used in "responses" (so no ...AsOwner here) */
-        if (!OCRepPayloadSetPropObject(parameters[1], "schema", schema))
-        {
-            goto exit;
-        }
-        /* parameters will be re-used in "get" (so no ...AsOwner here) */
-        if (!OCRepPayloadSetPropObjectArray(method, "parameters", (const OCRepPayload **)parameters,
-                parametersDim))
-        {
-            goto exit;
-        }
-        responses = OCRepPayloadCreate();
-        if (!responses)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        code = OCRepPayloadCreate();
-        if (!code)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropString(code, "description", ""))
-        {
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropObjectAsOwner(code, "schema", schema))
-        {
-            goto exit;
-        }
-        schema = NULL;
-        if (!OCRepPayloadSetPropObjectAsOwner(responses, "200", code))
-        {
-            goto exit;
-        }
-        code = NULL;
-        /* responses will be re-used in "get" (so no ...AsOwner here) */
-        if (!OCRepPayloadSetPropObject(method, "responses", responses))
-        {
-            goto exit;
-        }
-        if (!OCRepPayloadSetPropObjectAsOwner(path, "post", method))
-        {
-            goto exit;
-        }
-        method = NULL;
-        method = OCRepPayloadCreate();
-        if (!method)
-        {
-            LOG(LOG_ERR, "Failed to create payload");
-            goto exit;
-        }
-        itfs = (char **) OICCalloc(context->m_it.GetResource().m_ifs.size(), sizeof(char *));
-        if (!itfs)
-        {
-            LOG(LOG_ERR, "Failed to allocate string array");
-            goto exit;
-        }
-        itfsDim[0] = 0;
-        for (size_t i = 0; i < context->m_it.GetResource().m_ifs.size(); ++i)
-        {
-            /* All interfaces support get method */
-            itfs[itfsDim[0]++] = OICStrdup(context->m_it.GetResource().m_ifs[i].c_str());
-        }
-        if (!OCRepPayloadSetStringArrayAsOwner(parameters[0], "enum", itfs, itfsDim))
-        {
-            goto exit;
-        }
-        itfs = NULL;
-        parametersDim[0] = 1; /* only use "if" parameter */
-        if (!OCRepPayloadSetPropObjectArrayAsOwner(method, "parameters", parameters, parametersDim))
-        {
-            goto exit;
-        }
-        parameters = NULL;
-        if (!OCRepPayloadSetPropObject(method, "responses", responses))
-        {
-            goto exit;
-        }
-        responses = NULL;
-        if (!OCRepPayloadSetPropObjectAsOwner(path, "get", method))
-        {
-            goto exit;
-        }
-        method = NULL;
+        path = IntrospectPath(context->m_it.GetResource().m_rts, context->m_it.GetResource().m_ifs);
         if (!OCRepPayloadSetPropObjectAsOwner(context->m_paths,
                 context->m_it.GetResource().m_uri.c_str(), path))
         {
@@ -2008,785 +1708,40 @@ OCStackApplicationResult Bridge::GetCB(void *ctx, OCDoHandle handle,
 
 exit:
     OCRepPayloadDestroy(outPayload);
-    if (oneOf)
-    {
-        dimTotal = calcDimTotal(oneOfDim);
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            OCRepPayloadDestroy(oneOf[i]);
-        }
-        OICFree(oneOf);
-    }
-    OCRepPayloadDestroy(schema);
-    OCRepPayloadDestroy(code);
-    if (parameters)
-    {
-        dimTotal = calcDimTotal(parametersDim);
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            OCRepPayloadDestroy(parameters[i]);
-        }
-        OICFree(parameters);
-    }
-    OCRepPayloadDestroy(responses);
-    OCRepPayloadDestroy(method);
     OCRepPayloadDestroy(path);
-    OCRepPayloadDestroy(items);
-    OCRepPayloadDestroy(itf);
-    if (itfs)
-    {
-        dimTotal = calcDimTotal(itfsDim);
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            OICFree(itfs[i]);
-        }
-        OICFree(itfs);
-    }
-    if (rts)
-    {
-        dimTotal = calcDimTotal(rtsDim);
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            OICFree(rts[i]);
-        }
-        OICFree(rts);
-    }
-    OCRepPayloadDestroy(rt);
-    OCRepPayloadDestroy(properties);
     OCRepPayloadDestroy(definition);
     thiz->m_discovered.erase(handle);
     delete context;
     return OC_STACK_DELETE_TRANSACTION;
 }
 
-typedef std::pair<std::string, std::string> Annotation;
-typedef std::vector<Annotation> Annotations;
-
-static const char *GetRefDefinition(const char *ref)
+bool Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload)
 {
-    static const char prefix[] = "#/definitions/";
-    if (!strncmp(ref, prefix, sizeof(prefix) - 1))
-    {
-        return &ref[sizeof(prefix) - 1];
-    }
-    return NULL;
-}
-
-static const std::string EnumPrefix = "org.alljoyn.Bus.Enum.";
-static const std::string DictPrefix = "org.alljoyn.Bus.Dict.";
-static const std::string StructPrefix = "org.alljoyn.Bus.Struct.";
-
-/* Returns a pair<D-Bus signature, org.alljoyn.Bus.Type.Name> */
-static std::pair<std::string, std::string> GetSignature(OCRepPayload *obj,
-        std::map<std::string, Annotations> &annotations)
-{
-    OCRepPayload **anyOf = NULL;
-    size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-    char *str = NULL;
-    const char *ref = NULL;
-    std::pair<std::string, std::string> sig;
-    if (OCRepPayloadGetPropObjectArray(obj, "anyOf", &anyOf, dim))
-    {
-        sig.first = "v";
-    }
-    else if (OCRepPayloadGetPropString(obj, "$ref", &str) &&
-            (ref = GetRefDefinition(str)))
-    {
-        Annotations &as = annotations[ref];
-        if (!as.empty())
-        {
-            std::string &aName = as[0].first;
-            if (aName.compare(0, EnumPrefix.size(), EnumPrefix) == 0)
-            {
-                sig.first = "x";
-            }
-            else if (aName.compare(0, DictPrefix.size(), DictPrefix) == 0)
-            {
-                sig.first = "a{" + as[0].second + as[1].second + "}";
-            }
-            else if (aName.compare(0, StructPrefix.size(), StructPrefix) == 0)
-            {
-                sig.first = "(";
-                for (Annotation a : as)
-                {
-                    sig.first += a.second;
-                }
-                sig.first += ")";
-            }
-            sig.second = std::string("[") + ref + "]";
-        }
-    }
-    else if (OCRepPayloadGetPropString(obj, "type", &str))
-    {
-        if (!strcmp(str, "boolean"))
-        {
-            sig.first = "b";
-        }
-        else if (!strcmp(str, "integer"))
-        {
-            double min = MIN_SAFE_INTEGER;
-            double max = MAX_SAFE_INTEGER;
-            OCRepPayloadGetPropDouble(obj, "minimum", &min);
-            OCRepPayloadGetPropDouble(obj, "maximum", &max);
-            if (min >= 0 && max <= UINT8_MAX)
-            {
-                sig.first = "y";
-            }
-            else if (min >= 0 && max <= UINT16_MAX)
-            {
-                sig.first = "q";
-            }
-            else if (min >= INT16_MIN && max <= INT16_MAX)
-            {
-                sig.first = "n";
-            }
-            else if (min >= 0 && max <= UINT32_MAX)
-            {
-                sig.first = "u";
-            }
-            else if (min >= INT32_MIN && max <= INT32_MAX)
-            {
-                sig.first = "i";
-            }
-            else if (min >= 0)
-            {
-                sig.first = "t";
-            }
-            else
-            {
-                sig.first = "x";
-            }
-        }
-        else if (!strcmp(str, "number"))
-        {
-            sig.first = "d";
-        }
-        else if (!strcmp(str, "string"))
-        {
-            char *format = NULL;
-            OCRepPayload *media = NULL;
-            char *encoding = NULL;
-            OCRepPayloadGetPropString(obj, "format", &format);
-            OCRepPayloadGetPropObject(obj, "media", &media);
-            if (format && !strcmp(format, "uint64"))
-            {
-                sig.first = "t";
-            }
-            else if (format && !strcmp(format, "int64"))
-            {
-                sig.first = "x";
-            }
-            else if (media && OCRepPayloadGetPropString(media, "binaryEncoding", &encoding) &&
-                    !strcmp(encoding, "base64"))
-            {
-                sig.first = "ay";
-            }
-            else
-            {
-                sig.first = "s";
-            }
-            OICFree(encoding);
-            OCRepPayloadDestroy(media);
-            OICFree(format);
-        }
-        else if (!strcmp(str, "object"))
-        {
-            sig.first = "a{sv}";
-        }
-        else if (!strcmp(str, "array"))
-        {
-            OCRepPayload *items = NULL;
-            if (OCRepPayloadGetPropObject(obj, "items", &items))
-            {
-                std::pair<std::string, std::string> itemSig = GetSignature(items, annotations);
-                sig.first = "a" + itemSig.first;
-                if (!itemSig.second.empty())
-                {
-                    sig.second = "a" + itemSig.second;
-                }
-                OCRepPayloadDestroy(items);
-            }
-            else
-            {
-                sig.first = "av";
-            }
-        }
-        else
-        {
-            LOG(LOG_INFO, "Unhandled type %s", str);
-        }
-    }
-    else
-    {
-        LOG(LOG_INFO, "Missing \"anyOf\", \"$ref\", or \"type\" property");
-    }
-    size_t dimTotal = calcDimTotal(dim);
-    for (size_t i = 0; i < dimTotal; ++i)
-    {
-        OCRepPayloadDestroy(anyOf[i]);
-    }
-    OICFree(anyOf);
-    OICFree(str);
-    return sig;
-}
-
-static void AddAnnotations(ajn::InterfaceDescription *iface, std::string propertyName,
-        OCRepPayload *obj, std::map<std::string, Annotations> &annotations)
-{
-    char *str = NULL;
-    const char *ref = NULL;
-    if (OCRepPayloadGetPropString(obj, "$ref", &str) &&
-            (ref = GetRefDefinition(str)))
-    {
-        for (Annotation &a : annotations[ref])
-        {
-            iface->AddAnnotation(a.first, a.second);
-        }
-    }
-    else if (OCRepPayloadGetPropString(obj, "type", &str))
-    {
-        if (!strcmp(str, "array"))
-        {
-            OCRepPayload *items = NULL;
-            if (OCRepPayloadGetPropObject(obj, "items", &items))
-            {
-                AddAnnotations(iface, propertyName, items, annotations);
-                OCRepPayloadDestroy(items);
-            }
-        }
-    }
-    OICFree(str);
-}
-
-static void AddProperty(ajn::InterfaceDescription *iface, OCRepPayloadValue *property,
-        bool isObservable, std::map<std::string, Annotations> &annotations)
-{
-    std::pair<std::string, std::string> sig = GetSignature(property->obj, annotations);
-    if (sig.first.empty())
-    {
-        LOG(LOG_INFO, "%s property unknown type, skipping", property->name);
-        return;
-    }
-    uint8_t access = ajn::PROP_ACCESS_RW;
-    bool readOnly;
-    if (OCRepPayloadGetPropBool(property->obj, "readOnly", &readOnly) && readOnly)
-    {
-        access = ajn::PROP_ACCESS_READ;
-    }
-    std::string ajPropName = ToAJName(property->name);
-    iface->AddProperty(ajPropName.c_str(), sig.first.c_str(), access);
-    if (!sig.second.empty())
-    {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Name", sig.second);
-    }
-    AddAnnotations(iface, ajPropName, property->obj, annotations);
-    double d;
-    if (OCRepPayloadGetPropDouble(property->obj, "default", &d) &&
-            (floor(d) == d))
-    {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Default",
-                (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
-    }
-    if (OCRepPayloadGetPropDouble(property->obj, "maximum", &d) &&
-            (floor(d) == d))
-    {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Max",
-                (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
-    }
-    if (OCRepPayloadGetPropDouble(property->obj, "minimum", &d) &&
-            (floor(d) == d))
-    {
-        iface->AddPropertyAnnotation(ajPropName, "org.alljoyn.Bus.Type.Min",
-                (d > 0) ? std::to_string((uint64_t) d) : std::to_string((int64_t) d));
-    }
-    if (isObservable)
-    {
-        /* "false" is the default value */
-        iface->AddPropertyAnnotation(ajPropName, ajn::org::freedesktop::DBus::AnnotateEmitsChanged,
-                "true");
-    }
-}
-
-static void AddInterface(VirtualBusObject *obj, const char *refValue,
-        std::map<std::string, std::string> &ajNames)
-{
-    const char *def = GetRefDefinition(refValue);
-    if (def && ajNames.find(def) != ajNames.end())
-    {
-        obj->AddInterface(ajNames[def].c_str());
-    }
-    else
-    {
-        LOG(LOG_INFO, "Missing definition of %s", def);
-    }
-}
-
-static void AddInterface(VirtualBusObject *obj, OCRepPayload *schema,
-        std::map<std::string, std::string> &ajNames)
-{
-    if (!schema->values)
-    {
-        return;
-    }
-    if (!strcmp(schema->values->name, "$ref") &&
-            schema->values->type == OCREP_PROP_STRING)
-    {
-        AddInterface(obj, schema->values->str, ajNames);
-    }
-    else if (!strcmp(schema->values->name, "oneOf") &&
-            schema->values->type == OCREP_PROP_ARRAY &&
-            schema->values->arr.type == OCREP_PROP_OBJECT)
-    {
-        OCRepPayload **objArray = schema->values->arr.objArray;
-        for (size_t j = 0; j < schema->values->arr.dimensions[0]; ++j)
-        {
-            AddInterface(obj, objArray[j], ajNames);
-        }
-    }
-}
-
-void Bridge::ParseIntrospectionPayload(DiscoverContext *context, OCRepPayload *payload)
-{
-    OCRepPayload *definitions = NULL;
-    OCRepPayload *paths = NULL;
     OCPresence *presence = NULL;
-    Resource *resource;
-    std::map<std::string, bool> isObservable; /* rt => isObservable */
-    std::map<std::string, Annotations> annotations; /* definition => annotations */
-    std::map<std::string, std::string> ajNames; /* definition => ifaceName */
-    QStatus status;
-
-    /*
-     * Figure out which resource types are observable so that the properties can be annotated with
-     * the correct EmitsChanged value.  On the OC side it is resources that are observable, not
-     * resource types.  So in the worst case where a resource type is used by two resources, one of
-     * which is observable and one which is not, we set EmitsChanged to false.
-     */
-    for (auto &r : context->m_device.m_resources)
+    bool success = ::ParseIntrospectionPayload(&context->m_device, context->m_bus, payload);
+    if (success)
     {
-        for (auto &rt : r.m_rts)
+        QStatus status;
+        presence = new OCPresence(context->m_device.m_di.c_str(), DISCOVER_PERIOD_SECS);
+        if (!presence)
         {
-            if (isObservable.find(rt) == isObservable.end())
-            {
-                isObservable[rt] = r.m_isObservable;
-            }
-            else
-            {
-                isObservable[rt] = isObservable[rt] && r.m_isObservable;
-            }
+            LOG(LOG_ERR, "new OCPresence() failed");
+            goto exit;
         }
-    }
-
-    if (!OCRepPayloadGetPropObject(payload, "definitions", &definitions))
-    {
-        goto exit;
-    }
-    /* Look for struct definitions first since they will be needed by resource types */
-    for (OCRepPayloadValue *definition = definitions->values; definition;
-         definition = definition->next)
-    {
-        if (definition->type != OCREP_PROP_OBJECT)
-        {
-            LOG(LOG_INFO, "%s unknown type %d, skipping", definition->name, definition->type);
-            continue;
-        }
-        size_t dim[MAX_REP_ARRAY_DEPTH] = { 0 };
-        OCRepPayload **oneOf = NULL;
-        char *type = NULL;
-        if (OCRepPayloadGetPropObjectArray(definition->obj, "oneOf", &oneOf, dim))
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for (size_t i = 0; i < dimTotal; ++i)
-            {
-                char *enumName = NULL;
-                double *enumValue = NULL;
-                size_t dimEnumValue[MAX_REP_ARRAY_DEPTH] = { 0 };
-                if (OCRepPayloadGetPropString(oneOf[i], "title", &enumName) &&
-                        OCRepPayloadGetDoubleArray(oneOf[i], "enum", &enumValue, dimEnumValue) &&
-                        (calcDimTotal(dimEnumValue) == 1))
-                {
-                    std::string Enum = EnumPrefix + definition->name;
-                    /* Assume enum value is in range of an int64_t */
-                    annotations[definition->name].push_back(Annotation(Enum + ".Value." + enumName,
-                            std::to_string((int64_t) enumValue[0])));
-                }
-                OICFree(enumValue);
-                OICFree(enumName);
-            }
-        }
-        else if (OCRepPayloadGetPropString(definition->obj, "type", &type) &&
-                !strcmp(type, "object"))
-        {
-            OCRepPayload *properties = NULL;
-            OCRepPayload *rt = NULL;
-            if (!OCRepPayloadGetPropObject(definition->obj, "properties", &properties))
-            {
-                std::string Dict = DictPrefix + definition->name;
-                annotations[definition->name].push_back(Annotation(Dict + ".Key.Type", "s"));
-                annotations[definition->name].push_back(Annotation(Dict + ".Value.Type", "v"));
-            }
-            else if (!OCRepPayloadGetPropObject(properties, "rt", &rt))
-            {
-                for (OCRepPayloadValue *property = properties->values; property;
-                     property = property->next)
-                {
-                    if (property->type != OCREP_PROP_OBJECT)
-                    {
-                        LOG(LOG_INFO, "%s property unknown type %d, skipping", property->name,
-                                property->type);
-                        continue;
-                    }
-                    std::string unused;
-                    std::string Struct = StructPrefix + definition->name;
-                    annotations[definition->name].push_back(Annotation(Struct + ".Field." +
-                            property->name + ".Type", GetSignature(property->obj, annotations).first));
-                }
-            }
-            OCRepPayloadDestroy(rt);
-            OCRepPayloadDestroy(properties);
-        }
-        else
-        {
-            LOG(LOG_INFO, "%s unsupported \"type\" value \"%s\", skipping", definition->name, type);
-        }
-        OICFree(type);
-        if (oneOf)
-        {
-            size_t dimTotal = calcDimTotal(dim);
-            for(size_t i = 0; i < dimTotal; ++i)
-            {
-                OCRepPayloadDestroy(oneOf[i]);
-            }
-        }
-        OICFree(oneOf);
-    }
-    /* Look for resource types next */
-    for (OCRepPayloadValue *definition = definitions->values; definition;
-         definition = definition->next)
-    {
-        if (definition->type != OCREP_PROP_OBJECT)
-        {
-            LOG(LOG_INFO, "%s unknown type %d, skipping", definition->name, definition->type);
-            continue;
-        }
-        OCRepPayload *properties = NULL;
-        OCRepPayload *rt = NULL;
-        char **rts = NULL;
-        size_t rtsDim[MAX_REP_ARRAY_DEPTH] = { 0 };
-        std::string ifaceName;
-        ajn::InterfaceDescription *iface;
-        if (!OCRepPayloadGetPropObject(definition->obj, "properties", &properties))
-        {
-            LOG(LOG_INFO, "%s missing \"properties\", skipping", definition->name);
-            goto next_iface;
-        }
-        if (!OCRepPayloadGetPropObject(properties, "rt", &rt))
-        {
-            LOG(LOG_INFO, "%s missing \"rt\" property, skipping", definition->name);
-            goto next_iface;
-        }
-        if (!OCRepPayloadGetStringArray(rt, "default", &rts, rtsDim) || !rtsDim[0])
-        {
-            LOG(LOG_INFO, "%s missing or empty \"default\" property, skipping", definition->name);
-            goto next_iface;
-        }
-        ifaceName = ToAJName(rts[0]);
-        ajNames[definition->name] = ifaceName;
-        iface = context->m_bus->CreateInterface(ifaceName.c_str());
-        if (!iface)
-        {
-            LOG(LOG_ERR, "CreateInterface %s failed", ifaceName.c_str());
-            goto next_iface;
-        }
-        LOG(LOG_INFO, "Created interface %s", ifaceName.c_str());
-        if (strstr(ifaceName.c_str(), "oic.d.") == ifaceName.c_str())
-        {
-            /* Device types are translated as empty interfaces */
-            iface->Activate();
-            goto next_iface;
-        }
-        for (OCRepPayloadValue *property = properties->values; property; property = property->next)
-        {
-            if (property->type != OCREP_PROP_OBJECT)
-            {
-                LOG(LOG_INFO, "%s property unknown type %d, skipping", property->name,
-                        property->type);
-                continue;
-            }
-            if (!strcmp(property->name, "rt"))
-            {
-                /* "rt" property is special-cased above */
-                continue;
-            }
-            else if (!strcmp(property->name, "if") ||
-                    !strcmp(property->name, "p") ||
-                    !strcmp(property->name, "n") ||
-                    !strcmp(property->name, "id"))
-            {
-                /* Ignore baseline properties */
-                continue;
-            }
-            AddProperty(iface, property, isObservable[rts[0]], annotations);
-        }
-        iface->Activate();
-    next_iface:
-        size_t dimTotal = calcDimTotal(rtsDim);
-        for (size_t i = 0; i < dimTotal; ++i)
-        {
-            OICFree(rts[i]);
-        }
-        OICFree(rts);
-        rts = NULL;
-        OCRepPayloadDestroy(rt);
-        rt = NULL;
-        OCRepPayloadDestroy(properties);
-        properties = NULL;
-    }
-    OCRepPayloadDestroy(definitions);
-    definitions = NULL;
-
-    if (!OCRepPayloadGetPropObject(payload, "paths", &paths))
-    {
-        goto exit;
-    }
-    for (OCRepPayloadValue *path = paths->values; path; path = path->next)
-    {
-        if (path->type != OCREP_PROP_OBJECT)
-        {
-            LOG(LOG_INFO, "%s path unknown type %d, skipping", path->name, path->type);
-            continue;
-        }
-        if (!strcmp(path->name, "/oic/d") || !strcmp(path->name, "/oic/p"))
-        {
-            /* These resources are not translated on-the-fly */
-        }
-        else if (!strcmp(path->name, "/oic/con") || !strcmp(path->name, "/oic/mnt"))
-        {
-            VirtualBusObject *obj = context->m_bus->GetBusObject("/Config");
-            if (!obj)
-            {
-                obj = new VirtualConfigBusObject(context->m_bus, context->GetDevAddrs(path->name));
-                status = context->m_bus->RegisterBusObject(obj);
-                if (status != ER_OK)
-                {
-                    delete obj;
-                }
-            }
-        }
-        else
-        {
-            VirtualBusObject *obj = new VirtualBusObject(context->m_bus, path->name,
-                    context->GetDevAddrs(path->name));
-            for (OCRepPayloadValue *method = path->obj->values; method; method = method->next)
-            {
-                if (method->type != OCREP_PROP_OBJECT)
-                {
-                    LOG(LOG_INFO, "%s method unknown type %d, skipping", method->name,
-                            method->type);
-                    continue;
-                }
-                for (OCRepPayloadValue *value = method->obj->values; value; value = value->next)
-                {
-                    if (!strcmp(value->name, "parameters"))
-                    {
-                        if (value->type != OCREP_PROP_ARRAY || value->arr.type != OCREP_PROP_OBJECT)
-                        {
-                            LOG(LOG_INFO, "%s unknown type %d, skipping", value->name,
-                                    value->type);
-                            continue;
-                        }
-                        for (size_t i = 0; i < value->arr.dimensions[0]; ++i)
-                        {
-                            OCRepPayload *schema = NULL;
-                            if (OCRepPayloadGetPropObject(value->arr.objArray[i], "schema",
-                                    &schema))
-                            {
-                                AddInterface(obj, schema, ajNames);
-                            }
-                            OCRepPayloadDestroy(schema);
-                            schema = NULL;
-                        }
-                    }
-                    else if (!strcmp(value->name, "responses"))
-                    {
-                        if (value->type != OCREP_PROP_OBJECT)
-                        {
-                            LOG(LOG_INFO, "%s unknown type %d, skipping", value->name,
-                                    value->type);
-                            continue;
-                        }
-                        for (OCRepPayloadValue *code = value->obj->values; code; code = code->next)
-                        {
-                            if (code->type != OCREP_PROP_OBJECT)
-                            {
-                                LOG(LOG_INFO, "%s code unknown type %d, skipping", code->name,
-                                        code->type);
-                                continue;
-                            }
-                            for (OCRepPayloadValue *codeValue = code->obj->values; codeValue;
-                                 codeValue = codeValue->next)
-                            {
-                                if (!strcmp(codeValue->name, "schema") &&
-                                        codeValue->type == OCREP_PROP_OBJECT)
-                                {
-                                    AddInterface(obj, codeValue->obj, ajNames);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            status = context->m_bus->RegisterBusObject(obj);
-            if (status != ER_OK)
-            {
-                delete obj;
-            }
-        }
-    }
-    OCRepPayloadDestroy(paths);
-    paths = NULL;
-
-    /* Done */
-    resource = context->m_device.GetResourceUri(OC_RSRVD_DEVICE_URI);
-    if (resource)
-    {
-        VirtualBusObject *obj = new VirtualBusObject(context->m_bus, OC_RSRVD_DEVICE_URI,
-                resource->m_addrs);
-        for (auto &rt : resource->m_rts)
-        {
-            if (TranslateResourceType(rt.c_str()))
-            {
-                obj->AddInterface(ToAJName(rt).c_str(), true);
-            }
-        }
-        obj->AddInterface(ToAJName("oic.d.virtual").c_str(), true);
-        status = context->m_bus->RegisterBusObject(obj);
+        m_presence.push_back(presence);
+        presence = NULL; /* presence now belongs to this */
+        status = context->m_bus->Announce();
         if (status != ER_OK)
         {
-            delete obj;
+            LOG(LOG_ERR, "Announce() failed - %s", QCC_StatusText(status));
+            goto exit;
         }
+        m_virtualBusAttachments.push_back(context->m_bus);
+        context->m_bus = NULL; /* context->m_bus now belongs to this */
     }
-    presence = new OCPresence(context->m_device.m_di.c_str(), DISCOVER_PERIOD_SECS);
-    if (!presence)
-    {
-        LOG(LOG_ERR, "new OCPresence() failed");
-        goto exit;
-    }
-    m_presence.push_back(presence);
-    status = context->m_bus->Announce();
-    if (status != ER_OK)
-    {
-        LOG(LOG_ERR, "Announce() failed - %s", QCC_StatusText(status));
-        goto exit;
-    }
-    m_virtualBusAttachments.push_back(context->m_bus);
-    context->m_bus = NULL; /* context->m_bus now belongs to thiz */
-
 exit:
-    OCRepPayloadDestroy(paths);
-    OCRepPayloadDestroy(definitions);
-}
-
-/* Called with m_mutex held. */
-OCRepPayload *Bridge::GetSecureMode(OCEntityHandlerRequest *request)
-{
-    OCRepPayload *payload = CreatePayload(request->resource, request->query);
-    if (!OCRepPayloadSetPropBool(payload, "secureMode", m_secureMode))
-    {
-        OCRepPayloadDestroy(payload);
-        payload = NULL;
-    }
-    return payload;
-}
-
-/* Called with m_mutex held. */
-bool Bridge::PostSecureMode(OCEntityHandlerRequest *request, bool &hasChanged)
-{
-    OCRepPayload *payload = (OCRepPayload *) request->payload;
-    bool secureMode;
-    if (!OCRepPayloadGetPropBool(payload, "secureMode", &secureMode))
-    {
-        return false;
-    }
-    hasChanged = (m_secureMode != secureMode);
-    m_secureMode = secureMode;
-    return true;
-}
-
-OCEntityHandlerResult Bridge::EntityHandlerCB(OCEntityHandlerFlag flag,
-        OCEntityHandlerRequest *request,
-        void *ctx)
-{
-    LOG(LOG_INFO, "[%p] flag=%x,request=%p,ctx=%p",
-        ctx, flag, request, ctx);
-
-    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
-    thiz->m_mutex.lock();
-    bool hasChanged = false;
-    OCEntityHandlerResult result;
-    switch (request->method)
-    {
-        case OC_REST_GET:
-            {
-                OCEntityHandlerResponse response;
-                memset(&response, 0, sizeof(response));
-                response.requestHandle = request->requestHandle;
-                response.resourceHandle = request->resource;
-                OCRepPayload *payload = thiz->GetSecureMode(request);
-                if (!payload)
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                result = OC_EH_OK;
-                response.ehResult = result;
-                response.payload = reinterpret_cast<OCPayload *>(payload);
-                OCStackResult doResult = DoResponse(&response);
-                if (doResult != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "DoResponse - %d", doResult);
-                    OCRepPayloadDestroy(payload);
-                }
-                break;
-            }
-        case OC_REST_POST:
-            {
-                if (!request->payload || request->payload->type != PAYLOAD_TYPE_REPRESENTATION)
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                if (!thiz->PostSecureMode(request, hasChanged))
-                {
-                    result = OC_EH_ERROR;
-                    break;
-                }
-                OCEntityHandlerResponse response;
-                memset(&response, 0, sizeof(response));
-                response.requestHandle = request->requestHandle;
-                response.resourceHandle = request->resource;
-                OCRepPayload *outPayload = thiz->GetSecureMode(request);
-                result = OC_EH_OK;
-                response.ehResult = result;
-                response.payload = reinterpret_cast<OCPayload *>(outPayload);
-                OCStackResult doResult = DoResponse(&response);
-                if (doResult != OC_STACK_OK)
-                {
-                    LOG(LOG_ERR, "DoResponse - %d", doResult);
-                    OCRepPayloadDestroy(outPayload);
-                }
-                break;
-            }
-        default:
-            result = OC_EH_METHOD_NOT_ALLOWED;
-            break;
-    }
-    thiz->m_mutex.unlock();
-    if (hasChanged)
-    {
-        OCNotifyAllObservers(request->resource, OC_NA_QOS);
-    }
-    return result;
+    delete presence;
+    return success;
 }
 
 static const char *SeenStateText[] = { "NOT_SEEN", "SEEN_NATIVE", "SEEN_VIRTUAL" };
@@ -2843,7 +1798,7 @@ void Bridge::AnnouncedTask::Run(Bridge *thiz)
     switch (thiz->GetSeenState(m_piid.c_str()))
     {
         case NOT_SEEN:
-            thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_isVirtual);
+            thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_secureMode, m_isVirtual);
             break;
         case SEEN_NATIVE:
             /* Do nothing */
@@ -2856,7 +1811,7 @@ void Bridge::AnnouncedTask::Run(Bridge *thiz)
             else
             {
                 thiz->DestroyPiid(m_piid.c_str());
-                thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_isVirtual);
+                thiz->m_execCb(m_piid.c_str(), m_name.c_str(), m_secureMode, m_isVirtual);
             }
             break;
     }
@@ -2908,7 +1863,7 @@ void Bridge::DiscoverTask::Run(Bridge *thiz)
     {
         goto exit;
     }
-    context->m_bus->SetAboutData(OC_RSRVD_DEVICE_URI, m_payload);
+    context->m_bus->SetAboutData(m_payload);
     result = thiz->ContinueDiscovery(context, OC_RSRVD_PLATFORM_URI,
             context->GetDevAddrs(OC_RSRVD_PLATFORM_URI), Bridge::GetPlatformCB);
     if (result == OC_STACK_OK)
@@ -2954,51 +1909,58 @@ void Bridge::DestroyPiid(const char *piid)
     }
 }
 
-void Bridge::RDPublish()
+void Bridge::RDPublish(void *ctx)
 {
-    LOG(LOG_INFO, "[%p]", this);
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_rdPublishTask)
+    Bridge *thiz = reinterpret_cast<Bridge *>(ctx);
+    std::lock_guard<std::mutex> lock(thiz->m_mutex);
+    if (thiz->m_rdPublishTask)
     {
         /* Delay the pending publication to give time for multiple resources to be created. */
-        m_rdPublishTask->m_tick = time(NULL) + 1;
+        thiz->m_rdPublishTask->m_tick = time(NULL) + 1;
     }
     else
     {
-        m_rdPublishTask = new RDPublishTask(time(NULL) + 1);
-        m_tasks.push_back(m_rdPublishTask);
+        thiz->m_rdPublishTask = new RDPublishTask(time(NULL) + 1);
+        thiz->m_tasks.push_back(thiz->m_rdPublishTask);
     }
 }
 
 /* Called with m_mutex held. */
-void Bridge::RDPublishTask::Run(Bridge *thiz)
+void Bridge::SetIntrospectionData(ajn::BusAttachment *bus, const char *ajSoftwareVersion,
+        const char *title, const char *version)
 {
-    LOG(LOG_INFO, "[%p] thiz=%p", this, thiz);
+    LOG(LOG_INFO, "[%p]", this);
 
-    /* Also write out current introspection data. */
     OCPersistentStorage *ps = OCGetPersistentStorageHandler();
     assert(ps);
+    size_t curSize = 1024;
+    uint8_t *out = NULL;
+    CborError err;
     FILE *fp = NULL;
     size_t ret;
-    std::string s;
-    std::ostringstream os;
-    OCStackResult result = Introspect(os, thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE",
-            "VERSION");
-    if (result != OC_STACK_OK)
+    for (;;)
     {
-        LOG(LOG_ERR, "Introspect() failed - %d", result);
-        goto exit;
+        out = (uint8_t *)OICCalloc(1, curSize);
+        if (!out)
+        {
+            LOG(LOG_ERR, "Failed to allocate introspection data buffer");
+            goto exit;
+        }
+        err = Introspect(bus, ajSoftwareVersion, title, version, out, &curSize);
+        if (err != CborErrorOutOfMemory)
+        {
+            break;
+        }
+        OICFree(out);
     }
-    s = os.str();
     fp = ps->open(OC_INTROSPECTION_FILE_NAME, "wb");
     if (!fp)
     {
         LOG(LOG_ERR, "open failed");
         goto exit;
     }
-    ret = ps->write(s.c_str(), 1, s.size(), fp);
-    if (ret != s.size())
+    ret = ps->write(out, 1, curSize, fp);
+    if (ret != curSize)
     {
         LOG(LOG_ERR, "write failed");
         goto exit;
@@ -3008,39 +1970,15 @@ exit:
     {
         ps->close(fp);
     }
-
-    ::RDPublish();
-    thiz->m_rdPublishTask = NULL;
+    OICFree(out);
 }
 
-bool GetPiid(OCUUIdentity *piid, const char *peerGuid, ajn::AboutData *aboutData)
+/* Called with m_mutex held. */
+void Bridge::RDPublishTask::Run(Bridge *thiz)
 {
-    if (peerGuid && peerGuid[0])
-    {
-        return sscanf(peerGuid, "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx"
-                "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
-                &piid->id[0], &piid->id[1], &piid->id[2], &piid->id[3], &piid->id[4], &piid->id[5],
-                &piid->id[6], &piid->id[7], &piid->id[8], &piid->id[9], &piid->id[10], &piid->id[11],
-                &piid->id[12], &piid->id[13], &piid->id[14], &piid->id[15]) == 16;
-    }
-    else
-    {
-        ajn::MsgArg *piidArg = NULL;
-        aboutData->GetField("org.openconnectivity.piid", piidArg);
-        char *piidStr = NULL;
-        if (piidArg && (ER_OK == piidArg->Get("s", &piidStr)))
-        {
-            return (piidStr && OCConvertStringToUuid(piidStr, piid->id));
-        }
-        else
-        {
-            char *deviceId;
-            aboutData->GetDeviceId(&deviceId);
-            uint8_t *appId;
-            size_t n;
-            aboutData->GetAppId(&appId, &n);
-            DeriveUniqueId(piid, deviceId, appId, n);
-            return true;
-        }
-    }
+    LOG(LOG_INFO, "[%p] thiz=%p", this, thiz);
+
+    thiz->SetIntrospectionData(thiz->m_bus, thiz->m_ajSoftwareVersion.c_str(), "TITLE", "VERSION");
+    ::RDPublish();
+    thiz->m_rdPublishTask = NULL;
 }

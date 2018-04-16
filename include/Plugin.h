@@ -18,87 +18,28 @@
 //
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-#ifndef __PLUGIN_H__
-#define __PLUGIN_H__
+#ifndef _PLUGIN_H
+#define _PLUGIN_H
 
-#include "octypes.h"
 #include <inttypes.h>
+#include "cacommon.h"
+#include "octypes.h"
 #include <alljoyn/AboutData.h>
 #include <alljoyn/AboutObjectDescription.h>
 #include <stdint.h>
 #include <vector>
 
-/** Protocol independent indentifier.*/
-#define OC_RSRVD_PROTOCOL_INDEPENDENT_ID "piid"
+/* Default language */
+#define OC_RSRVD_DEFAULT_LANGUAGE "dl"
 
-/** Device software version.*/
-#define OC_RSRVD_SOFTWARE_VERSION        "sv"
+/* Device name, localized */
+#define OC_RSRVD_DEVICE_NAME_LOCALIZED "ln"
 
-/** Device manufacture name. */
-#define OC_RSRVD_DEVICE_MFG_NAME         "dmn"
-
-/** Device model number.*/
-#define OC_RSRVD_DEVICE_MODEL_NUM        "dmno"
-
-/** To represent secure mode resource type.*/
-#define OC_RSRVD_RESOURCE_TYPE_SECURE_MODE "oic.r.securemode"
-
-#define LOG_ERR         3
-#define LOG_INFO        6
-
-void LogWriteln(
-    const char *file,
-    const char *function,
-    int32_t line,
-    int8_t severity,
-    const char *fmt,
-    ...
-);
-
-#define LOG(severity, fmt, ...)                                         \
-    LogWriteln(__FILE__, __FUNCTION__, __LINE__, severity, fmt, ##__VA_ARGS__)
+/* Platform name, localized */
+#define OC_RSRVD_PLATFORM_NAME "mnpn"
 
 extern std::string gRD;
 
-void DeriveUniqueId(OCUUIdentity *id, const char *deviceId, uint8_t *appId, size_t n);
-
-const char *GetServerInstanceIDString();
-OCStackResult SetPlatformAndDeviceInfo(ajn::AboutObjectDescription &objectDescription,
-        ajn::AboutData &aboutData);
-OCStackResult StartPresence();
-OCStackResult StopPresence();
-
 OCStackResult RDPublish();
 
-OCStackResult CreateResource(const char *uri, const char *typeName, const char *interfaceName,
-        OCEntityHandler entityHandler, void *callbackParam,
-        uint8_t properties);
-OCStackResult DestroyResource(const char *uri);
-OCStackResult AddResourceType(const char *uri, const char *typeName);
-OCStackResult AddInterface(const char *uri, const char *interfaceName);
-OCStackResult DoResponse(OCEntityHandlerResponse *response);
-
-OCStackResult DoResource(OCDoHandle *handle,
-        OCMethod method,
-        const char *uri,
-        const OCDevAddr *destination,
-        OCPayload *payload,
-        OCCallbackData *cbData,
-        OCHeaderOption *options,
-        uint8_t numOptions);
-OCStackResult DoResource(OCDoHandle *handle,
-        OCMethod method,
-        const char *uri,
-        const std::vector<OCDevAddr> &destinations,
-        OCPayload *payload,
-        OCCallbackData *cbData,
-        OCHeaderOption *options,
-        uint8_t numOptions);
-OCStackResult Cancel(OCDoHandle handle, OCQualityOfService qos);
-
-OCStackResult NotifyListOfObservers(const char *uri,
-        OCObservationId  *obsIdList,
-        uint8_t numberOfIds,
-        OCRepPayload *payload);
-
-#endif // __PLUGIN_H__
+#endif // _PLUGIN_H

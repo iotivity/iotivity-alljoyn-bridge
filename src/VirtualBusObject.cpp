@@ -20,51 +20,65 @@
 
 #include "VirtualBusObject.h"
 
+#include "Log.h"
 #include "Name.h"
 #include "Payload.h"
 #include "Plugin.h"
-#include <alljoyn/BusAttachment.h>
+#include "VirtualBusAttachment.h"
 #include "ocpayload.h"
+#include "ocstack.h"
+#include "oic_malloc.h"
+#include "oic_string.h"
 #include <algorithm>
 #include <assert.h>
 
 struct VirtualBusObject::ObserveContext
 {
-    public:
-        ObserveContext(VirtualBusObject *obj, const char *iface)
-            : m_obj(obj), m_iface(iface), m_handle(NULL), m_result(OC_STACK_KEEP_TRANSACTION) { }
-        static void Deleter(void *ctx)
+public:
+    ObserveContext(VirtualBusObject *obj, std::string iface)
+        : m_obj(obj), m_iface(iface), m_handle(NULL), m_result(OC_STACK_KEEP_TRANSACTION) { }
+    static void Deleter(void *ctx)
+    {
+        LOG(LOG_INFO, "[%p]", ctx);
+        ObserveContext *context = reinterpret_cast<ObserveContext *>(ctx);
         {
-            LOG(LOG_INFO, "[%p]", ctx);
-            ObserveContext *context = reinterpret_cast<ObserveContext *>(ctx);
-            {
-                std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
-                context->m_obj->m_observes.erase(context);
-            }
-            delete context;
+            std::lock_guard<std::mutex> lock(context->m_obj->m_mutex);
+            context->m_obj->m_observes.erase(context);
+            context->m_obj->m_cond.notify_one();
         }
-        VirtualBusObject *m_obj;
-        std::string m_iface;
-        OCDoHandle m_handle;
-        OCStackApplicationResult m_result;
+        delete context;
+    }
+    VirtualBusObject *m_obj;
+    std::string m_iface;
+    DoHandle m_handle;
+    OCStackApplicationResult m_result;
 };
 
 struct VirtualBusObject::DoResourceContext
 {
-    public:
-        DoResourceContext(VirtualBusObject *obj, VirtualBusObject::DoResourceHandler cb, ajn::Message &msg)
-            : m_obj(obj), m_cb(cb), m_msg(msg), m_handle(NULL) { }
-        VirtualBusObject *m_obj;
-        VirtualBusObject::DoResourceHandler m_cb;
-        ajn::Message m_msg;
-        OCDoHandle m_handle;
+public:
+    DoResourceContext(VirtualBusObject *obj, VirtualBusObject::DoResourceHandler cb, void *context,
+            ajn::Message &msg)
+        : m_obj(obj), m_cb(cb), m_context(context), m_msg(msg), m_handle(NULL) { }
+    VirtualBusObject *m_obj;
+    VirtualBusObject::DoResourceHandler m_cb;
+    void *m_context;
+    ajn::Message m_msg;
+    DoHandle m_handle;
 };
 
-VirtualBusObject::VirtualBusObject(ajn::BusAttachment *bus, const char *uri,
-        const std::vector<OCDevAddr> &devAddrs)
-    : ajn::BusObject(uri), m_bus(bus), m_devAddrs(devAddrs), m_pending(0)
+VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, Resource &resource)
+    : ajn::BusObject(ToObjectPath(resource.m_uri).c_str()), m_bus(bus), m_pending(0)
 {
-    LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, uri);
+    LOG(LOG_INFO, "[%p] bus=%p,uri=%s", this, bus, resource.m_uri.c_str());
+    m_resources.push_back(resource);
+}
+
+VirtualBusObject::VirtualBusObject(VirtualBusAttachment *bus, const char *path, Resource &resource)
+    : ajn::BusObject(ToObjectPath(path).c_str()), m_bus(bus), m_pending(0)
+{
+    LOG(LOG_INFO, "[%p] bus=%p,path=%s", this, bus, path);
+    m_resources.push_back(resource);
 }
 
 VirtualBusObject::~VirtualBusObject()
@@ -72,7 +86,7 @@ VirtualBusObject::~VirtualBusObject()
     LOG(LOG_INFO, "[%p]", this);
 
     std::unique_lock<std::mutex> lock(m_mutex);
-    while (m_pending > 0 && !m_observes.empty())
+    while (m_pending > 0 || !m_observes.empty())
     {
         m_cond.wait(lock);
     }
@@ -80,7 +94,7 @@ VirtualBusObject::~VirtualBusObject()
 
 void VirtualBusObject::Stop()
 {
-    std::vector<OCDoHandle> handles;
+    std::vector<DoHandle> handles;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         for (ObserveContext *context : m_observes)
@@ -89,14 +103,20 @@ void VirtualBusObject::Stop()
             handles.push_back(context->m_handle);
         }
     }
-    for (OCDoHandle handle : handles)
+    for (DoHandle handle : handles)
     {
-        OCStackResult result = Cancel(handle, OC_LOW_QOS);
+        OCStackResult result = Cancel(handle, OC_LOW_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "Cancel - %d", result);
         }
     }
+}
+
+void VirtualBusObject::AddResource(Resource &resource)
+{
+    LOG(LOG_INFO, "[%p] uri=%s", this, resource.m_uri.c_str());
+    m_resources.push_back(resource);
 }
 
 QStatus VirtualBusObject::AddInterface(const char *ifaceName, bool createEmptyInterface)
@@ -115,17 +135,10 @@ QStatus VirtualBusObject::AddInterface(const char *ifaceName, bool createEmptyIn
     }
     if (iface)
     {
-        if (std::find(m_ifaces.begin(), m_ifaces.end(), iface) == m_ifaces.end())
+        status = ajn::BusObject::AddInterface(*iface, ajn::BusObject::ANNOUNCED);
+        if ((status != ER_OK) && (status != ER_BUS_IFACE_ALREADY_EXISTS))
         {
-            status = ajn::BusObject::AddInterface(*iface, ajn::BusObject::ANNOUNCED);
-            if (status == ER_OK)
-            {
-                m_ifaces.push_back(iface);
-            }
-            else
-            {
-                LOG(LOG_ERR, "AddInterface - %s", QCC_StatusText(status));
-            }
+            LOG(LOG_ERR, "AddInterface - %s", QCC_StatusText(status));
         }
     }
     return status;
@@ -136,28 +149,41 @@ void VirtualBusObject::Observe()
     LOG(LOG_INFO, "[%p]", this);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    bool multipleRts = m_ifaces.size() > 1;
-    for (const ajn::InterfaceDescription *iface : m_ifaces)
+    for (auto &parent : m_resources)
     {
-        qcc::String uri = GetPath();
-        if (multipleRts)
+        Observe(parent);
+        for (auto &child : parent.m_resources)
         {
-            uri += qcc::String("?rt=") + iface->GetName();
+            Observe(child);
         }
-        ObserveContext *context = new ObserveContext(this, iface->GetName());
+    }
+}
+
+/* Called with m_mutex held. */
+void VirtualBusObject::Observe(Resource &resource)
+{
+    if (!resource.m_isObservable)
+    {
+        return;
+    }
+    for (auto &rt : resource.m_rts)
+    {
+        std::string uri = resource.m_uri;
+        if (resource.m_rts.size() > 1)
+        {
+            uri += std::string("?rt=") + rt;
+        }
+        ObserveContext *context = new ObserveContext(this, ToAJName(rt));
         OCCallbackData cbData;
         cbData.cb = VirtualBusObject::ObserveCB;
         cbData.context = context;
         cbData.cd = ObserveContext::Deleter;
+        LOG(LOG_INFO, "[%p] Observe uri=%s", this, uri.c_str());
         OCStackResult result = ::DoResource(&context->m_handle, OC_REST_OBSERVE, uri.c_str(),
-                m_devAddrs, NULL, &cbData, NULL, 0);
+                resource.m_addrs, NULL, &cbData, NULL, 0);
         if (result == OC_STACK_OK)
         {
             m_observes.insert(context);
-        }
-        else
-        {
-            LOG(LOG_ERR, "DoResource - %d", result);
         }
     }
 }
@@ -170,10 +196,23 @@ void VirtualBusObject::CancelObserve()
     for (ObserveContext *context : m_observes)
     {
         context->m_result = OC_STACK_DELETE_TRANSACTION;
-        OCStackResult result = Cancel(context->m_handle, OC_HIGH_QOS);
+        OCStackResult result = Cancel(context->m_handle, OC_HIGH_QOS, NULL, 0);
         if (result != OC_STACK_OK)
         {
             LOG(LOG_ERR, "Cancel - %d", result);
+        }
+    }
+}
+
+static void TranslatePropertyNames(OCRepPayload *payload)
+{
+    for (OCRepPayloadValue *v = payload->values; v; v = v->next)
+    {
+        std::string ajName = ToAJPropName(v->name);
+        if (ajName != v->name)
+        {
+            OICFree(v->name);
+            v->name = OICStrdup(ajName.c_str());
         }
     }
 }
@@ -192,9 +231,11 @@ OCStackApplicationResult VirtualBusObject::ObserveCB(void *ctx, OCDoHandle handl
         memset(&value, 0, sizeof(value));
         value.type = OCREP_PROP_OBJECT;
         value.obj = (OCRepPayload *) response->payload;
+        TranslatePropertyNames(value.obj);
         ajn::MsgArg args[3];
         args[0].Set("s", context->m_iface.c_str());
-        ToAJMsgArg(&args[1], "a{sv}", &value);
+        std::string valueType = std::string("[") + context->m_iface + ".Properties" + "]";
+        ToAJMsgArg(&args[1], "a{sv}", &value, valueType.c_str());
         args[2].Set("as", 0, NULL);
         const ajn::InterfaceDescription *iface = context->m_obj->m_bus->GetInterface(
                     ajn::org::freedesktop::DBus::Properties::InterfaceName);
@@ -217,26 +258,71 @@ void VirtualBusObject::GetProp(const ajn::InterfaceDescription::Member *member, 
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    bool multipleRts = m_ifaces.size() > 1;
-    qcc::String uri = GetPath();
-    if (multipleRts)
+    std::vector<Resource>::iterator resource;
+    std::string uri;
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
+    if (m_resources.size() > 1)
+    {
+        goto error;
+    }
+    resource = FindResourceFromUri(m_resources, ToUri(GetPath()));
+    if (resource == m_resources.end())
+    {
+        goto error;
+    }
+    if (!resource->m_resources.empty())
+    {
+        resource = FindResourceFromType(resource->m_resources, ToOCName(ifaceName));
+        if (resource == resource->m_resources.end())
+        {
+            goto error;
+        }
+    }
+    uri = resource->m_uri;
+    if (resource->m_rts.size() > 1)
     {
         uri += qcc::String("?rt=") + msg->GetArg(0)->v_string.str;
     }
-    DoResource(OC_REST_GET, uri.c_str(), NULL, msg, &VirtualBusObject::GetPropCB);
+    DoResource(OC_REST_GET, uri, resource->m_addrs, NULL, msg, &VirtualBusObject::GetPropCB);
+    return;
+
+error:
+    QStatus status = MethodReply(msg, ER_FAIL);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+    }
 }
 
 /* Called with m_mutex held. */
-void VirtualBusObject::GetPropCB(ajn::Message &msg, OCRepPayload *payload)
+void VirtualBusObject::GetPropCB(ajn::Message &msg, OCRepPayload *payload, void *ctx)
 {
+    (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
+
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
+    const char *propName = msg->GetArg(1)->v_string.str;
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (!iface)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_INTERFACE);
+        return;
+    }
+    const ajn::InterfaceDescription::Property *prop = iface->GetProperty(propName);
+    if (!prop)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_PROPERTY);
+        return;
+    }
 
     ajn::MsgArg arg;
     for (OCRepPayloadValue *value = payload->values; value; value = value->next)
     {
-        if (!strcmp(value->name, msg->GetArg(1)->v_string.str))
+        if (!strcmp(ToAJPropName(value->name).c_str(), propName))
         {
-            ToAJMsgArg(&arg, "v", value);
+            qcc::String signature = prop->signature;
+            prop->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
+            ToAJMsgArg(&arg, "v", value, signature.c_str());
             break;
         }
     }
@@ -252,18 +338,64 @@ void VirtualBusObject::SetProp(const ajn::InterfaceDescription::Member *member, 
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    qcc::String uri = GetPath();
-    OCRepPayload *payload = OCRepPayloadCreate();
-    const char *name = msg->GetArg(1)->v_string.str;
+    std::vector<Resource>::iterator resource;
+    std::string uri;
+    OCRepPayload *payload;
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
+    const char *propName = msg->GetArg(1)->v_string.str;
     const ajn::MsgArg *arg = msg->GetArg(2);
-    ToOCPayload(payload, name, arg, arg->Signature().c_str());
-    DoResource(OC_REST_POST, uri.c_str(), payload, msg, &VirtualBusObject::SetPropCB);
+    qcc::String signature;
+    const ajn::InterfaceDescription *iface = m_bus->GetInterface(ifaceName);
+    if (!iface)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_INTERFACE);
+        return;
+    }
+    const ajn::InterfaceDescription::Property *prop = iface->GetProperty(propName);
+    if (!prop)
+    {
+        MethodReply(msg, ER_BUS_NO_SUCH_PROPERTY);
+        return;
+    }
+    if (m_resources.size() > 1)
+    {
+        goto error;
+    }
+    resource = FindResourceFromUri(m_resources, ToUri(GetPath()));
+    if (resource == m_resources.end())
+    {
+        goto error;
+    }
+    if (!resource->m_resources.empty())
+    {
+        resource = FindResourceFromType(resource->m_resources, ToOCName(ifaceName));
+        if (resource == resource->m_resources.end())
+        {
+            goto error;
+        }
+    }
+    uri = resource->m_uri;
+    payload = OCRepPayloadCreate();
+    signature = prop->signature;
+    prop->GetAnnotation("org.alljoyn.Bus.Type.Name", signature);
+    ToOCPayload(payload, ToOCPropName(propName).c_str(), GetPropType(prop, arg->v_variant.val), arg->v_variant.val,
+            signature.c_str());
+    DoResource(OC_REST_POST, uri, resource->m_addrs, payload, msg, &VirtualBusObject::SetPropCB);
+    return;
+
+error:
+    QStatus status = MethodReply(msg, ER_FAIL);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+    }
 }
 
 /* Called with m_mutex held. */
-void VirtualBusObject::SetPropCB(ajn::Message &msg, OCRepPayload *payload)
+void VirtualBusObject::SetPropCB(ajn::Message &msg, OCRepPayload *payload, void *ctx)
 {
     (void) payload;
+    (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
     QStatus status = MethodReply(msg);
@@ -279,26 +411,57 @@ void VirtualBusObject::GetAllProps(const ajn::InterfaceDescription::Member *memb
     LOG(LOG_INFO, "[%p] member=%p", this, member);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    bool multipleRts = m_ifaces.size() > 1;
-    qcc::String uri = GetPath();
-    if (multipleRts)
+    std::vector<Resource>::iterator resource;
+    std::string uri;
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
+    if (m_resources.size() > 1)
+    {
+        goto error;
+    }
+    resource = FindResourceFromUri(m_resources, ToUri(GetPath()));
+    if (resource == m_resources.end())
+    {
+        goto error;
+    }
+    if (!resource->m_resources.empty())
+    {
+        resource = FindResourceFromType(resource->m_resources, ToOCName(ifaceName));
+        if (resource == resource->m_resources.end())
+        {
+            goto error;
+        }
+    }
+    uri = resource->m_uri;
+    if (resource->m_rts.size() > 1)
     {
         uri += qcc::String("?rt=") + msg->GetArg(0)->v_string.str;
     }
-    DoResource(OC_REST_GET, uri.c_str(), NULL, msg, &VirtualBusObject::GetAllPropsCB);
+    DoResource(OC_REST_GET, uri, resource->m_addrs, NULL, msg, &VirtualBusObject::GetAllPropsCB);
+    return;
+
+error:
+    QStatus status = MethodReply(msg, ER_FAIL);
+    if (status != ER_OK)
+    {
+        LOG(LOG_ERR, "MethodReply - %s", QCC_StatusText(status));
+    }
 }
 
 /* Called with m_mutex held. */
-void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload)
+void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload, void *ctx)
 {
+    (void) ctx;
     LOG(LOG_INFO, "[%p]", this);
 
+    const char *ifaceName = msg->GetArg(0)->v_string.str;
     OCRepPayloadValue value;
     memset(&value, 0, sizeof(value));
     value.type = OCREP_PROP_OBJECT;
     value.obj = payload;
+    TranslatePropertyNames(value.obj);
     ajn::MsgArg arg;
-    ToAJMsgArg(&arg, "a{sv}", &value);
+    std::string valueType = std::string("[") + ifaceName + ".Properties" + "]";
+    ToAJMsgArg(&arg, "a{sv}", &value, valueType.c_str());
     QStatus status = MethodReply(msg, &arg, 1);
     if (status != ER_OK)
     {
@@ -307,17 +470,17 @@ void VirtualBusObject::GetAllPropsCB(ajn::Message &msg, OCRepPayload *payload)
 }
 
 /* This must be called with m_mutex held. */
-void VirtualBusObject::DoResource(OCMethod method, const char *uri, OCRepPayload *payload,
-                                  ajn::Message &msg, DoResourceHandler cb)
+void VirtualBusObject::DoResource(OCMethod method, std::string uri, std::vector<OCDevAddr> addrs,
+        OCRepPayload *payload, ajn::Message &msg, DoResourceHandler cb, void *ctx)
 {
-    LOG(LOG_INFO, "[%p] method=%d,uri=%s,payload=%p", this, method, uri, payload);
+    LOG(LOG_INFO, "[%p] method=%d,uri=%s,payload=%p", this, method, uri.c_str(), payload);
 
-    DoResourceContext *context = new DoResourceContext(this, cb, msg);
+    DoResourceContext *context = new DoResourceContext(this, cb, ctx, msg);
     OCCallbackData cbData;
     cbData.cb = VirtualBusObject::DoResourceCB;
     cbData.context = context;
     cbData.cd = NULL;
-    OCStackResult result = ::DoResource(&context->m_handle, method, uri, m_devAddrs,
+    OCStackResult result = ::DoResource(&context->m_handle, method, uri.c_str(), addrs,
             (OCPayload *) payload, &cbData, NULL, 0);
     if (result == OC_STACK_OK)
     {
@@ -325,7 +488,6 @@ void VirtualBusObject::DoResource(OCMethod method, const char *uri, OCRepPayload
     }
     else
     {
-        LOG(LOG_ERR, "DoResource - %d", result);
         delete context;
         QStatus status = MethodReply(msg, ER_FAIL);
         if (status != ER_OK)
@@ -396,7 +558,7 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
             }
             if (code)
             {
-                std::string name("org.openconnectivity.Error.");
+                std::string name("org.openconnectivity.Error.Code");
                 name = name + std::to_string(code);
                 status = context->m_obj->MethodReply(context->m_msg, name.c_str());
             }
@@ -421,7 +583,7 @@ OCStackApplicationResult VirtualBusObject::DoResourceCB(void *ctx, OCDoHandle ha
     else
     {
         OCRepPayload *payload = (OCRepPayload *) response->payload;
-        (context->m_obj->*(context->m_cb))(context->m_msg, payload);
+        (context->m_obj->*(context->m_cb))(context->m_msg, payload, context->m_context);
     }
     --context->m_obj->m_pending;
     context->m_obj->m_cond.notify_one();
