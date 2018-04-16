@@ -453,6 +453,8 @@ static OCEndpointPayload *ParseEndpoint(OCRepPayload *payload)
 {
     OCEndpointPayload *ep = NULL;
     char *s = NULL;
+    char *tps = NULL;
+    char *addr = NULL;
     int64_t n;
 
     ep = (OCEndpointPayload *) OICCalloc(1, sizeof(OCEndpointPayload));
@@ -465,26 +467,65 @@ static OCEndpointPayload *ParseEndpoint(OCRepPayload *payload)
         // 0         1         2         3         4         5         6
         // 01234567890123456789012345678901234567890123456789012345678901234
         // coaps+tcp://[xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:yyy.yyy.yyy.yyy]:xxxxx
-        char *tps = (char *) OICMalloc(10);
-        char *addr = (char *) OICMalloc(48);
-        int port;
-        if (tps && addr && (sscanf(s, "%10s://%48s:%d", tps, addr, &port) == 3))
+        char *begin = s;
+        size_t n = strlen(s);
+        char *end;
+        long port;
+
+        tps = (char *) OICCalloc(10, 1);
+        addr = (char *) OICCalloc(48, 1);
+        if (!tps || !addr)
         {
-            ep->tps = tps;
-            ep->addr = addr;
-            ep->family = strchr(addr, '[') ? OC_IP_USE_V6 : OC_IP_USE_V4;
-            if (!strncmp(tps, "coaps", 5))
+            goto exit;
+        }
+        end = strstr(begin, "://");
+        if (!end || ((end - begin) >= 10))
+        {
+            goto exit;
+        }
+        strncpy(tps, begin, end - begin);
+        begin = end + 3;
+        if (begin > (s + n))
+        {
+            goto exit;
+        }
+        if (*begin == '[')
+        {
+            end = strstr(begin + 1, "]");
+            if (!end || (*(++end) != ':'))
             {
-                ep->family = (OCTransportFlags) (ep->family | OC_FLAG_SECURE);
+                goto exit;
             }
-            ep->port = (uint16_t) port;
         }
         else
         {
-            OICFree(addr);
-            OICFree(tps);
+            end = strstr(begin, ":");
+            if (!end)
+            {
+                goto exit;
+            }
+        }
+        if ((end - begin) >= 48)
+        {
             goto exit;
         }
+        strncpy(addr, begin, end - begin);
+        begin = end + 1;
+        port = strtol(begin, &end, 10);
+        if (*end != 0 || port < 0 || UINT16_MAX < port)
+        {
+            goto exit;
+        }
+        ep->tps = tps;
+        tps = NULL;
+        ep->addr = addr;
+        addr = NULL;
+        ep->family = strchr(ep->addr, '[') ? OC_IP_USE_V6 : OC_IP_USE_V4;
+        if (!strncmp(ep->tps, "coaps", 5))
+        {
+            ep->family = (OCTransportFlags) (ep->family | OC_FLAG_SECURE);
+        }
+        ep->port = (uint16_t) port;
         OICFree(s);
         s = NULL;
     }
@@ -499,6 +540,8 @@ static OCEndpointPayload *ParseEndpoint(OCRepPayload *payload)
     return ep;
 
 exit:
+    OICFree(addr);
+    OICFree(tps);
     OICFree(s);
     OICFree(ep);
     return NULL;
