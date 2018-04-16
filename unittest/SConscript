@@ -57,9 +57,9 @@ if env['TARGET_OS'] == 'linux':
                     'PayloadAdditionalTest.cpp',
                     'SecureModeResourceTest.cpp',
                     'UnitTest.cpp',
-                    '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest.a',
-                    '${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/lib/.libs/libgtest_main.a']
-    env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/gtest-1.7.0/include',
+                    '${IOTIVITY_BASE}/extlibs/gtest/googletest-release-1.7.0/lib/.libs/libgtest.a',
+                    '${IOTIVITY_BASE}/extlibs/gtest/googletest-release-1.7.0/lib/.libs/libgtest_main.a']
+    env_unittest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/extlibs/gtest/googletest-release-1.7.0/include',
                                          '${IOTIVITY_BASE}/resource/c_common/oic_time/include',
                                          '${IOTIVITY_BASE}/resource/csdk/stack/include/internal',
                                          '${IOTIVITY_BASE}/resource/csdk/stack/test',

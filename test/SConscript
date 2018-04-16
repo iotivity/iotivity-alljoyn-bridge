@@ -25,7 +25,8 @@ if env['TARGET_OS'] == 'linux':
     oic_libs = ['octbstack', 'connectivity_abstraction', 'coap']
 
     env_octest = env.Clone()
-    env_octest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/resource/csdk/stack/include/internal'])
+    env_octest.AppendUnique(CPPPATH = ['${IOTIVITY_BASE}/resource/csdk/stack/include/experimental',
+                                       '${IOTIVITY_BASE}/resource/csdk/stack/include/internal'])
     env_octest.AppendUnique(LIBS = [oic_libs])
     test_bins = [
         env_octest.Program('occlient', ['occlient.cpp',
