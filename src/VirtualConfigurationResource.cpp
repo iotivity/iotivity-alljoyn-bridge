@@ -369,8 +369,8 @@ void VirtualConfigurationResource::GetConfigurationsCB(ajn::Message &msg, void *
                 {
                     break;
                 }
-                /* FALLTHROUGH */
             }
+            /* FALLTHROUGH */
         case ajn::MESSAGE_ERROR:
             OCRepPayloadDestroy(context->m_payload);
             context->m_payload = NULL;
@@ -430,8 +430,8 @@ void VirtualConfigurationResource::UpdateConfigurationsCB(ajn::Message &msg, voi
                 {
                     break;
                 }
-                /* FALLTHROUGH */
             }
+            /* FALLTHROUGH */
         case ajn::MESSAGE_ERROR:
             OCRepPayloadDestroy(context->m_payload);
             context->m_payload = NULL;

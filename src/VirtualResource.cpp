@@ -1143,8 +1143,8 @@ void VirtualResource::SetCB(ajn::Message &msg, void *ctx)
                     result = OC_STACK_OK;
                     break;
                 }
-                /* FALLTHROUGH */
             }
+            /* FALLTHROUGH */
         case ajn::MESSAGE_ERROR:
             context->m_response->payload = (OCPayload *) CreatePayload(msg,
                     &context->m_response->ehResult);
