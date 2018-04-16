@@ -32,6 +32,7 @@ if env['TARGET_OS'] == 'linux':
         env_octest.Program('occlient', ['occlient.cpp',
                                         '${IOTIVITY_BASE}/extlibs/cjson/cJSON.c',
                                         '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cbortojson.c',
-                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty.c'])]
+                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty.c',
+                                        '${IOTIVITY_BASE}/extlibs/tinycbor/tinycbor/src/cborpretty_stdio.c'])]
 
     env.Install('#/${BUILD_DIR}/bin', test_bins)
