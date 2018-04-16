@@ -469,8 +469,8 @@ static OCEntityHandlerResult ErrorEntityHandler(OCEntityHandlerFlag flag,
                     result = OC_EH_ERROR;
                     break;
                 }
-                result = OC_EH_ERROR;
-                response.ehResult = result;
+                result = OC_EH_OK;
+                response.ehResult = OC_EH_ERROR;
                 response.payload = reinterpret_cast<OCPayload *>(outPayload);
                 OCStackResult doResult = OCDoResponse(&response);
                 if (doResult != OC_STACK_OK)
