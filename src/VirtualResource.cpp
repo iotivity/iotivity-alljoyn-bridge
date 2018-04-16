@@ -74,6 +74,7 @@ VirtualResource::~VirtualResource()
         OCUnBindResource(m_handle, handle);
         OCDeleteResource(handle);
     }
+    OCDeleteResource(m_handle);
 }
 
 OCStackResult VirtualResource::Create()
